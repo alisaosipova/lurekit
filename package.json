@@ -1,0 +1,29 @@
+{
+  "name": "agent-attack-bench",
+  "version": "0.0.0",
+  "description": "A runnable, disclosure-traced security benchmark for deployed coding-agent configurations.",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=20.19" },
+  "bin": { "agent-attack-bench": "dist/cli.js" },
+  "publishConfig": { "access": "public", "provenance": true },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "vitest run",
+    "report": "node dist/tools/report.js",
+    "validate:scenarios": "node dist/tools/validate-scenarios.js scenarios"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "~1.32.1",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "yaml": "^2.5.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "typescript": "~5.9",
+    "vitest": "^4.1.12"
+  }
+}
