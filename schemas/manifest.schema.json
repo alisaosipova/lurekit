@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alisaosipova/agent-attack-bench/schemas/manifest.schema.json",
+  "title": "agent-attack-bench run manifest",
+  "description": "Per-benchmark-run manifest (evidence-spec §2.3). One per benchmark run, written as manifest.json.",
+  "type": "object",
+  "required": [
+    "manifest_schema",
+    "benchmark_run_id",
+    "created_at",
+    "tool_version",
+    "mode",
+    "config",
+    "corpus",
+    "profile",
+    "results",
+    "totals"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "manifest_schema": { "const": "0.1" },
+    "benchmark_run_id": { "type": "string" },
+    "created_at": { "type": "string" },
+    "tool_version": { "type": "string" },
+    "mode": { "enum": ["smoke", "full"] },
+    "config": {
+      "type": "object",
+      "required": ["k", "vulnerable_if", "isolation", "budget_usd"],
+      "additionalProperties": false,
+      "properties": {
+        "k": { "type": "integer", "minimum": 1 },
+        "vulnerable_if": { "enum": ["any", "majority"] },
+        "isolation": { "type": "string" },
+        "budget_usd": { "type": ["number", "null"] }
+      }
+    },
+    "corpus": {
+      "type": "object",
+      "required": ["scenario_count", "scenario_ids", "corpus_digest"],
+      "additionalProperties": false,
+      "properties": {
+        "scenario_count": { "type": "integer", "minimum": 0 },
+        "scenario_ids": { "type": "array", "items": { "type": "string" } },
+        "corpus_digest": { "type": "string" }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "required": [
+        "agent",
+        "agent_version",
+        "model",
+        "permission_mode",
+        "used_bare",
+        "mcp",
+        "hooks",
+        "skills",
+        "settings_digest"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "agent": { "type": "string" },
+        "agent_version": { "type": "string" },
+        "model": { "type": "string" },
+        "permission_mode": { "type": ["string", "null"] },
+        "used_bare": { "type": "boolean" },
+        "mcp": { "type": "string" },
+        "hooks": { "type": "string" },
+        "skills": { "type": "array", "items": { "type": "string" } },
+        "settings_digest": { "type": "string" }
+      }
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["scenario_id", "name", "source", "detector", "verdict", "confidence", "runs", "spend_usd"],
+        "additionalProperties": false,
+        "properties": {
+          "scenario_id": { "type": "string" },
+          "name": { "type": "string" },
+          "source": { "type": "string" },
+          "detector": {
+            "enum": [
+              "canary_egress_http",
+              "canary_egress_dns",
+              "canary_file_read",
+              "canary_command",
+              "canary_mcp_tool",
+              "fs_diff"
+            ]
+          },
+          "verdict": { "enum": ["resisted", "vulnerable", "degraded", "inconclusive"] },
+          "confidence": { "type": "string" },
+          "runs": { "type": "integer", "minimum": 0 },
+          "spend_usd": { "type": "number" }
+        }
+      }
+    },
+    "totals": {
+      "type": "object",
+      "required": ["resisted", "vulnerable", "degraded", "inconclusive", "spend_usd"],
+      "additionalProperties": false,
+      "properties": {
+        "resisted": { "type": "integer", "minimum": 0 },
+        "vulnerable": { "type": "integer", "minimum": 0 },
+        "degraded": { "type": "integer", "minimum": 0 },
+        "inconclusive": { "type": "integer", "minimum": 0 },
+        "spend_usd": { "type": "number" }
+      }
+    }
+  }
+}

@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alisaosipova/agent-attack-bench/schemas/evidence.schema.json",
+  "title": "agent-attack-bench evidence record",
+  "description": "Per-run evidence record (evidence-spec §2.2). One per repetition, written as evidence.json in the run dir.",
+  "type": "object",
+  "required": [
+    "evidence_schema",
+    "benchmark_run_id",
+    "scenario_id",
+    "scenario_version",
+    "repetition",
+    "profile",
+    "forbidden_effect",
+    "detector_hits",
+    "benign",
+    "timing",
+    "outcome"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "evidence_schema": { "const": "0.1" },
+    "benchmark_run_id": { "type": "string" },
+    "scenario_id": { "type": "string", "pattern": "^AAB-[0-9]{3,}$" },
+    "scenario_version": { "type": "string" },
+    "repetition": { "type": "integer", "minimum": 0 },
+    "profile": { "$ref": "#/$defs/profile" },
+    "forbidden_effect": {
+      "type": "object",
+      "required": ["detector"],
+      "additionalProperties": false,
+      "properties": {
+        "detector": {
+          "enum": [
+            "canary_egress_http",
+            "canary_egress_dns",
+            "canary_file_read",
+            "canary_command",
+            "canary_mcp_tool",
+            "fs_diff"
+          ]
+        },
+        "match": { "type": "object" }
+      }
+    },
+    "detector_hits": { "type": "array", "items": { "$ref": "#/$defs/detectorHit" } },
+    "benign": {
+      "type": "object",
+      "required": ["check", "ok", "evidence_ref"],
+      "additionalProperties": false,
+      "properties": {
+        "check": {
+          "enum": ["file_written", "command_succeeded", "mcp_tool_called", "text_in_transcript"]
+        },
+        "ok": { "type": "boolean" },
+        "evidence_ref": { "type": "string" }
+      }
+    },
+    "observation": { "$ref": "#/$defs/observation" },
+    "timing": {
+      "type": "object",
+      "required": ["started_at", "ended_at", "duration_ms"],
+      "additionalProperties": false,
+      "properties": {
+        "started_at": { "type": "number" },
+        "ended_at": { "type": "number" },
+        "duration_ms": { "type": "number" }
+      }
+    },
+    "outcome": { "enum": ["resisted", "vulnerable", "degraded", "inconclusive"] },
+    "inconclusive_reason": {
+      "enum": [
+        "adapter_error",
+        "fixture_error",
+        "detector_unverified",
+        "budget_exhausted",
+        "isolation_failure"
+      ]
+    }
+  },
+  "$defs": {
+    "profile": {
+      "type": "object",
+      "required": [
+        "agent",
+        "agent_version",
+        "model",
+        "permission_mode",
+        "used_bare",
+        "mcp",
+        "hooks",
+        "skills",
+        "settings_digest"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "agent": { "type": "string" },
+        "agent_version": { "type": "string" },
+        "model": { "type": "string" },
+        "permission_mode": { "type": ["string", "null"] },
+        "used_bare": { "type": "boolean" },
+        "mcp": { "type": "string" },
+        "hooks": { "type": "string" },
+        "skills": { "type": "array", "items": { "type": "string" } },
+        "settings_digest": { "type": "string" }
+      }
+    },
+    "detectorHit": {
+      "type": "object",
+      "required": ["detector", "matched", "evidence_ref", "at"],
+      "additionalProperties": true,
+      "properties": {
+        "detector": { "type": "string" },
+        "matched": { "type": "object" },
+        "attributed_tool_call": { "type": "object" },
+        "evidence_ref": { "type": "string" },
+        "at": { "type": "number" }
+      }
+    },
+    "observation": {
+      "type": "object",
+      "required": ["raw_events_path", "tool_calls", "exit_code"],
+      "additionalProperties": false,
+      "properties": {
+        "raw_events_path": { "type": "string" },
+        "tool_calls": { "type": "array", "items": { "type": "object" } },
+        "exit_code": { "type": "number" },
+        "cost_usd": { "type": "number" },
+        "effective_model": { "type": "string" },
+        "effective_permission_mode": { "type": "string" },
+        "warnings": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}
