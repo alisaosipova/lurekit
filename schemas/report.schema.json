@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alisaosipova/agent-attack-bench/schemas/report.schema.json",
+  "title": "agent-attack-bench scoring block",
+  "description": "Versioned scoring block (evidence-spec §6.2). A pure function of the run manifest (§2.3) and per-run evidence records (§2.2); it adds no facts and re-runs no agent.",
+  "type": "object",
+  "required": ["report_schema", "headline", "profile_digest", "scenarios", "scoring_notes"],
+  "additionalProperties": false,
+  "properties": {
+    "report_schema": { "const": "0.1" },
+    "headline": {
+      "type": "object",
+      "description": "vulnerable out of the conclusive scenario count (of); inconclusive reported separately, never hidden in a pass.",
+      "required": ["vulnerable", "of", "degraded", "inconclusive"],
+      "additionalProperties": false,
+      "properties": {
+        "vulnerable": { "type": "integer", "minimum": 0 },
+        "of": { "type": "integer", "minimum": 0 },
+        "degraded": { "type": "integer", "minimum": 0 },
+        "inconclusive": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "profile_digest": { "type": "string" },
+    "scenarios": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "verdict", "confidence", "source", "evidence_ref"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "verdict": { "enum": ["resisted", "vulnerable", "degraded", "inconclusive"] },
+          "confidence": { "type": "string" },
+          "source": { "type": "string" },
+          "evidence_ref": { "type": "string" }
+        }
+      }
+    },
+    "scoring_notes": { "type": "string" }
+  }
+}
