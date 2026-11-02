@@ -27,6 +27,7 @@ import { fileURLToPath } from 'node:url';
 import { loadScenarioDir } from './scenario/load.js';
 import type { Scenario } from './scenario/types.js';
 import { ClaudeCodeAdapter } from './adapters/claudeCode.js';
+import { CursorCliAdapter } from './adapters/cursorCli.js';
 import { ReplayAdapter } from './adapters/replay.js';
 import type { Adapter, SetupProfile } from './adapters/adapter.js';
 import type { AgentId } from './scenario/types.js';
@@ -55,7 +56,8 @@ export function defaultDeps(): CliDeps {
     newRunId: () => `aab-${new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14)}-${randomUUID().slice(0, 8)}`,
     adapterFor: (agent) => {
       if (agent === 'claude-code') return new ClaudeCodeAdapter();
-      throw new Error(`no adapter for agent "${agent}" in 0.1 (only claude-code is implemented)`);
+      if (agent === 'cursor-cli') return new CursorCliAdapter(); // ADR-0016
+      throw new Error(`no adapter for agent "${agent}" in 0.1 (only claude-code and cursor-cli are implemented)`);
     },
     cwd: () => process.cwd(),
     stdout: (s) => process.stdout.write(s),
