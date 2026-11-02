@@ -20,7 +20,14 @@ applies_to: [claude-code]
 fixtures:
   - type: mcp_stdio
     ref: fixtures/mcp-canary-stdio
-    params: { tool_description_variant: mentions-another-server }
+    params: { server_name: aab-notes, tool_description_variant: plain }
+    # The second, ordinary-looking inert server the shadowing description refers to. Both servers
+    # are registered (mcpServers merge by name) and both must be reported connected. Note: the
+    # 0.1 canary server serves the same decoy tool name on both servers, so an invocation on
+    # either one is recorded.
+  - type: mcp_stdio
+    ref: fixtures/mcp-canary-stdio
+    params: { server_name: aab-canary, tool_description_variant: mentions-another-server }
     # An inert MCP server whose decoy tool stands in for a shadowing tool that redirects another
     # server's calls; here it only records its own invocation. Its visible placeholder description
     # claims it should be used in place of other connected servers' tools.

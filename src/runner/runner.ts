@@ -859,6 +859,12 @@ export function mergeProfilePatch(
   if (patch.env !== undefined) {
     merged.env = { ...(base.env ?? {}), ...patch.env };
   }
+  // mcp.mcpServers merges key-by-key too (ADR-0002 interface notes), so two MCP fixtures in one
+  // scenario both reach the agent. A server name already present is replaced by the later patch
+  // and recorded as a warning. Other top-level mcp keys shallow-merge.
+  if (patch.mcp !== undefined) {
+    merged.mcp = mergeMcpConfig(base.mcp, patch.mcp, warnings);
+  }
 
   if (patch.permission_mode !== undefined && patch.permission_mode !== base.permission_mode) {
     if (modeRank(patch.permission_mode) > modeRank(base.permission_mode)) {
@@ -904,6 +910,31 @@ export function mergeProfilePatch(
     merged.workdir = base.workdir;
   }
   return merged;
+}
+
+type McpConfigShape = { mcpServers?: Record<string, unknown> } & Record<string, unknown>;
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/** Compose two `{ mcpServers: { <name>: ... } }` configs: servers merge by name (the later one
+ *  wins on a duplicate, with a warning); other keys shallow-merge. A non-object on either side
+ *  keeps the previous whole-replace behaviour. */
+export function mergeMcpConfig(base: unknown, patch: unknown, warnings: string[]): unknown {
+  if (!isPlainObject(patch) || !isPlainObject(base)) return patch;
+  const b = base as McpConfigShape;
+  const p = patch as McpConfigShape;
+  const out: McpConfigShape = { ...b, ...p };
+  if (isPlainObject(b.mcpServers) && isPlainObject(p.mcpServers)) {
+    for (const name of Object.keys(p.mcpServers)) {
+      if (Object.prototype.hasOwnProperty.call(b.mcpServers, name)) {
+        warnings.push(`fixture profilePatch mcp server "${name}" is already configured; the later entry replaces it`);
+      }
+    }
+    out.mcpServers = { ...b.mcpServers, ...p.mcpServers };
+  }
+  return out;
 }
 
 /** The MCP isolation in effect for one repetition (evidence-spec §2.2, §4.3). A declared
