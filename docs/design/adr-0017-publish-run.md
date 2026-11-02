@@ -1,6 +1,7 @@
 # ADR-0017: Publishing a run (`publish` subcommand and redaction gate)
 
-Status: proposed, implemented (2026-11-02); awaiting maintainer approval.
+Status: proposed, implemented (2026-11-02); awaiting maintainer approval. Amended 2026-11-02:
+opt-in operator home redaction (`--redact-home`, see "Operator home redaction").
 Authorises `src/report/publish.ts`, the `publish` subcommand in `src/cli.ts`, the exported
 `findSecretShape()` / `extractHost()` helpers in `src/fixtures/fixture.ts` (and the
 path-before-userinfo order of `extractHost()`), and
@@ -30,13 +31,14 @@ that the evidence is free of local paths, tokens or third-party URLs.
 ## Decision
 Option 3.
 
-`agent-attack-bench publish <runDir> [--out <dir>] [--allow-host <host>]...`
+`agent-attack-bench publish <runDir> [--out <dir>] [--allow-host <host>]... [--redact-home]`
 
 - Default output dir: `reports/<benchmark_run_id>` (relative to the cwd). A non-empty output
   dir is refused, so stale unscanned files cannot ride along.
 - Bundle contents, and nothing else:
-  - `manifest.json` (byte copy);
-  - every `<scenario>/<rep>/evidence.json` for the manifest's scenarios (byte copy, layout kept);
+  - `manifest.json` (byte copy, except for `--redact-home` replacements);
+  - every `<scenario>/<rep>/evidence.json` for the manifest's scenarios (byte copy, layout kept,
+    except for `--redact-home` replacements);
   - `report.md`, `report.json`, `report.sarif`, rendered by `report()` (§6.1). The Markdown
     evidence excerpt uses the same selection rule as `report` (first vulnerable repetition,
     else repetition 0; `selectEvidence()` is shared);
@@ -65,6 +67,24 @@ Option 3.
   - A URL's host is taken after stripping path, query and fragment, then userinfo
     (`extractHost()`), so `https://evil.example/x@github.com` has host `evil.example`, not an
     allowlisted source host. The same fix tightens fixture invariant (a) (`assertLoopback`).
+- **Operator home redaction (`--redact-home`, opt-in).** Off by default; without it the
+  behaviour above is unchanged and an operator home path fails the gate. When set:
+  - every occurrence of the operator home dir (`CliDeps.homeDir()`, else `os.homedir()`;
+    spelled as is, with JSON-escaped backslashes, and with forward slashes; trailing separators
+    dropped) in the **published copies** (manifest, evidence, the three renders, `index.md`) is
+    replaced by the literal `<HOME>`. An occurrence counts only when the next character ends a
+    home segment in the gate's own patterns (`/`, `\`, whitespace, a quote or backtick, `<`,
+    `>`, `|`) or the text ends, so `/home/u` never rewrites the prefix of a sibling such as
+    `/home/u2`, `/home/u@old`, `/home/u+bak` or `/home/uü`. Any other following character
+    (`)`, `,`, `:`) leaves the occurrence as is, and it fails the gate (fail closed);
+  - the run dir is never modified: the replacement is applied to the in-memory copies only;
+  - `index.md` gains a `## Redaction` section with the line
+    `redaction applied: home directory -> <HOME> (N replacements)`, N being the total over the
+    bundle (the same line is printed on stdout);
+  - the gate then runs on the redacted bundle exactly as without the flag: any other home-style
+    path (another user's `/home/<u>`, `/Users/<u>`, `/root`, `<drive>:\Users\<u>`), any token
+    shape and any non-allowlisted URL still fail, and nothing is written;
+  - a missing or root-ish home dir (empty, `/`) with the flag is an error, not a silent no-op.
 - Ids that become path segments (`benchmark_run_id`, scenario ids) must match
   `^[A-Za-z0-9][A-Za-z0-9._-]*$`; anything else fails the publish.
 - Offline: no network, no agent, no clock. The command writes local files only; uploading or
@@ -76,6 +96,9 @@ agent-attack-bench publish .aab-runs/<benchmark_run_id>
 agent-attack-bench publish .aab-runs/<id> --out site/runs/<id>
 # a deliberate exception, e.g. a vendor docs host cited in an evidence record
 agent-attack-bench publish .aab-runs/<id> --allow-host docs.vendor.example
+# the run legitimately names the operator's own home (e.g. the agent listed the memory dir
+# the agent runtime announced); publish it as <HOME>
+agent-attack-bench publish .aab-runs/<id> --redact-home
 ```
 A failing gate prints, for example:
 ```
@@ -91,5 +114,17 @@ publish: redaction gate failed (evidence-spec §5), 1 finding(s); nothing writte
 - Runs whose workdir sits under the home dir (or the OS temp dir is under it, as on Windows)
   will fail the gate when evidence tool-call inputs name workdir paths. That is intended: the
   maintainer decides, by re-running with a neutral `--workdir` or fixing the evidence.
-- Evidence records are published verbatim, including tool-call inputs. The gate, not the
+- `--redact-home` is a narrow, explicit exception to "the gate never rewrites" (Option 2 stays
+  rejected as a default). It is opt-in because rewriting changes published bytes (§6: a
+  reporter alters no facts), so the maintainer must ask for it per publish, and the bundle
+  says so (`index.md` note with the count) so a reader knows `<HOME>` is a substitution, not
+  what the agent saw. The rewrite is a pure substitution of one known string: the path
+  structure below it (e.g. `<HOME>/.claude/projects/<slug>/memory/`) is kept, which is what an
+  auditor needs, and the source run dir keeps the exact bytes for local audit.
+- It covers only the operator's own home because that is the one value the tool knows to be
+  the publisher's, and the case it exists for (a live run naming the home the agent runtime
+  itself announced) is always that home. Another user's home, a macOS/Windows home that is not
+  the operator's, or a sibling such as `/home/u2` or `/home/u@old` is evidence the run captured something
+  unexpected; masking it would hide that from the maintainer, so it keeps failing the gate.
+- Evidence records are published verbatim (save for `--redact-home`), including tool-call inputs. The gate, not the
   renderer, is what keeps those inputs safe to share.

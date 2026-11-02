@@ -308,8 +308,9 @@ export function cmdReport(flags: Flags, deps: CliDeps): number {
   return 0;
 }
 
-/** publish <runDir> [--out <dir>] [--allow-host <host>]... (ADR-0017). Builds the whole bundle
- *  in memory, runs the §5 redaction gate, and writes only if the gate is clean. */
+/** publish <runDir> [--out <dir>] [--allow-host <host>]... [--redact-home] (ADR-0017). Builds the
+ *  whole bundle in memory, optionally replaces the operator home dir with <HOME> in the copies,
+ *  runs the §5 redaction gate, and writes only if the gate is clean. */
 export function cmdPublish(flags: Flags, deps: CliDeps): number {
   const runArg = flags._[0];
   if (!runArg) throw new Error('publish: a benchmark run directory is required');
@@ -321,6 +322,7 @@ export function cmdPublish(flags: Flags, deps: CliDeps): number {
   const plan = planPublish(readRunDir(runDir), {
     allowHosts: flags.multi.get('allow-host') ?? [],
     homeDir: deps.homeDir ? deps.homeDir() : homedir(),
+    redactHome: flags.bool.has('redact-home'),
   });
   if (!plan.ok) {
     deps.stderr(formatPlanFailure(plan));
@@ -334,6 +336,9 @@ export function cmdPublish(flags: Flags, deps: CliDeps): number {
     return 1;
   }
   for (const f of plan.files) deps.stdout(`wrote ${f.rel}\n`);
+  if (plan.homeReplacements !== undefined) {
+    deps.stdout(`redaction applied: home directory -> <HOME> (${plan.homeReplacements} replacements)\n`);
+  }
   deps.stdout(`\npublished ${plan.files.length} file(s) to ${outDir}\n`);
   return 0;
 }
@@ -358,6 +363,8 @@ Commands:
   publish <runDir> Write a shareable bundle (manifest, evidence, report.md/json/sarif, index.md)
                    after the redaction gate (no raw transcripts). Offline.
                    --out <dir> (default reports/<benchmark_run_id>)  --allow-host <host> (repeatable)
+                   --redact-home  replace YOUR home dir with <HOME> in the published copies (opt-in;
+                                  run dir untouched; other home paths still fail the gate)
 
 Only 'run' launches a real agent (cost / auth), unless given --replay. Everything else is offline.
 `;

@@ -10,7 +10,13 @@
 // scanned. A non-loopback http(s) URL whose host is not a scenario source host (or an explicit
 // --allow-host), a token-shaped string (the fixture inertness patterns, src/fixtures/fixture.ts),
 // or an absolute path under a home directory fails the publish, and nothing is written. The gate
-// never rewrites (no `~` substitution): the maintainer must see and fix the leak.
+// itself never rewrites (no `~` substitution): the maintainer must see and fix the leak.
+//
+// One explicit, opt-in exception (--redact-home, ADR-0017 "Operator home redaction"): every
+// occurrence of the operator's OWN home directory in the published copies is replaced by the
+// literal <HOME>, the count is recorded in index.md, and the gate then runs on the redacted
+// bundle as usual, so any other home-style path, token or URL still fails. The run dir is never
+// modified: redaction applies to the in-memory copies only.
 //
 // Structure: planPublish() / scanForLeaks() / renderIndex() are pure (data in, data out);
 // readRunDir() and writeBundle() are the only I/O; publishRun() glues them.
@@ -40,7 +46,13 @@ export interface PublishPolicy {
   allowHosts?: string[];
   /** The publishing user's home directory; any absolute path under it fails the gate. */
   homeDir?: string;
+  /** --redact-home: replace every occurrence of `homeDir` in the published copies with
+   *  HOME_PLACEHOLDER before the gate runs. Requires `homeDir`. */
+  redactHome?: boolean;
 }
+
+/** The literal that replaces the operator home directory under --redact-home. */
+export const HOME_PLACEHOLDER = '<HOME>';
 
 export type LeakKind = 'url' | 'token' | 'home_path';
 
@@ -53,7 +65,7 @@ export interface Leak {
 }
 
 export type PublishPlan =
-  | { ok: true; benchmarkRunId: string; files: BundleFile[] }
+  | { ok: true; benchmarkRunId: string; files: BundleFile[]; homeReplacements?: number }
   | { ok: false; benchmarkRunId?: string; error?: string; leaks: Leak[] };
 
 /** URLs the tool itself emits in every render (SARIF $schema and driver.informationUri). They
@@ -113,12 +125,36 @@ function homePathPatterns(homeDir: string | undefined): RegExp[] {
     /(?<![\w.~-])\/root(?=[/\s"'`]|$)/,
     /\b[A-Za-z]:(?:\\|\\\\|\/)Users(?:\\|\\\\|\/)[^\\/\s"'`<>|]+/i,
   ];
-  const home = homeDir?.replace(/[\\/]+$/, '');
-  if (home && home.length > 1) {
-    const variants = new Set([home, home.replace(/\\/g, '\\\\'), home.replace(/\\/g, '/')]);
-    for (const v of variants) out.push(new RegExp(`${escapeRe(v)}(?=[\\\\/\\s"'\`]|$)`));
-  }
+  for (const v of homeVariants(homeDir)) out.push(new RegExp(`${escapeRe(v)}(?=[\\\\/\\s"'\`]|$)`));
   return out;
+}
+
+/** The spellings of `homeDir` as they can appear in published text: as is, with JSON-escaped
+ *  backslashes, and with forward slashes. Trailing separators are dropped; a root-ish value
+ *  (`/`, empty) yields nothing. */
+function homeVariants(homeDir: string | undefined): string[] {
+  const home = homeDir?.replace(/[\\/]+$/, '');
+  if (!home || home.length <= 1) return [];
+  const variants = new Set([home, home.replace(/\\/g, '\\\\'), home.replace(/\\/g, '/')]);
+  return [...variants].sort((a, b) => b.length - a.length); // longest first in the alternation
+}
+
+/** Replace every occurrence of the operator home dir with HOME_PLACEHOLDER. An occurrence counts
+ *  only when it is followed by a separator, whitespace, a quote, `<>|` or the end: exactly the
+ *  characters that end a home segment in homePathPatterns(). So `/home/kali` never eats the
+ *  prefix of a sibling (`/home/kali2`, `/home/kali@old`, `/home/kali+bak`, `/home/kaliü`); that
+ *  path stays and fails the gate. Anything else after the home (`)`, `,`, `:`) is left as is and
+ *  fails the gate too: fail closed. Pure. */
+export function redactHomeDir(text: string, homeDir: string): { text: string; count: number } {
+  const variants = homeVariants(homeDir);
+  if (variants.length === 0) return { text, count: 0 };
+  const re = new RegExp(`(?:${variants.map(escapeRe).join('|')})(?=[\\\\/\\s"'\`<>|]|$)`, 'g');
+  let count = 0;
+  const out = text.replace(re, () => {
+    count++;
+    return HOME_PLACEHOLDER;
+  });
+  return { text: out, count };
 }
 
 /** The texts the gate scans for one file: the bytes as written, plus (when different) a view
@@ -182,7 +218,13 @@ const EOL = /\r\n?|\n/g;
 const cell = (s: string): string =>
   String(s).replace(EOL, ' ').replace(/[\p{Cc}]/gu, ' ').replace(/\|/g, '\\|');
 
-export function renderIndex(manifest: RunManifest, evidenceRels: string[]): string {
+/** Optional notes renderIndex records about how the bundle was produced. */
+export interface IndexNotes {
+  /** Set when --redact-home ran: the number of home-dir occurrences replaced in the bundle. */
+  homeReplacements?: number;
+}
+
+export function renderIndex(manifest: RunManifest, evidenceRels: string[], notes: IndexNotes = {}): string {
   const score = buildScore(manifest);
   const h = score.headline;
   const p = manifest.profile;
@@ -228,6 +270,11 @@ export function renderIndex(manifest: RunManifest, evidenceRels: string[]): stri
   out.push('- [report.md](report.md), [report.json](report.json), [report.sarif](report.sarif) — renders (evidence-spec §6)');
   for (const rel of evidenceRels) out.push(`- [${rel}](${rel})`);
   out.push('');
+  if (notes.homeReplacements !== undefined) {
+    out.push('## Redaction', '');
+    out.push(`- redaction applied: home directory -> ${HOME_PLACEHOLDER} (${notes.homeReplacements} replacements)`);
+    out.push('');
+  }
   out.push(
     '_Raw agent transcripts and hook captures are kept with the local run and are not published ' +
       '(evidence-spec §5). Agent output is stochastic: the verdict is a k-run tally, not a ' +
@@ -268,14 +315,37 @@ export function planPublish(contents: RunDirContents, policy: PublishPolicy = {}
   const lookup = lookupFromRecords(manifest, records);
   const evidenceRels = contents.evidence.map((f) => f.rel);
 
-  const files: BundleFile[] = [
+  let files: BundleFile[] = [
     { rel: 'manifest.json', text: contents.manifestText },
     ...contents.evidence,
     { rel: 'report.md', text: report(manifest, { format: 'markdown', evidenceLookup: lookup }) },
     { rel: 'report.json', text: report(manifest, { format: 'json' }) },
     { rel: 'report.sarif', text: report(manifest, { format: 'sarif' }) },
-    { rel: 'index.md', text: renderIndex(manifest, evidenceRels) },
   ];
+
+  // --redact-home: rewrite the in-memory copies only (contents.* are fresh objects per file, the
+  // run dir is never touched). index.md is rendered last so its note can carry the total count;
+  // the note itself contains no home path, so redacting the noted index counts the same as the
+  // un-noted one.
+  let homeReplacements: number | undefined;
+  if (policy.redactHome) {
+    const home = policy.homeDir;
+    if (homeVariants(home).length === 0) {
+      return { ok: false, benchmarkRunId: id, error: '--redact-home needs a usable home directory', leaks: [] };
+    }
+    let total = 0;
+    files = files.map((f) => {
+      const r = redactHomeDir(f.text, home as string);
+      total += r.count;
+      return { rel: f.rel, text: r.text };
+    });
+    total += redactHomeDir(renderIndex(manifest, evidenceRels), home as string).count;
+    homeReplacements = total;
+    const index = redactHomeDir(renderIndex(manifest, evidenceRels, { homeReplacements }), home as string);
+    files.push({ rel: 'index.md', text: index.text });
+  } else {
+    files.push({ rel: 'index.md', text: renderIndex(manifest, evidenceRels) });
+  }
 
   const allowed = new Set<string>();
   for (const r of manifest.results) {
@@ -283,9 +353,12 @@ export function planPublish(contents: RunDirContents, policy: PublishPolicy = {}
   }
   for (const h of policy.allowHosts ?? []) allowed.add(extractHost(h));
 
+  // The gate always runs, and after redaction: a foreign home path, a token or a URL still fails.
   const leaks = scanForLeaks(files, allowed, policy.homeDir);
   if (leaks.length > 0) return { ok: false, benchmarkRunId: id, leaks };
-  return { ok: true, benchmarkRunId: id, files };
+  return homeReplacements === undefined
+    ? { ok: true, benchmarkRunId: id, files }
+    : { ok: true, benchmarkRunId: id, files, homeReplacements };
 }
 
 /** Human-readable failure text for a rejected plan. */
@@ -295,7 +368,11 @@ export function formatPlanFailure(plan: Extract<PublishPlan, { ok: false }>): st
   return (
     `publish: redaction gate failed (evidence-spec §5), ${plan.leaks.length} finding(s); nothing written\n` +
     lines.join('\n') +
-    '\nFix the run artefacts, or pass --allow-host <host> for a deliberate URL exception.\n'
+    '\nFix the run artefacts, or pass --allow-host <host> for a deliberate URL exception' +
+    (plan.leaks.some((l) => l.kind === 'home_path')
+      ? ', or --redact-home to replace your own home directory with <HOME> in the published copies'
+      : '') +
+    '.\n'
   );
 }
 
