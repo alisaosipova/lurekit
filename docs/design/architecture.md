@@ -220,7 +220,7 @@ without a usable SDK (OpenHands is Python-only) are driven via their CLI.
 
 ## ADR-0009: Effect detectors and observation layers
 
-**Status:** accepted (2026-11-01); four detectors implemented, two deferred. Full contract in
+**Status:** accepted (2026-11-01); five detectors implemented, one deferred (`canary_egress_dns`). Full contract in
 `evidence-spec.md` §1.
 
 ### Context
@@ -395,7 +395,7 @@ plumbing, keep decisions in ADRs; codified in `CLAUDE.md`. This document was ass
 | 0006 | Cost control | accepted, partially implemented |
 | 0007 | Isolation + safety (inert by construction) | accepted, implemented |
 | 0008 | Agent adapter contract | accepted; Claude Code done, others scheduled |
-| 0009 | Effect detectors + observation | accepted; 4 of 6 detectors done |
+| 0009 | Effect detectors + observation | accepted; 5 of 6 detectors done |
 | 0010 | Dependency policy | accepted |
 | 0011 | Repository layout | accepted, implemented |
 | 0012 | Contribution model | accepted, to be published (Week 4) |

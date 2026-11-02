@@ -18,6 +18,7 @@ import type { ValidateFunction } from 'ajv';
 import {
   BenchmarkRunner,
   aggregateOutcomes,
+  mergeProfilePatch,
   type RunConfig,
   type RunnerIds,
 } from '../src/runner/runner.js';
@@ -469,6 +470,65 @@ describe('fixture profilePatch merge (ADR-0002 step 2)', () => {
     const evidence = await readEvidence(cfg, 'BR8', 'AAB-020', 0);
     expect(evidence.observation.warnings.join(' ')).toMatch(/loosen permission_mode/);
     expect(fixture.teardownCalls).toBe(1);
+  });
+
+  it('composes two fixtures\' env patches in order', () => {
+    const warnings: string[] = [];
+    let p = makeProfile('/w');
+    p = mergeProfilePatch(p, { env: { AAB_WEB_URL: 'http://127.0.0.1:1/' } }, warnings);
+    p = mergeProfilePatch(p, { env: { npm_config_registry: 'http://127.0.0.1:2/' } }, warnings);
+    expect(p.env).toEqual({
+      AAB_WEB_URL: 'http://127.0.0.1:1/',
+      npm_config_registry: 'http://127.0.0.1:2/',
+    });
+    expect(warnings).toEqual([]);
+  });
+
+  it('keeps the profile\'s own env keys when a patch sets env', () => {
+    const base = makeProfile('/w', { env: { PROFILE_KEY: 'p', SHARED: 'base' } });
+    const merged = mergeProfilePatch(base, { env: { AAB_WEB_URL: 'http://127.0.0.1:1/' } }, []);
+    expect(merged.env).toEqual({ PROFILE_KEY: 'p', SHARED: 'base', AAB_WEB_URL: 'http://127.0.0.1:1/' });
+    // The base profile is not mutated.
+    expect(base.env).toEqual({ PROFILE_KEY: 'p', SHARED: 'base' });
+  });
+
+  it('lets a later patch override the same env key', () => {
+    let p = makeProfile('/w', { env: { SHARED: 'base' } });
+    p = mergeProfilePatch(p, { env: { SHARED: 'first' } }, []);
+    p = mergeProfilePatch(p, { env: { SHARED: 'second' } }, []);
+    expect(p.env).toEqual({ SHARED: 'second' });
+  });
+
+  it('leaves non-env fields with their existing behaviour', () => {
+    const warnings: string[] = [];
+    const base = makeProfile('/w', {
+      env: { K: 'v' },
+      permission_mode: 'default',
+      mcp: { servers: { a: 1 } },
+      skills: ['s1'],
+    });
+    const merged = mergeProfilePatch(
+      base,
+      {
+        mcp: { servers: { b: 2 } },
+        skills: ['s2'],
+        permission_mode: 'plan',
+        agent: 'cursor-cli',
+        model: 'other-model',
+      },
+      warnings,
+    );
+    // Shallow replace for non-env fields; env untouched when the patch has none.
+    expect(merged.mcp).toEqual({ servers: { b: 2 } });
+    expect(merged.skills).toEqual(['s2']);
+    expect(merged.env).toEqual({ K: 'v' });
+    // Tightening permission_mode is allowed; identity fields are pinned with warnings.
+    expect(merged.permission_mode).toBe('plan');
+    expect(merged.agent).toBe(base.agent);
+    expect(merged.model).toBe(base.model);
+    expect(warnings.join(' ')).toMatch(/change agent; ignored/);
+    expect(warnings.join(' ')).toMatch(/change model; ignored/);
+    expect(warnings.join(' ')).not.toMatch(/loosen/);
   });
 });
 

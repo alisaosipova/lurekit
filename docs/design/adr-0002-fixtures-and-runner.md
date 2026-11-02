@@ -32,6 +32,15 @@ Inertness invariants, asserted in the base class (not per fixture):
    base class rejects a fixture that would reach a non-loopback host or embed a real token.
 3. A fixture never calls a canary itself (so the detectors' negative control stays clean, §1.4).
 
+Interface notes — `profilePatch` merging. The runner applies each fixture's `profilePatch` to
+the profile under test in fixture order (`mergeProfilePatch`, `src/runner/runner.ts`):
+- `env` merges key-by-key: the profile's `env`, then each patch's `env` in order. Keys the
+  profile set survive; two fixtures' env patches compose (e.g. `web_server`'s `AAB_WEB_URL` and
+  `local_registry`'s `npm_config_registry`); a later patch overrides only the same key.
+- Every other field is shallow-merged (a patched field replaces the profile's value whole).
+- Never loosened: a patch that would loosen `permission_mode` is ignored with a warning, and a
+  patch that changes `agent`, `agent_version` or `model` is ignored with a warning.
+
 ### Runner lifecycle
 `plan → provision → run×k → observe → score → teardown`:
 1. **plan** — filter the corpus to scenarios whose `applies_to` includes the profile's agent

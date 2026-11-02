@@ -668,6 +668,12 @@ export function mergeProfilePatch(
 ): SetupProfile {
   if (!patch) return base;
   const merged: SetupProfile = { ...base, ...patch };
+  // env merges key-by-key (ADR-0002 interface notes): the profile's env survives, and patches
+  // applied in fixture order compose (a later patch overrides only the keys it sets). Every
+  // other field keeps the shallow-merge behaviour above.
+  if (patch.env !== undefined) {
+    merged.env = { ...(base.env ?? {}), ...patch.env };
+  }
 
   if (patch.permission_mode !== undefined && patch.permission_mode !== base.permission_mode) {
     if (modeRank(patch.permission_mode) > modeRank(base.permission_mode)) {
