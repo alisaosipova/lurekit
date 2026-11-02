@@ -27,7 +27,9 @@ import type {
   RunOptions,
   SetupProfile,
   ToolCall,
+  McpServerStatus,
 } from './adapter.js';
+import { normalizeMcpServers } from './adapter.js';
 import type { AgentId } from '../scenario/types.js';
 
 export const CURSOR_STREAM_FILE = 'cursor-stream.jsonl';
@@ -263,7 +265,7 @@ export interface CursorStreamState {
   byCallId: Map<string, ToolCall>;
   effectiveModel?: string;
   effectivePermissionMode?: string;
-  mcpServers?: unknown;
+  mcpServers?: McpServerStatus[];
   sessionId?: string;
   sawResult: boolean;
   resultIsError?: boolean;
@@ -309,7 +311,10 @@ export function parseCursorStreamLine(line: string, at: number, state: CursorStr
     if (typeof evt.model === 'string') state.effectiveModel = evt.model;
     if (typeof evt.permissionMode === 'string') state.effectivePermissionMode = evt.permissionMode;
     if (typeof evt.session_id === 'string') state.sessionId = evt.session_id;
-    if ('mcp_servers' in evt) state.mcpServers = evt.mcp_servers; // "may be added" (NOTES)
+    if ('mcp_servers' in evt) {
+      const servers = normalizeMcpServers(evt.mcp_servers); // "may be added" (NOTES)
+      if (servers) state.mcpServers = servers;
+    }
   } else if (type === 'tool_call') {
     const { name, input } = describeCursorToolCall(evt.tool_call);
     const callId = typeof evt.call_id === 'string' ? evt.call_id : undefined;

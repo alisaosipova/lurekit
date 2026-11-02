@@ -74,7 +74,8 @@
         "fixture_error",
         "detector_unverified",
         "budget_exhausted",
-        "isolation_failure"
+        "isolation_failure",
+        "precondition_failed"
       ]
     }
   },
@@ -100,6 +101,7 @@
         "permission_mode": { "type": ["string", "null"] },
         "used_bare": { "type": "boolean" },
         "mcp": { "type": "string" },
+        "strict_mcp_config": { "type": "boolean" },
         "hooks": { "type": "string" },
         "skills": { "type": "array", "items": { "type": "string" } },
         "settings_digest": { "type": "string" }
@@ -128,6 +130,19 @@
         "cost_usd": { "type": "number" },
         "effective_model": { "type": "string" },
         "effective_permission_mode": { "type": "string" },
+        "mcp_servers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "status"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string" },
+              "status": { "type": "string" },
+              "source": { "type": "string" }
+            }
+          }
+        },
         "warnings": { "type": "array", "items": { "type": "string" } }
       }
     }

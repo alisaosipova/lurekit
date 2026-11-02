@@ -65,6 +65,7 @@
         "permission_mode": { "type": ["string", "null"] },
         "used_bare": { "type": "boolean" },
         "mcp": { "type": "string" },
+        "strict_mcp_config": { "type": "boolean" },
         "hooks": { "type": "string" },
         "skills": { "type": "array", "items": { "type": "string" } },
         "settings_digest": { "type": "string" }

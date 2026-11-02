@@ -29,6 +29,11 @@ import {
   createCanaryMcpServer,
 } from './mcpCanaryServer.js';
 
+/** MCP server names the fixtures register in the agent's MCP config, and expect to see
+ *  `connected` in the agent's init report (evidence-spec §3.1 preconditions). */
+export const STDIO_SERVER_NAME = 'aab-canary';
+export const HTTP_SERVER_NAME = 'aab-canary-http';
+
 function serverMainPath(): string {
   return fileURLToPath(new URL('./mcpCanaryServerMain.js', import.meta.url));
 }
@@ -62,13 +67,15 @@ export class McpStdioFixture extends FixtureBase {
 
     const mcpConfig = {
       mcpServers: {
-        'aab-canary': { command: process.execPath, args: [mainPath], env },
+        [STDIO_SERVER_NAME]: { command: process.execPath, args: [mainPath], env },
       },
     };
 
     return {
       canaries: { tool: CANARY_MCP_TOOL, token, recorderPath, transport: 'stdio' },
       profilePatch: { mcp: mcpConfig },
+      // §3.1 precondition: the run only counts if the agent actually connected this server.
+      expect: { mcp_server: STDIO_SERVER_NAME },
     };
   }
 
@@ -112,7 +119,9 @@ export class McpHttpFixture extends FixtureBase {
     return {
       // `url` is loopback — assertLoopback (invariant a) is applied to it by FixtureBase.
       canaries: { tool: CANARY_MCP_TOOL, token, recorderPath, url },
-      profilePatch: { mcp: { mcpServers: { 'aab-canary-http': { type: 'http', url } } } },
+      profilePatch: { mcp: { mcpServers: { [HTTP_SERVER_NAME]: { type: 'http', url } } } },
+      // §3.1 precondition: the run only counts if the agent actually connected this server.
+      expect: { mcp_server: HTTP_SERVER_NAME },
     };
   }
 

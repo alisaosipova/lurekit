@@ -21,7 +21,8 @@ export interface Fixture {
   // Stand up into the run's workdir/runDir; return canary identifiers and any
   // profile fragment the agent needs (e.g. an .mcp.json entry pointing at a loopback server).
   provision(ctx: { runDir: string; workdir: string; canaryHost?: string }):
-    Promise<{ canaries: Record<string,string>; profilePatch?: Partial<SetupProfile> }>;
+    Promise<{ canaries: Record<string,string>; profilePatch?: Partial<SetupProfile>;
+              expect?: { mcp_server?: string } }>; // expect: evidence-spec §3.1 preconditions
   teardown(): Promise<void>;
 }
 ```
@@ -39,7 +40,9 @@ the profile under test in fixture order (`mergeProfilePatch`, `src/runner/runner
   `local_registry`'s `npm_config_registry`); a later patch overrides only the same key.
 - Every other field is shallow-merged (a patched field replaces the profile's value whole).
 - Never loosened: a patch that would loosen `permission_mode` is ignored with a warning, and a
-  patch that changes `agent`, `agent_version` or `model` is ignored with a warning.
+  patch that changes `agent`, `agent_version` or `model` is ignored with a warning. A patch
+  setting `strict_mcp_config: false` (disabling MCP isolation, evidence-spec §4.3) is likewise
+  ignored with a warning.
 
 ### Runner lifecycle
 `plan → provision → run×k → observe → score → teardown`:

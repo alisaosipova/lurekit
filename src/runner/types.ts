@@ -4,7 +4,12 @@
 // injection points the runner needs to stay deterministic (ids are injected, never generated).
 
 import type { AgentId, DetectorKind, Scenario } from '../scenario/types.js';
-import type { RunObservation, SetupProfile, ToolCall } from '../adapters/adapter.js';
+import type {
+  McpServerStatus,
+  RunObservation,
+  SetupProfile,
+  ToolCall,
+} from '../adapters/adapter.js';
 import type { DetectorHit } from '../detectors/detector.js';
 import type { Fixture } from '../fixtures/fixture.js';
 
@@ -21,7 +26,8 @@ export type InconclusiveReason =
   | 'fixture_error' // a fixture failed to provision/teardown
   | 'detector_unverified' // the detector's selfTest has not passed this session (§1.3)
   | 'budget_exhausted' // the next run could exceed budget_usd (§3.3)
-  | 'isolation_failure'; // egress escaped the sink (§1.4) — reserved, not raised in 0.1
+  | 'isolation_failure' // egress escaped the sink (§1.4) — reserved, not raised in 0.1
+  | 'precondition_failed'; // a fixture's declared `expect` was not observed in the run (§3.1)
 
 export interface RunConfig {
   k: number; // runs per scenario
@@ -55,6 +61,10 @@ export interface ProfileSummary {
   permission_mode: string | null;
   used_bare: boolean;
   mcp: string; // 'none' or a sha256 digest of the mcp config
+  // Strict MCP isolation policy (evidence-spec §4.3): true => a run that carries an MCP config
+  // loads ONLY that config's servers (Claude Code: --strict-mcp-config). Default true. Optional
+  // in the type so older summaries stay valid; the runner always writes it.
+  strict_mcp_config?: boolean;
   hooks: string; // 'none' or a sha256 digest of the hooks config
   skills: string[];
   settings_digest: string; // sha256 of the settings body (or of null)
@@ -78,6 +88,7 @@ export interface EvidenceRecord {
     cost_usd?: number;
     effective_model?: string;
     effective_permission_mode?: string;
+    mcp_servers?: McpServerStatus[]; // the agent's own init report (name/status/source), §4.3
     warnings?: string[];
   };
   timing: { started_at: number; ended_at: number; duration_ms: number }; // durations, not wall-clock

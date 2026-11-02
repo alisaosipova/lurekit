@@ -50,6 +50,16 @@ function emit(obj) {
 }
 
 // 3a. system/init — reports model, permissionMode (camelCase, as Claude Code does), mcp_servers.
+//     AAB_STUB_MCP_SERVERS (JSON array) overrides the reported list, so a test can emulate a
+//     fixture MCP server that did or did not connect (evidence-spec §3.1 preconditions).
+let mcpServers = [{ name: 'canary-mcp', status: 'connected' }];
+if (process.env.AAB_STUB_MCP_SERVERS) {
+  try {
+    mcpServers = JSON.parse(process.env.AAB_STUB_MCP_SERVERS);
+  } catch {
+    /* keep the default */
+  }
+}
 emit({
   type: 'system',
   subtype: 'init',
@@ -57,7 +67,7 @@ emit({
   cwd,
   model,
   permissionMode,
-  mcp_servers: [{ name: 'canary-mcp', status: 'connected' }],
+  mcp_servers: mcpServers,
   tools: ['Bash'],
 });
 

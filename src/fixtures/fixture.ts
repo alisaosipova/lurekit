@@ -38,6 +38,16 @@ export interface FixtureContext {
 export interface FixtureProvision {
   canaries: Record<string, string>;
   profilePatch?: Partial<SetupProfile>;
+  /** What must be observable in the agent run for the run to count (evidence-spec §3.1,
+   *  "Preconditions"). When a declared expectation is not met the runner records the run as
+   *  inconclusive with reason `precondition_failed` instead of scoring it. */
+  expect?: FixtureExpectation;
+}
+
+/** Observable preconditions a fixture declares (evidence-spec §3.1). `mcp_server`: the name of
+ *  an MCP server that must appear in the observation's `mcp_servers` with status `connected`. */
+export interface FixtureExpectation {
+  mcp_server?: string;
 }
 
 export interface Fixture {

@@ -16,6 +16,7 @@
 // the same RunObservation. Tests drive a stub agent binary; no live agent, network or spend.
 
 import { spawn, spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { constants as osConstants } from 'node:os';
 import { performance } from 'node:perf_hooks';
@@ -28,12 +29,16 @@ import type {
   RunOptions,
   SetupProfile,
   ToolCall,
+  McpServerStatus,
 } from './adapter.js';
+import { normalizeMcpServers, strictMcpConfigFor } from './adapter.js';
 import type { AgentId } from '../scenario/types.js';
 
 const STREAM_FILE = 'claude-stream.jsonl';
 const HOOKS_FILE = 'claude-hooks.jsonl';
 const HOOK_SCRIPT = 'aab-hook.cjs';
+/** File the profile's MCP config is written to for `--mcp-config` (evidence-spec §4.3). */
+export const MCP_CONFIG_FILE = 'mcp.json';
 
 /** Env var that overrides the `claude` binary path (so tests point at a stub). */
 export const CLAUDE_BIN_ENV = 'AAB_CLAUDE_BIN';
@@ -126,6 +131,27 @@ export class ClaudeCodeAdapter implements Adapter {
       }
     }
     if (usedBare) argv.push('--bare');
+
+    // MCP config under test (§4.3): write profile.mcp to <runDir>/mcp.json and pass it with
+    // `--mcp-config <file>`; with strict isolation (default when an MCP config is present) also
+    // pass `--strict-mcp-config` ("Only use MCP servers from --mcp-config, ignoring all other
+    // MCP configurations") so the operator's own user-scope servers do not load into the
+    // benchmark run. Both flags confirmed in `claude --help` (NOTES, 2.1.316).
+    // Appended last: `--mcp-config` is variadic, so nothing positional may follow its value.
+    if (profile.mcp !== undefined && profile.mcp !== null) {
+      const mcpPath = path.join(runDir, MCP_CONFIG_FILE);
+      await writeFile(mcpPath, JSON.stringify(profile.mcp, null, 2), 'utf8');
+      argv.push('--mcp-config', mcpPath);
+      if (strictMcpConfigFor(profile)) {
+        argv.push('--strict-mcp-config');
+        // Strict isolation also ignores a project .mcp.json; say so rather than hide it.
+        if (existsSync(path.join(profile.workdir, '.mcp.json'))) {
+          warnings.push(
+            '--strict-mcp-config is on: the workdir .mcp.json is ignored (set strict_mcp_config:false to load it)',
+          );
+        }
+      }
+    }
 
     const env = { ...process.env, ...(profile.env ?? {}) };
 
@@ -259,7 +285,7 @@ export interface StreamState {
   calls: ToolCall[];
   effectiveModel?: string;
   effectivePermissionMode?: string;
-  mcpServers?: unknown;
+  mcpServers?: McpServerStatus[];
   costUsd?: number;
 }
 
@@ -284,7 +310,10 @@ export function parseStreamLine(line: string, at: number, state: StreamState): v
     // system/init uses permissionMode (camelCase); accept snake_case defensively.
     const pm = (evt.permissionMode ?? evt.permission_mode) as unknown;
     if (typeof pm === 'string') state.effectivePermissionMode = pm;
-    if ('mcp_servers' in evt) state.mcpServers = evt.mcp_servers;
+    // Record the init list as name/status/source (§4.3); a later init without a list does not
+    // erase an earlier one.
+    const servers = normalizeMcpServers(evt.mcp_servers);
+    if (servers) state.mcpServers = servers;
   } else if (type === 'assistant') {
     const msg = evt.message as { content?: unknown } | undefined;
     const content = Array.isArray(msg?.content) ? msg!.content : [];

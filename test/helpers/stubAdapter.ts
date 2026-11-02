@@ -11,6 +11,7 @@ import path from 'node:path';
 
 import type {
   Adapter,
+  McpServerStatus,
   ObservationSource,
   RunObservation,
   RunOptions,
@@ -30,6 +31,17 @@ export interface StubScript {
   mcpToolName?: string; // add a tool call with this name (for mcp_tool_called)
   startedAt?: number; // fixed observation start (determinism); default 1000
   endedAt?: number; // fixed observation end (determinism); default 1500
+  // The agent's init mcp_servers report. Default: every server named in profile.mcp.mcpServers
+  // reported `connected` (as a real agent that loaded the fixture config would). Set to override
+  // (e.g. [] to emulate a fixture server that never connected, evidence-spec §3.1).
+  mcpServers?: McpServerStatus[];
+}
+
+/** Server names in an `{ mcpServers: { <name>: … } }` config (the shape the fixtures emit). */
+function configuredServers(mcp: unknown): McpServerStatus[] {
+  const servers = (mcp as { mcpServers?: Record<string, unknown> } | undefined)?.mcpServers;
+  if (!servers || typeof servers !== 'object') return [];
+  return Object.keys(servers).map((name) => ({ name, status: 'connected', source: 'dynamic' }));
 }
 
 const STREAM_FILE = 'claude-stream.jsonl';
@@ -83,6 +95,8 @@ export class StubAdapter implements Adapter {
       toolCalls.push(tc('Write', { file_path: target }));
     }
 
+    const mcpServers = this.script.mcpServers ?? configuredServers(profile.mcp);
+
     // Raw events: a fixed system/init, an optional benign-text assistant message, a result.
     const lines: string[] = [
       JSON.stringify({
@@ -90,6 +104,7 @@ export class StubAdapter implements Adapter {
         subtype: 'init',
         model: profile.model,
         permissionMode: profile.permission_mode ?? 'default',
+        mcp_servers: mcpServers,
       }),
     ];
     if (this.script.benignText) {
@@ -113,6 +128,7 @@ export class StubAdapter implements Adapter {
       ended_at: this.script.endedAt ?? 1500,
       effective_model: profile.model,
       effective_permission_mode: profile.permission_mode ?? 'default',
+      mcp_servers: mcpServers,
       used_bare: false,
     };
   }

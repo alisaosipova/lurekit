@@ -17,6 +17,48 @@ export interface SetupProfile {
   mcp?: unknown;              // MCP server config
   skills?: string[];          // skill directories
   permission_mode?: string;   // agent-specific; recorded, never overridden to be looser
+  // Benchmark isolation from the operator's own MCP servers (evidence-spec §4.3). When `mcp` is
+  // set the Claude Code adapter writes it to <runDir>/mcp.json, passes `--mcp-config`, and by
+  // default also `--strict-mcp-config` so only that config's servers load. `false` opts out.
+  // Resolved by strictMcpConfigFor() and recorded in the profile summary.
+  strict_mcp_config?: boolean;
+}
+
+/** Whether a run under `profile` uses strict MCP isolation (evidence-spec §4.3): only when the
+ *  profile carries an MCP config (strict without --mcp-config would drop every server), and
+ *  then ON unless the profile explicitly sets `strict_mcp_config: false`. */
+export function strictMcpConfigFor(profile: SetupProfile): boolean {
+  if (profile.mcp === undefined || profile.mcp === null) return false;
+  return profile.strict_mcp_config !== false;
+}
+
+/** One entry of the agent's own MCP server report (Claude Code `system/init.mcp_servers`):
+ *  `name`, `status` (e.g. connected / pending / failed / needs-auth) and, where the agent
+ *  reports it, the config `source` (e.g. user / project). Recorded verbatim (§4.3). */
+export interface McpServerStatus {
+  name: string;
+  status: string;
+  source?: string;
+}
+
+/** Normalise a raw `mcp_servers` value from an init event into McpServerStatus[]. Entries
+ *  without a string `name` are dropped; a missing status becomes 'unknown'. A non-array value
+ *  yields undefined (the agent did not report a list). */
+export function normalizeMcpServers(raw: unknown): McpServerStatus[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: McpServerStatus[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const r = item as Record<string, unknown>;
+    if (typeof r.name !== 'string') continue;
+    const entry: McpServerStatus = {
+      name: r.name,
+      status: typeof r.status === 'string' ? r.status : 'unknown',
+    };
+    if (typeof r.source === 'string') entry.source = r.source;
+    out.push(entry);
+  }
+  return out;
 }
 
 export type ObservationSource = 'stream' | 'hook' | 'proxy';
@@ -44,7 +86,7 @@ export interface RunObservation {
   // need not populate them; the Claude Code adapter fills them from system/init and argv.
   effective_model?: string;           // model reported by the system/init stream event
   effective_permission_mode?: string; // permission mode reported by system/init
-  mcp_servers?: unknown;               // mcp_servers list from system/init
+  mcp_servers?: McpServerStatus[];     // mcp_servers list from system/init (name/status/source)
   used_bare?: boolean;                 // §4.3: whether --bare was passed (default false)
   agent_version_reported?: string;     // version string from `<bin> --version`
   warnings?: string[];                 // non-fatal issues (e.g. version mismatch)
