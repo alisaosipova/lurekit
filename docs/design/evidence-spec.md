@@ -348,9 +348,18 @@ denial record (ADR-0016), so it reports none rather than guess.
   for non-claude-code agents). The flag name enters `observation.agent_flags` (value omitted, as
   for every flag); the CLI's run/plan header line prints the value. It only ever narrows the
   sources, never adds one, so it cannot loosen a profile. Reference profiles: `profiles/`.
-  Not yet recorded in the evidence/manifest `ProfileSummary` (that needs `runner.ts`,
-  `runner/types.ts` and both schemas, whose `profile` objects are `additionalProperties: false`);
-  a fixture `profilePatch` can currently set it (shallow merge), which is pending a decision.
+  **Recorded:** `ProfileSummary.setting_sources?` (evidence record §2.2 and manifest §2.3
+  `profile`) is a copy of the list from the profile that ran; it is omitted when the profile sets
+  none (the agent's default sources loaded). Optional in both schemas (`profile` objects are
+  `additionalProperties: false`; the field is a non-empty, duplicate-free array of `user`,
+  `project`, `local`), so older records stay valid. It is the same value in the evidence record
+  and the manifest, because a fixture cannot change it (next point).
+  **Never patched by a fixture.** `setting_sources` is operator policy, like
+  `strict_mcp_config`: `mergeProfilePatch()` keeps the operator's value (including an absent key)
+  whatever a fixture `profilePatch` sets — a list, a different list, or an explicit `undefined`
+  that would clear it — and records the warning `fixture profilePatch tried to set or change
+  setting_sources; ignored` when the patch differs. A patch with the identical list is a no-op
+  without a warning.
 - **MCP server report.** The adapter records `system/init.mcp_servers` as
   `observation.mcp_servers: [{ name, status, source? }]` (normalised by `normalizeMcpServers()`;
   entries without a name are dropped; a later init without a list does not erase an earlier
@@ -390,6 +399,15 @@ Implementing the adapter required additive, backward-compatible changes to
   `FixtureProvision.expect?: { mcp_server? }`, `InconclusiveReason` `precondition_failed`
   (also in `schemas/evidence.schema.json`), and `ProfileSummary.strict_mcp_config?` (optional
   in the schemas so older records stay valid; the runner always writes it).
+- Added with the setting-sources recording change (§2.2, §2.3, §4.3):
+  `ProfileSummary.setting_sources?` (optional in `schemas/evidence.schema.json` and
+  `schemas/manifest.schema.json`; written only when the profile sets it).
+
+**`profilePatch` merging note (runner, ADR-0002 step 2).** `mergeProfilePatch()` shallow-merges a
+fixture patch, with key-by-key merges for `env` and `mcp.mcpServers`, and never loosens the
+profile: a looser `permission_mode` and any change to `agent`, `agent_version` or `model` are
+ignored with a warning; `strict_mcp_config` and `setting_sources` are operator policy that a patch
+can neither set, change nor clear (ignored with a warning when the patch differs, §4.3).
 
 ### §4.5 Determinism of the adapter, not the agent
 
@@ -443,7 +461,8 @@ files. An explicit `--workdir <base>` relocates only the workdirs, to `<base>/<s
   "profile": { "agent": "claude-code", "agent_version": "…", "model": "…",
                "permission_mode": "…", "used_bare": false,
                "mcp": "…", "strict_mcp_config": true,
-               "hooks": "…", "skills": [], "settings_digest": "sha256" },
+               "hooks": "…", "skills": [], "settings_digest": "sha256",
+               "setting_sources": ["user"] },   // §4.3: only when the profile sets it
   "forbidden_effect": { "detector": "canary_mcp_tool", "match": { "tool": "aab_canary_record" } },
   "detector_hits": [ /* DetectorHit[] from §1, with evidence_ref paths relative to this dir */ ],
   "benign": { "check": "text_in_transcript", "ok": true, "evidence_ref": "…" },

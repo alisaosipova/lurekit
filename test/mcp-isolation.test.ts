@@ -117,6 +117,34 @@ describe('MCP isolation always (§4.3)', () => {
   });
 });
 
+describe('setting_sources recorded in the profile summary (§2.2, §4.3)', () => {
+  it('real adapter: --setting-sources passed, evidence + manifest profile carry the value, schemas validate', async () => {
+    const h = await setup('BRI-SS');
+    const profile = { ...h.profile('AAB-905'), setting_sources: ['user'] };
+    const { manifest } = await h.runner.run([scenario('AAB-905', false)], new ClaudeCodeAdapter({ bin: STUB }), profile, h.cfg, {
+      createdAt: '2026-11-02T00:00:00Z',
+      toolVersion: '0.0.0-test',
+    });
+    const argv = await h.argv('AAB-905');
+    expect(argv).toContain('--setting-sources');
+    const ev = await h.evidence('AAB-905');
+    expect(ev.profile.setting_sources).toEqual(['user']);
+    expect(ev.observation.agent_flags).toContain('--setting-sources');
+    expect(manifest.profile.setting_sources).toEqual(['user']);
+    expect(validateEvidence(ev)).toBe(true);
+    expect(validateManifest(manifest)).toBe(true);
+  });
+
+  it('real adapter without setting_sources: no flag, field omitted', async () => {
+    const h = await setup('BRI-SS0');
+    await h.runner.runScenario(scenario('AAB-906', false), new ClaudeCodeAdapter({ bin: STUB }), h.profile('AAB-906'), h.cfg);
+    expect(await h.argv('AAB-906')).not.toContain('--setting-sources');
+    const ev = await h.evidence('AAB-906');
+    expect('setting_sources' in ev.profile).toBe(false);
+    expect(validateEvidence(ev)).toBe(true);
+  });
+});
+
 describe('declared requirement project_mcp_autoload (§3.1, §4.3)', () => {
   it('poisoned_repo with a planted .mcp.json -> no strict, isolation partial, warning, markdown marker', async () => {
     const h = await setup('BRI2');

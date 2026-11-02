@@ -345,10 +345,16 @@ export class BenchmarkRunner implements Runner {
           /* ignore */
         }
       }
+      // §4.3: setting_sources is recorded from the profile that ran (post-patch), which the
+      // never-patched rule in mergeProfilePatch() keeps equal to the operator value. The other
+      // summary fields stay digests of the operator profile.
+      const ranProfile: SetupProfile = { ...profile };
+      if (runProfile.setting_sources !== undefined) ranProfile.setting_sources = runProfile.setting_sources;
+      else delete ranProfile.setting_sources;
       const evidence = this.buildEvidence(
         scenario,
         scenarioVersion,
-        profile,
+        ranProfile,
         rep,
         single.detector_hits,
         { check: scenario.benign_task.check, ok: single.benign_ok, evidence_ref: benignEvidence },
@@ -867,7 +873,8 @@ export function aggregateOutcomes(
 
 /** Merge a fixture's profilePatch into the profile under test WITHOUT loosening it: a patch
  *  may not move permission_mode to a looser rank, nor change the agent/version/model under
- *  test. Such attempts are ignored and recorded as a warning (ADR-0002 runner step 2). */
+ *  test, strict_mcp_config, or setting_sources (operator policy, evidence-spec §4.3). Such
+ *  attempts are ignored and recorded as a warning (ADR-0002 runner step 2). */
 export function mergeProfilePatch(
   base: SetupProfile,
   patch: Partial<SetupProfile> | undefined,
@@ -912,6 +919,15 @@ export function mergeProfilePatch(
     }
     if ('strict_mcp_config' in base) merged.strict_mcp_config = base.strict_mcp_config;
     else delete merged.strict_mcp_config;
+  }
+  // §4.3: setting_sources is an operator hardening knob; a fixture may neither set, change nor
+  // clear it (an absent key stays absent, an explicit `undefined` does not clear it).
+  if ('setting_sources' in patch) {
+    if (!sameStringList(patch.setting_sources, base.setting_sources)) {
+      warnings.push('fixture profilePatch tried to set or change setting_sources; ignored');
+    }
+    if ('setting_sources' in base) merged.setting_sources = base.setting_sources;
+    else delete merged.setting_sources;
   }
   if (patch.agent !== undefined && patch.agent !== base.agent) {
     warnings.push('fixture profilePatch tried to change agent; ignored');
@@ -1111,6 +1127,12 @@ async function transcriptText(ctx: {
   return parts.join('\n');
 }
 
+function sameStringList(a: unknown, b: unknown): boolean {
+  // Runtime-defensive: a JS fixture may patch a non-array (null, a string); that never matches.
+  if (!Array.isArray(a) || !Array.isArray(b)) return a === b;
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
 function summariseProfile(profile: SetupProfile, observation?: RunObservation): ProfileSummary {
   return {
     agent: profile.agent,
@@ -1130,6 +1152,9 @@ function summariseProfile(profile: SetupProfile, observation?: RunObservation): 
         : sha256(canonical(profile.hooks)),
     skills: profile.skills ?? [],
     settings_digest: sha256(canonical(profile.settings ?? null)),
+    // §4.3: the setting sources of the profile that ran; omitted when the profile sets none
+    // (the agent's default sources loaded).
+    ...(profile.setting_sources !== undefined ? { setting_sources: [...profile.setting_sources] } : {}),
   };
 }
 

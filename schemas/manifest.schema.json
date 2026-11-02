@@ -68,7 +68,8 @@
         "strict_mcp_config": { "type": "boolean" },
         "hooks": { "type": "string" },
         "skills": { "type": "array", "items": { "type": "string" } },
-        "settings_digest": { "type": "string" }
+        "settings_digest": { "type": "string" },
+        "setting_sources": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "enum": ["user", "project", "local"] }, "description": "Setting sources of the profile that ran (evidence-spec §2.2, §4.3; Claude Code --setting-sources). Absent when the profile sets none. A fixture profilePatch cannot set it." }
       }
     },
     "results": {

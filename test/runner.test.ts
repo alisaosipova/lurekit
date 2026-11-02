@@ -532,6 +532,106 @@ describe('fixture profilePatch merge (ADR-0002 step 2)', () => {
   });
 });
 
+// --- setting_sources: operator knob, recorded, never patched (evidence-spec §2.2, §4.3) ----
+
+describe('setting_sources in ProfileSummary and profilePatch (§2.2, §2.3, §4.3)', () => {
+  it('evidence + manifest profile carry setting_sources when the profile sets it; both validate', async () => {
+    const root = await tmpRoot();
+    const runner = new BenchmarkRunner({ ids: ids('BRSS1') });
+    const cfg = makeCfg(root);
+    const { manifest } = await runner.run(
+      [makeScenario({ id: 'AAB-070' })],
+      new StubAdapter({ benignText: 'DONE-BENIGN' }),
+      makeProfile(path.join(root, 'work'), { setting_sources: ['user', 'project'] }),
+      cfg,
+      { createdAt: '2026-11-02T00:00:00Z', toolVersion: '0.0.0' },
+    );
+    const evidence = await readEvidence(cfg, 'BRSS1', 'AAB-070', 0);
+    expect(evidence.profile.setting_sources).toEqual(['user', 'project']);
+    expect(manifest.profile.setting_sources).toEqual(['user', 'project']);
+    expect(validateEvidence(evidence)).toBe(true);
+    expect(validateEvidence.errors ?? []).toEqual([]);
+    expect(validateManifest(manifest)).toBe(true);
+    expect(validateManifest.errors ?? []).toEqual([]);
+  });
+
+  it('omits setting_sources from evidence + manifest when the profile sets none', async () => {
+    const root = await tmpRoot();
+    const runner = new BenchmarkRunner({ ids: ids('BRSS2') });
+    const cfg = makeCfg(root);
+    const { manifest } = await runner.run(
+      [makeScenario({ id: 'AAB-071' })],
+      new StubAdapter({ benignText: 'DONE-BENIGN' }),
+      makeProfile(path.join(root, 'work')),
+      cfg,
+      { createdAt: '2026-11-02T00:00:00Z', toolVersion: '0.0.0' },
+    );
+    const evidence = await readEvidence(cfg, 'BRSS2', 'AAB-071', 0);
+    expect('setting_sources' in evidence.profile).toBe(false);
+    expect('setting_sources' in manifest.profile).toBe(false);
+    expect(validateEvidence(evidence)).toBe(true);
+    expect(validateManifest(manifest)).toBe(true);
+  });
+
+  it('the schemas reject an invalid setting_sources value in profile', async () => {
+    const root = await tmpRoot();
+    const runner = new BenchmarkRunner({ ids: ids('BRSS3') });
+    const cfg = makeCfg(root);
+    const { manifest } = await runner.run(
+      [makeScenario({ id: 'AAB-072' })],
+      new StubAdapter({ benignText: 'DONE-BENIGN' }),
+      makeProfile(path.join(root, 'work'), { setting_sources: ['user'] }),
+      cfg,
+      { createdAt: '2026-11-02T00:00:00Z', toolVersion: '0.0.0' },
+    );
+    const evidence = await readEvidence(cfg, 'BRSS3', 'AAB-072', 0);
+    for (const bad of [[], ['enterprise'], ['user', 'user'], 'user']) {
+      expect(validateEvidence({ ...evidence, profile: { ...evidence.profile, setting_sources: bad } })).toBe(false);
+      expect(validateManifest({ ...manifest, profile: { ...manifest.profile, setting_sources: bad } })).toBe(false);
+    }
+  });
+
+  it('a fixture patch cannot set setting_sources on a profile without it (ignored with a warning)', async () => {
+    const root = await tmpRoot();
+    const fixture = new InMemoryNoopFixture({ setting_sources: ['local'] });
+    const runner = new BenchmarkRunner({ ids: ids('BRSS4'), fixtures: () => [fixture] });
+    const cfg = makeCfg(root);
+    const seen: Array<string[] | undefined> = [];
+    class SpyAdapter extends StubAdapter {
+      override run(...args: Parameters<StubAdapter['run']>): ReturnType<StubAdapter['run']> {
+        seen.push(args[0].setting_sources);
+        return super.run(...args);
+      }
+    }
+    const adapter = new SpyAdapter({ benignText: 'DONE-BENIGN' });
+    await runner.runScenario(makeScenario({ id: 'AAB-073' }), adapter, makeProfile(path.join(root, 'work')), cfg);
+    expect(seen).toEqual([undefined]); // the adapter never saw the fixture's value
+    const evidence = await readEvidence(cfg, 'BRSS4', 'AAB-073', 0);
+    expect('setting_sources' in evidence.profile).toBe(false);
+    expect(evidence.observation.warnings.join(' ')).toMatch(/setting_sources; ignored/);
+    expect(validateEvidence(evidence)).toBe(true);
+  });
+
+  it('mergeProfilePatch keeps the operator setting_sources whatever the patch sets', () => {
+    const base = makeProfile('/w', { setting_sources: ['user'] });
+    const bogus = [{ setting_sources: null }, { setting_sources: 'u' }] as unknown as Array<Partial<SetupProfile>>;
+    for (const patch of [{ setting_sources: ['user', 'project', 'local'] }, { setting_sources: undefined }, ...bogus]) {
+      const warnings: string[] = [];
+      const merged = mergeProfilePatch(base, patch, warnings);
+      expect(merged.setting_sources).toEqual(['user']);
+      expect(warnings.join('\n')).toContain('setting_sources');
+    }
+    // An identical value is a no-op without a warning; an absent key stays absent.
+    const same: string[] = [];
+    expect(mergeProfilePatch(base, { setting_sources: ['user'] }, same).setting_sources).toEqual(['user']);
+    expect(same).toEqual([]);
+    const fresh: string[] = [];
+    const merged = mergeProfilePatch(makeProfile('/w'), { setting_sources: ['project'] }, fresh);
+    expect('setting_sources' in merged).toBe(false);
+    expect(fresh.join('\n')).toContain('fixture profilePatch tried to set or change setting_sources; ignored');
+  });
+});
+
 // --- schema shapes (§2.2 / §2.3) ----------------------------------------------------------
 
 describe('evidence and manifest validate against their schemas (§2.2/§2.3)', () => {

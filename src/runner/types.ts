@@ -86,6 +86,9 @@ export interface ProfileSummary {
   hooks: string; // 'none' or a sha256 digest of the hooks config
   skills: string[];
   settings_digest: string; // sha256 of the settings body (or of null)
+  // Setting sources of the profile that ran (evidence-spec §4.3, Claude Code --setting-sources).
+  // Absent when the profile sets none (agent default sources). Never set by a fixture patch.
+  setting_sources?: string[];
 }
 
 /** The per-run evidence record written as evidence.json (evidence-spec §2.2). */
