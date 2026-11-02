@@ -55,7 +55,9 @@ jobs:
 
   replay:
     # Drives the whole corpus through the replay adapter (ADR-0015) and the publish gate (ADR-0012). No live agent,
-    # no network, no cost: the CLI re-drives test/fixtures/recordings/claude-sample.
+    # no network, no cost: the CLI re-drives test/fixtures/recordings/claude-sample, then (second pass)
+    # test/fixtures/recordings/claude-mcp-sample (a redacted live AAB-018 run whose init reports aab-canary
+    # connected) against AAB-018 alone, the scenario that recording was made for.
     name: Replay corpus + publish gate / Node ${{ matrix.node }} / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
@@ -121,6 +123,44 @@ jobs:
           id="$(node -p 'require("./ci-report.json").manifest.benchmark_run_id')"
           node dist/cli.js publish ".aab-runs/ci/$id" --redact-home --out .aab-runs/ci-pub
           test -f .aab-runs/ci-pub/manifest.json
+      # The recording registers only aab-canary (as the live run did), so the other MCP scenarios (AAB-019/022/023)
+      # would end precondition_failed; the second pass therefore drives AAB-018 alone.
+      - name: Second pass, AAB-018 against the redacted MCP recording (replay, offline)
+        shell: bash
+        run: |
+          mkdir -p .aab-runs/ci-mcp-corpus
+          cp scenarios/AAB-018.yaml .aab-runs/ci-mcp-corpus/
+          node dist/cli.js run .aab-runs/ci-mcp-corpus --model ci-replay --agent claude-code \
+            --replay test/fixtures/recordings/claude-mcp-sample --results .aab-runs/ci-mcp \
+            --format json --output ci-mcp-report.json
+      # Same checks as the first pass, tightened: AAB-018's mcp_server precondition is met by this recording, so no
+      # result may be inconclusive at all (a precondition_failed here means the MCP surface regressed).
+      - name: Assert the MCP replay manifest and evidence (inconclusive == 0)
+        run: |
+          node -e '
+          const fs = require("fs"), path = require("path");
+          const id = JSON.parse(fs.readFileSync("ci-mcp-report.json", "utf8")).manifest.benchmark_run_id;
+          const dir = path.join(".aab-runs/ci-mcp", id);
+          const m = JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8"));
+          const fail = (msg) => { console.error("FAIL: " + msg); process.exit(1); };
+          const planned = m.corpus.scenario_ids;
+          if (JSON.stringify(planned) !== JSON.stringify(["AAB-018"])) fail(`planned ${JSON.stringify(planned)} != ["AAB-018"]`);
+          if (m.results.length !== planned.length) fail(`results ${m.results.length} != planned ${planned.length}`);
+          for (const sid of planned) {
+            const f = path.join(dir, sid, "0", "evidence.json");
+            if (!fs.existsSync(f)) fail(`${sid}: no evidence file`);
+            const e = JSON.parse(fs.readFileSync(f, "utf8"));
+            const w = (e.observation && e.observation.warnings) || [];
+            if (!w.some((x) => x.startsWith("replayed from a recording"))) fail(`${sid}: replay warning missing`);
+            if (e.outcome === "inconclusive") fail(`${sid}: inconclusive (${e.inconclusive_reason})`);
+            if (e.outcome !== "resisted") fail(`${sid}: outcome ${e.outcome} != resisted`);
+            if (w.some((x) => x.startsWith("precondition failed"))) fail(`${sid}: precondition warning present`);
+          }
+          if (m.totals.inconclusive !== 0) fail(`totals.inconclusive ${m.totals.inconclusive} != 0`);
+          if (m.totals.vulnerable !== 0) fail(`vulnerable ${m.totals.vulnerable} on a benign recording`);
+          if (m.totals.degraded !== 0) fail(`degraded ${m.totals.degraded} on a benign recording`);
+          console.log(`ok: ${planned.length} planned, ${planned.length} evidence files, 0 inconclusive`);
+          '
 
   package:
     # The installed bin, not `node dist/cli.js`: npm links bins as symlinks on Linux and macOS, so this is the only

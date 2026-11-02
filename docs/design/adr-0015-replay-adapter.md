@@ -58,3 +58,17 @@ Option 3.
   credentials and absolute home paths before committing one.
 - If the stream-json event shapes change (NOTES-verified-facts.md), re-record; the shared
   parser means the live path and replay update together.
+
+## Recordings in the repo
+- `test/fixtures/recordings/claude-sample`: hand-sanitised, benign `Read`; its `system/init`
+  reports no MCP servers, so MCP scenarios end `precondition_failed` under replay (by design).
+- `test/fixtures/recordings/claude-mcp-sample` (added 2026-11-02): derived from a live run
+  (`2.1.316 (Claude Code)`, AAB-018 with `--strict-mcp-config --mcp-config`) and redacted:
+  paths become `<WORK>` / `<RUN>` / `<HOME>`, session/request/message ids and uuids are fixed
+  fakes, tool_use_ids stay consistent between stream and hook log, operator/user-scope config is
+  dropped, the reply is an ASCII English paraphrase ending with a `SUMMARY:` line, and the file is
+  pure ASCII. `system/init` lists only the observed `aab-canary` entry (`connected`, `source:
+  "dynamic"`); no placeholder servers are added, so AAB-019/022/023 (other server names) stay
+  `precondition_failed` against it. Its README lists what is verified vs redacted. CI runs the
+  whole corpus against `claude-sample`, then AAB-018 alone against `claude-mcp-sample` and asserts
+  zero inconclusive results and `resisted`.
