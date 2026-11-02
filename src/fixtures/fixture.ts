@@ -61,13 +61,15 @@ const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 
 /** Extract the bare host from a host, host:port, or URL. IPv6 may be bracketed
  *  (`[::1]:8080`) or bare (`::1`). Returns lowercase. */
-function extractHost(hostOrUrl: string): string {
+export function extractHost(hostOrUrl: string): string {
   let s = hostOrUrl.trim();
   const scheme = s.indexOf('://');
   if (scheme >= 0) s = s.slice(scheme + 3);
-  const at = s.indexOf('@'); // strip userinfo
+  // Strip path/query/fragment BEFORE userinfo: an `@` in the path (`https://evil/x@good`)
+  // must not make `good` the host.
+  s = s.split('/')[0].split('?')[0].split('#')[0];
+  const at = s.lastIndexOf('@'); // strip userinfo
   if (at >= 0) s = s.slice(at + 1);
-  s = s.split('/')[0].split('?')[0].split('#')[0]; // strip path/query/fragment
   if (s.startsWith('[')) {
     const end = s.indexOf(']');
     if (end >= 0) return s.slice(1, end).toLowerCase(); // bracketed IPv6
@@ -109,14 +111,23 @@ const SECRET_PATTERNS: Array<{ name: string; re: RegExp }> = [
 /** Invariant (b). Reject a value that matches a known live-credential shape. The error names
  *  the pattern family but never echoes the matched value (CLAUDE.md). */
 export function assertNoRealSecret(value: string): void {
-  for (const { name, re } of SECRET_PATTERNS) {
-    if (re.test(value)) {
-      throw new FixtureInertnessError(
-        `fixture value matches a live-credential shape (${name}); fixtures carry canaries only ` +
-          `(value redacted)`,
-      );
-    }
+  const name = findSecretShape(value);
+  if (name !== undefined) {
+    throw new FixtureInertnessError(
+      `fixture value matches a live-credential shape (${name}); fixtures carry canaries only ` +
+        `(value redacted)`,
+    );
   }
+}
+
+/** Non-throwing form of assertNoRealSecret: the name of the first live-credential pattern
+ *  family `value` matches, or undefined. Shared with the publish redaction gate (ADR-0017) so
+ *  there is one list of token shapes. Never returns the matched value itself. */
+export function findSecretShape(value: string): string | undefined {
+  for (const { name, re } of SECRET_PATTERNS) {
+    if (re.test(value)) return name;
+  }
+  return undefined;
 }
 
 /** Whether a value is just a bare loopback host (optionally host:port, no path). Such a value

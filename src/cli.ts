@@ -13,13 +13,14 @@
 //   plan      show which scenarios would run for a profile WITHOUT invoking the agent (offline)
 //   selftest  run every implemented detector's positive/negative self-test (offline)
 //   report    render a report (json|markdown|sarif) from a completed run directory
+//   publish   gate (evidence-spec §5) and write a shareable bundle of a run (ADR-0017)
 //
 // `run` is the only subcommand that launches a real agent (and therefore costs money / needs
 // auth); the others are fully offline.
 // `run --replay <dir>` re-drives a recorded Claude Code run instead (ADR-0015): offline, no spend.
 
 import { readFileSync, writeFileSync, existsSync, mkdtempSync, realpathSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -36,6 +37,7 @@ import { fixturesForScenario } from './fixtures/index.js';
 import { BenchmarkRunner } from './runner/runner.js';
 import type { RunConfig, RunManifest, RunnerIds, RunMeta, EvidenceRecord } from './runner/types.js';
 import { report, type ReportFormat, type EvidenceLookup } from './report/index.js';
+import { planPublish, readRunDir, writeBundle, formatPlanFailure, selectEvidence } from './report/publish.js';
 
 const REPORT_FORMATS: ReportFormat[] = ['json', 'markdown', 'sarif'];
 
@@ -48,6 +50,8 @@ export interface CliDeps {
   cwd(): string;
   stdout(s: string): void;
   stderr(s: string): void;
+  /** Home directory for the publish redaction gate (ADR-0017). Optional; defaults to os.homedir(). */
+  homeDir?(): string;
 }
 
 export function defaultDeps(): CliDeps {
@@ -87,10 +91,10 @@ interface Flags {
 const STRING_FLAGS = new Set([
   'model', 'agent', 'agent-version', 'mode', 'vulnerable-if', 'isolation',
   'results', 'workdir', 'format', 'output', 'permission-mode', 'settings', 'mcp', 'hooks',
-  'replay',
+  'replay', 'out',
 ]);
 const NUMBER_FLAGS = new Set(['k', 'budget']);
-const MULTI_FLAGS = new Set(['skill']);
+const MULTI_FLAGS = new Set(['skill', 'allow-host']);
 
 function parseFlags(argv: string[]): Flags {
   const f: Flags = { _: [], str: new Map(), num: new Map(), bool: new Set(), multi: new Map() };
@@ -231,7 +235,6 @@ function makeIds(benchmarkRunId: string): RunnerIds {
 function makeEvidenceLookup(runDir: string, manifest: RunManifest): EvidenceLookup {
   const runsById = new Map(manifest.results.map((r) => [r.scenario_id, r.runs]));
   return (scenarioId: string): EvidenceRecord | undefined => {
-    const reps = runsById.get(scenarioId) ?? 1;
     const read = (rep: number): EvidenceRecord | undefined => {
       const p = path.join(runDir, scenarioId, String(rep), 'evidence.json');
       if (!existsSync(p)) return undefined;
@@ -241,11 +244,7 @@ function makeEvidenceLookup(runDir: string, manifest: RunManifest): EvidenceLook
         return undefined;
       }
     };
-    for (let rep = 0; rep < Math.max(1, reps); rep++) {
-      const ev = read(rep);
-      if (ev && ev.outcome === 'vulnerable') return ev;
-    }
-    return read(0);
+    return selectEvidence(runsById.get(scenarioId) ?? 1, read);
   };
 }
 
@@ -309,6 +308,36 @@ export function cmdReport(flags: Flags, deps: CliDeps): number {
   return 0;
 }
 
+/** publish <runDir> [--out <dir>] [--allow-host <host>]... (ADR-0017). Builds the whole bundle
+ *  in memory, runs the §5 redaction gate, and writes only if the gate is clean. */
+export function cmdPublish(flags: Flags, deps: CliDeps): number {
+  const runArg = flags._[0];
+  if (!runArg) throw new Error('publish: a benchmark run directory is required');
+  const runDir = path.resolve(deps.cwd(), runArg);
+  if (!existsSync(path.join(runDir, 'manifest.json'))) {
+    deps.stderr(`no manifest.json in ${runArg}\n`);
+    return 1;
+  }
+  const plan = planPublish(readRunDir(runDir), {
+    allowHosts: flags.multi.get('allow-host') ?? [],
+    homeDir: deps.homeDir ? deps.homeDir() : homedir(),
+  });
+  if (!plan.ok) {
+    deps.stderr(formatPlanFailure(plan));
+    return 1;
+  }
+  const outDir = path.resolve(deps.cwd(), flags.str.get('out') ?? path.join('reports', plan.benchmarkRunId));
+  try {
+    writeBundle(outDir, plan.files);
+  } catch (err) {
+    deps.stderr(`${(err as Error).message}; nothing written\n`);
+    return 1;
+  }
+  for (const f of plan.files) deps.stdout(`wrote ${f.rel}\n`);
+  deps.stdout(`\npublished ${plan.files.length} file(s) to ${outDir}\n`);
+  return 0;
+}
+
 const USAGE = `agent-attack-bench — a disclosure-traced security benchmark for deployed coding-agent setups
 
 Usage: agent-attack-bench <command> [options]
@@ -326,6 +355,9 @@ Commands:
   plan [dir]       Show which scenarios would run for a profile, WITHOUT a live agent. Offline.
   selftest         Run each detector's positive/negative self-test. Offline.
   report <runDir>  Render a report from a completed run. --format --output.
+  publish <runDir> Write a shareable bundle (manifest, evidence, report.md/json/sarif, index.md)
+                   after the redaction gate (no raw transcripts). Offline.
+                   --out <dir> (default reports/<benchmark_run_id>)  --allow-host <host> (repeatable)
 
 Only 'run' launches a real agent (cost / auth), unless given --replay. Everything else is offline.
 `;
@@ -352,6 +384,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     case 'selftest': return cmdSelftest(flags, deps);
     case 'run': return cmdRun(flags, deps);
     case 'report': return cmdReport(flags, deps);
+    case 'publish': return cmdPublish(flags, deps);
     default:
       deps.stderr(`unknown command: ${command}\n\n${USAGE}`);
       return 2;

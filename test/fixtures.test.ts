@@ -45,7 +45,8 @@ describe('assertLoopback (invariant a)', () => {
   });
 
   it('rejects non-loopback hosts', () => {
-    for (const bad of ['evil.com', 'http://example.com/x', '10.0.0.5:9000', '169.254.169.254']) {
+    // `@` in the path is not userinfo: the host of http://evil.com/@127.0.0.1 is evil.com.
+    for (const bad of ['evil.com', 'http://example.com/x', '10.0.0.5:9000', '169.254.169.254', 'http://evil.com/@127.0.0.1']) {
       expect(() => assertLoopback(bad)).toThrow(FixtureInertnessError);
     }
   });
