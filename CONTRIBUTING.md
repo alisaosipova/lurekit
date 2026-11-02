@@ -79,8 +79,16 @@ On every push and pull request, CI (`.github/workflows/ci.yml`) runs on Linux, m
 - `node dist/tools/validate-scenarios.js scenarios` (schema, including the required `source.primary_url`);
 - `node dist/cli.js selftest` (each detector's positive and negative control).
 
+A second job (Linux) drives the corpus through the replay adapter on the recorded claude-code run
+in `test/fixtures/recordings/claude-sample` and checks that every planned scenario (runnable and
+applicable to claude-code) wrote an evidence file, that nothing is vulnerable or degraded, and that
+nothing is inconclusive except MCP scenarios (the recording has no MCP server connected). It
+then runs `node dist/cli.js publish --redact-home` on that run, which must pass the redaction gate.
+Replayed results are marked as replays: this proves the pipeline, parser, reporters and publish gate,
+not how an agent behaves on your scenario.
+
 CI does not launch a live agent. The live run against at least one agent is a manual step performed by
-the maintainer before merge.
+the maintainer before merge (ADR-0012).
 
 ## Running the offline commands
 

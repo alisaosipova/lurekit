@@ -53,6 +53,75 @@ jobs:
           node dist/cli.js --version
           node dist/cli.js selftest
 
+  replay:
+    # Drives the whole corpus through the replay adapter (ADR-0015) and the publish gate (ADR-0012). No live agent,
+    # no network, no cost: the CLI re-drives test/fixtures/recordings/claude-sample.
+    name: Replay corpus + publish gate / Node ${{ matrix.node }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        node: ['20.19', '22', '24']
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - name: Run the corpus against the recorded claude-code run (replay, offline)
+        run: >-
+          node dist/cli.js run scenarios --model ci-replay --agent claude-code
+          --replay test/fixtures/recordings/claude-sample --results .aab-runs/ci
+          --format json --output ci-report.json
+      # Every result carries the REPLAY_WARNING: this proves the pipeline (runner, fixtures, detectors), the
+      # transcript/hook parser and the reporters end to end. It says nothing about agent behaviour; that needs the
+      # maintainer's live run before merge (ADR-0012).
+      # Asserts: every planned scenario (runnable and applicable to claude-code; the runner skips the rest) wrote an
+      # evidence file carrying the replay warning, nothing is vulnerable or degraded on the benign recording, and every inconclusive result is a failed mcp_server precondition (the recording has no
+      # MCP server connected, so MCP scenarios are inconclusive by design, never resisted). Any other inconclusive
+      # reason (adapter_error, fixture_error, detector_unverified, ...) fails the job.
+      - name: Assert the replay manifest and evidence
+        run: |
+          node -e '
+          const fs = require("fs"), path = require("path");
+          const id = JSON.parse(fs.readFileSync("ci-report.json", "utf8")).manifest.benchmark_run_id;
+          const dir = path.join(".aab-runs/ci", id);
+          const m = JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8"));
+          const fail = (msg) => { console.error("FAIL: " + msg); process.exit(1); };
+          const planned = m.corpus.scenario_ids;
+          if (planned.length === 0) fail("no scenario planned");
+          if (m.results.length !== planned.length) fail(`results ${m.results.length} != planned ${planned.length}`);
+          const explained = [];
+          for (const sid of planned) {
+            const f = path.join(dir, sid, "0", "evidence.json");
+            if (!fs.existsSync(f)) fail(`${sid}: no evidence file`);
+            const e = JSON.parse(fs.readFileSync(f, "utf8"));
+            const w = (e.observation && e.observation.warnings) || [];
+            if (!w.some((x) => x.startsWith("replayed from a recording"))) fail(`${sid}: replay warning missing`);
+            if (e.outcome === "inconclusive") {
+              const mcpPrecondition = e.inconclusive_reason === "precondition_failed" &&
+                w.some((x) => /^precondition failed: mcp_server .* absent from mcp_servers$/.test(x));
+              if (!mcpPrecondition) fail(`${sid}: inconclusive (${e.inconclusive_reason})`);
+              explained.push(sid);
+            }
+          }
+          if (m.totals.inconclusive !== explained.length) fail(`totals.inconclusive ${m.totals.inconclusive} != ${explained.length}`);
+          if (m.totals.vulnerable !== 0) fail(`vulnerable ${m.totals.vulnerable} on a benign recording`);
+          if (m.totals.degraded !== 0) fail(`degraded ${m.totals.degraded} on a benign recording`);
+          console.log(`ok: ${planned.length} planned, ${planned.length} evidence files; ${explained.length} inconclusive, all mcp_server precondition: ${explained.join(" ") || "none"}`);
+          '
+      - name: Publish the replay run through the redaction gate (must exit 0)
+        run: |
+          id="$(node -p 'require("./ci-report.json").manifest.benchmark_run_id')"
+          node dist/cli.js publish ".aab-runs/ci/$id" --redact-home --out .aab-runs/ci-pub
+          test -f .aab-runs/ci-pub/manifest.json
+
   package:
     # The installed bin, not `node dist/cli.js`: npm links bins as symlinks on Linux and macOS, so this is the only
     # step that runs the CLI the way a user does.

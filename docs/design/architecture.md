@@ -329,7 +329,8 @@ small core, "adding a scenario = one-file PR."
 
 ## ADR-0012: Contribution model
 
-**Status:** accepted (2026-11-01), to be published (roadmap Week 4).
+**Status:** accepted (2026-11-01), to be published (roadmap Week 4). CI scope revised 2026-11-02:
+CI drives the corpus via replay, not a live agent.
 
 ### Context
 The project's survival depends on external scenario submissions (see the kill criterion). The
@@ -340,12 +341,26 @@ follow and hard to skip.
 A scenario PR must: add exactly one `scenarios/AAB-NNN.yaml` that validates; cite a primary
 public disclosure in `source.primary_url` (schema-enforced); include the fixture it needs
 (reusing an existing inert fixture where possible); and pass a reproducibility checklist (the
-author ran it live against ≥1 agent and recorded the manifest). CI validates the schema and runs
-the scenario against one agent. Review rules: no speculative attacks, inertness by construction,
-no working-exploit/evasion text beyond disclosure level.
+author ran it live against ≥1 agent and recorded the manifest). Review rules: no speculative
+attacks, inertness by construction, no working-exploit/evasion text beyond disclosure level.
+
+CI (`.github/workflows/ci.yml`) launches no live agent. On every push and pull request it:
+typechecks; runs the test suite; validates every scenario against the schema (including the
+required `source.primary_url`); runs the detector self-tests (positive + negative control per
+detector); drives the corpus through the replay adapter (ADR-0015) on the recorded claude-code
+run in `test/fixtures/recordings/claude-sample`, asserting that every planned scenario (runnable
+and applicable to claude-code; the rest are skipped) wrote an evidence file carrying the replay
+warning, that none is vulnerable or degraded, and that none is inconclusive for any reason other
+than an MCP precondition the recording cannot satisfy (it has no MCP server connected); passes
+that run through the `publish --redact-home` gate, which must exit 0; and installs the packed
+tarball and runs its bin (offline commands only). Every replayed result carries the replay warning, so
+this proves the runner, fixtures, detectors, parser, reporters and publish gate, not agent
+behaviour. The live run against ≥1 agent before merge is the maintainer's step, recorded in the
+reproducibility checklist.
 
 ### Consequences
-- The quality bar is enforced by CI + schema, not only by reviewer vigilance.
+- The mechanical quality bar (schema, detector controls, pipeline end to end) is enforced by CI;
+  the behavioural bar (a live agent run) is enforced by the maintainer before merge.
 - A contributor cannot merge a scenario that reaches a real host or lacks a disclosure.
 
 ## ADR-0013: Weekly update cadence — **DECISION NEEDED**
@@ -431,7 +446,7 @@ plumbing, keep decisions in ADRs; codified in `CLAUDE.md`. This document was ass
 | 0009 | Effect detectors + observation | accepted; 5 of 6 detectors done (`canary_egress_dns` deferred: needs ADR-0007 resolver control); all 8 fixture kinds done |
 | 0010 | Dependency policy | accepted |
 | 0011 | Repository layout | accepted, implemented |
-| 0012 | Contribution model | accepted, to be published (Week 4) |
+| 0012 | Contribution model | accepted, to be published (Week 4); CI scope revised 2026-11-02 (replay + publish gate; live run = maintainer) |
 | 0013 | Weekly update cadence | **DECISION NEEDED** |
 | 0014 | Ethics + coordinated disclosure | accepted |
 | 0015 | Replay adapter (`adr-0015-replay-adapter.md`) | accepted, implemented |
