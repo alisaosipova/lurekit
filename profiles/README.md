@@ -55,3 +55,5 @@ agent-attack-bench run scenarios --agent claude-code \
 Accepted `--setting-sources` values, from `claude --help` (2.1.316): `user`, `project`, `local`,
 comma-separated. The benchmark rejects anything else, an empty list and duplicates before any
 agent process is spawned. The flag is claude-code only; the CLI rejects it for other agents.
+
+Measured comparison of the two profiles (claude-code 2.1.316, k=1): [Configuration comparison: bare vs hardened](../docs/reports/2026-11-02-claude-code-2.1.316.md#configuration-comparison-bare-vs-hardened).
