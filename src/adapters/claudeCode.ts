@@ -8,7 +8,8 @@
 // exit 0, never blocking a call.
 //
 // Observation layers merged by tool_use_id (§4.2):
-//   stream  — `--output-format stream-json --verbose`; assistant.tool_use blocks + result cost.
+//   stream  — `--output-format stream-json --verbose`; assistant.tool_use blocks + result cost;
+//             error-flagged tool_result blocks and result.permission_denials -> attempts (§4.2).
 //   hook    — a PreToolUse/PostToolUse hook the adapter passes in a SEPARATE settings file
 //             (`--settings <runDir>/claude-settings.json`); the workdir's own project settings
 //             are never read or rewritten (§4.2). The hook appends its stdin JSON to
@@ -30,10 +31,11 @@ import type {
   RunObservation,
   RunOptions,
   SetupProfile,
+  ToolAttempt,
   ToolCall,
   McpServerStatus,
 } from './adapter.js';
-import { normalizeMcpServers, requireWorkdir, strictMcpConfigFor } from './adapter.js';
+import { inputDigest, normalizeMcpServers, requireWorkdir, strictMcpConfigFor } from './adapter.js';
 import type { AgentId } from '../scenario/types.js';
 
 const STREAM_FILE = 'claude-stream.jsonl';
@@ -276,10 +278,14 @@ export interface StreamState {
   effectivePermissionMode?: string;
   mcpServers?: McpServerStatus[];
   costUsd?: number;
+  /** §4.2 "Attempts": entries of the result event's `permission_denials` (last result wins). */
+  permissionDenials?: Array<{ id?: string; name?: string; input?: unknown; at: number }>;
+  /** §4.2 "Attempts": `tool_result` blocks flagged `is_error: true`, in stream order. */
+  toolErrors: Array<{ id?: string; at: number }>;
 }
 
 export function newStreamState(): StreamState {
-  return { calls: [] };
+  return { calls: [], toolErrors: [] };
 }
 
 /** Parse one stream-json line into `state`. `at` is the ms offset recorded on tool calls.
@@ -318,9 +324,75 @@ export function parseStreamLine(line: string, at: number, state: StreamState): v
         });
       }
     }
+  } else if (type === 'user') {
+    // Tool results come back on user messages; an error-flagged one is a failed/denied attempt.
+    const msg = evt.message as { content?: unknown } | undefined;
+    const content = Array.isArray(msg?.content) ? msg!.content : [];
+    for (const block of content as Array<Record<string, unknown>>) {
+      if (block && block.type === 'tool_result' && block.is_error === true) {
+        state.toolErrors.push({
+          id: typeof block.tool_use_id === 'string' ? block.tool_use_id : undefined,
+          at,
+        });
+      }
+    }
   } else if (type === 'result') {
     if (typeof evt.total_cost_usd === 'number') state.costUsd = evt.total_cost_usd;
+    // `permission_denials`: [{ tool_name, tool_use_id, tool_input }] — the tool uses the
+    // permission gate refused during the run (§4.2 "Attempts").
+    if (Array.isArray(evt.permission_denials)) {
+      const denials: NonNullable<StreamState['permissionDenials']> = [];
+      for (const d of evt.permission_denials as unknown[]) {
+        if (!d || typeof d !== 'object') continue;
+        const r = d as Record<string, unknown>;
+        denials.push({
+          id: typeof r.tool_use_id === 'string' ? r.tool_use_id : undefined,
+          name: typeof r.tool_name === 'string' ? r.tool_name : undefined,
+          input: r.tool_input,
+          at,
+        });
+      }
+      state.permissionDenials = denials;
+    }
   }
+}
+
+/** Derive the attempts list (§4.2 "Attempts") from the parsed stream and the merged tool calls.
+ *  Every permission denial is one `permission_gate` attempt; every error-flagged tool_result
+ *  whose tool_use_id is not already a denial is one `tool_error` attempt. Name/input come from
+ *  the denial itself, else from the tool call with the same id. Only a digest of the input is
+ *  kept; the raw events are not modified. */
+export function attemptsFrom(state: StreamState, calls: ToolCall[]): ToolAttempt[] {
+  const byId = new Map<string, ToolCall>();
+  for (const c of calls) if (c.id && !byId.has(c.id)) byId.set(c.id, c);
+  const out: ToolAttempt[] = [];
+  const deniedIds = new Set<string>();
+  for (const d of state.permissionDenials ?? []) {
+    const call = d.id ? byId.get(d.id) : undefined;
+    const input = d.input !== undefined ? d.input : call?.input;
+    if (d.id) deniedIds.add(d.id);
+    out.push({
+      ...(d.id ? { tool_use_id: d.id } : {}),
+      name: d.name ?? call?.name ?? 'unknown',
+      input_digest: inputDigest(input),
+      denied_by: 'permission_gate',
+      at: call?.at ?? d.at,
+    });
+  }
+  const errorIds = new Set<string>();
+  for (const e of state.toolErrors) {
+    if (e.id && (deniedIds.has(e.id) || errorIds.has(e.id))) continue;
+    if (e.id) errorIds.add(e.id);
+    const call = e.id ? byId.get(e.id) : undefined;
+    out.push({
+      ...(e.id ? { tool_use_id: e.id } : {}),
+      name: call?.name ?? 'unknown',
+      input_digest: inputDigest(call?.input),
+      denied_by: 'tool_error',
+      at: call?.at ?? e.at,
+    });
+  }
+  return out;
 }
 
 /** Turn hook-log entries into hook-layer tool calls; also returns the first transcript_path. */
@@ -367,10 +439,11 @@ export function assembleObservation(
 ): RunObservation {
   const hook = hookCallsFromEntries(hookEntries, meta.startedAt);
   const warnings = meta.warnings ?? [];
+  const toolCalls = mergeById(state.calls, hook.calls);
   return {
     transcript_path: hook.transcriptPath,
     raw_events_path: meta.rawEventsPath,
-    tool_calls: mergeById(state.calls, hook.calls),
+    tool_calls: toolCalls,
     exit_code: meta.exitCode,
     cost_usd: state.costUsd,
     started_at: meta.startedAt,
@@ -382,6 +455,7 @@ export function assembleObservation(
     agent_version_reported: meta.agentVersionReported,
     warnings: warnings.length > 0 ? warnings : undefined,
     ...(meta.agentFlags ? { agent_flags: [...meta.agentFlags] } : {}),
+    attempts: attemptsFrom(state, toolCalls),
   };
 }
 

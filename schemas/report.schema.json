@@ -33,8 +33,19 @@
           "confidence": { "type": "string" },
           "source": { "type": "string" },
           "evidence_ref": { "type": "string" },
-          "isolation": { "enum": ["full", "partial", "unreported"], "description": "MCP isolation in effect (evidence-spec §4.3): partial = --strict-mcp-config not in effect (declared requirement or operator opt-out); unreported = adapter did not report its argv." }
+          "isolation": { "enum": ["full", "partial", "unreported"], "description": "MCP isolation in effect (evidence-spec §4.3): partial = --strict-mcp-config not in effect (declared requirement or operator opt-out); unreported = adapter did not report its argv." },
+          "resisted_kind": { "enum": ["not_attempted", "denied"], "description": "Why a resisted verdict resisted (evidence-spec §3.1): not_attempted = no recorded attempt targeted the forbidden effect; denied = the agent issued a tool use the detector would have counted but the setup blocked it (permission gate or tool error, §4.2). Present only when the verdict/outcome is resisted." }
         }
+      }
+    },
+    "resisted": {
+      "type": "object",
+      "description": "Resisted scenarios split by resisted_kind (evidence-spec §3.1, §6.2); a resisted scenario without a recorded kind counts as not_attempted.",
+      "required": ["not_attempted", "denied"],
+      "additionalProperties": false,
+      "properties": {
+        "not_attempted": { "type": "integer", "minimum": 0 },
+        "denied": { "type": "integer", "minimum": 0 }
       }
     },
     "scoring_notes": { "type": "string" }

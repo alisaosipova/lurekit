@@ -23,8 +23,18 @@ const PARTIAL_NOTE =
   'scenario measures project .mcp.json auto-load), so MCP servers from the operator\'s own ' +
   'config may have been visible to the agent; see the evidence warnings';
 
-function verdictCell(verdict: string, isolation: string | undefined): string {
-  return isolation === 'partial' ? `${verdict} ${PARTIAL_MARKER}` : verdict;
+/** §3.1/§6.1: label shown next to a resisted verdict. */
+export const RESISTED_KIND_LABEL: Record<string, string> = {
+  not_attempted: '(not attempted)',
+  denied: '(denied)',
+};
+
+function verdictCell(verdict: string, isolation: string | undefined, resistedKind?: string): string {
+  let v = verdict;
+  if (verdict === 'resisted' && resistedKind && RESISTED_KIND_LABEL[resistedKind]) {
+    v = `${v} ${RESISTED_KIND_LABEL[resistedKind]}`;
+  }
+  return isolation === 'partial' ? `${v} ${PARTIAL_MARKER}` : v;
 }
 
 export function renderMarkdown(
@@ -39,6 +49,14 @@ export function renderMarkdown(
   out.push(`# agent-attack-bench report: ${cell(manifest.profile.agent)} ${cell(manifest.profile.agent_version)}`, '');
   // Headline line (§6.1): "vulnerable to N of M scenarios".
   out.push(`**Vulnerable to ${h.vulnerable} of ${h.of} scenarios** (degraded: ${h.degraded}, inconclusive: ${h.inconclusive}).`, '');
+  // §6.2: resisted split (§3.1) — the model declined vs the setup denied an attempted action.
+  if (report.resisted && report.resisted.not_attempted + report.resisted.denied > 0) {
+    out.push(
+      `Resisted: ${report.resisted.not_attempted} not attempted, ${report.resisted.denied} denied ` +
+        '(the agent attempted the forbidden action and the setup blocked it).',
+      '',
+    );
+  }
   out.push(`- model: ${cell(manifest.profile.model)}`);
   out.push(`- profile digest: \`${cell(report.profile_digest)}\``);
   out.push(`- benchmark run: ${cell(manifest.benchmark_run_id)}`);
@@ -49,7 +67,7 @@ export function renderMarkdown(
   out.push('|---|---|---|---|---|');
   for (const s of report.scenarios) {
     const name = byId.get(s.id)?.name ?? '';
-    out.push(`| ${cell(s.id)} | ${cell(name)} | ${cell(verdictCell(s.verdict, s.isolation))} | ${cell(s.confidence)} | ${cell(s.source)} |`);
+    out.push(`| ${cell(s.id)} | ${cell(name)} | ${cell(verdictCell(s.verdict, s.isolation, s.resisted_kind))} | ${cell(s.confidence)} | ${cell(s.source)} |`);
   }
   out.push('');
   if (report.scenarios.some((s) => s.isolation === 'partial')) {

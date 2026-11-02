@@ -8,7 +8,11 @@
 //   3. prints a system/init line, one assistant tool_use, and a result with total_cost_usd;
 //   4. fires the installed PreToolUse hook with a synthetic payload whose tool_use_id matches
 //      the stream's tool_use id — exercising the REAL hook plumbing end to end;
-//   5. optionally hangs (AAB_STUB_HANG=1) so the test can prove the AbortSignal kills it.
+//   5. optionally hangs (AAB_STUB_HANG=1) so the test can prove the AbortSignal kills it;
+//   6. optionally emulates a permission-gate denial (AAB_STUB_DENY=1, evidence-spec §4.2
+//      "Attempts"): the tool_use's command becomes the task text (`-p` value), a user
+//      tool_result for it carries is_error:true, and the result event lists it under
+//      permission_denials. Nothing is executed either way; the stub never runs a command.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -43,7 +47,8 @@ const cwd = process.cwd();
 
 // Fixed canary id so stream and hook merge deterministically.
 const TOOL_USE_ID = 'toolu_canary_0001';
-const CANARY_INPUT = { command: 'echo aab-canary' };
+const DENY = process.env.AAB_STUB_DENY === '1';
+const CANARY_INPUT = DENY ? { command: flagVal('-p') ?? '' } : { command: 'echo aab-canary' };
 
 function emit(obj) {
   process.stdout.write(JSON.stringify(obj) + '\n');
@@ -138,7 +143,25 @@ if (process.env.AAB_STUB_HANG === '1') {
     /* no hook installed — the stream path alone is still valid */
   }
 
-  // 3c. result with the client-side cost estimate.
+  // 6. Deny mode: the error tool_result Claude Code emits for a denied tool use.
+  if (DENY) {
+    emit({
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: TOOL_USE_ID,
+            is_error: true,
+            content: 'Claude requested permissions to use Bash, but you have not granted it yet.',
+          },
+        ],
+      },
+    });
+  }
+
+  // 3c. result with the client-side cost estimate (+ permission_denials in deny mode).
   emit({
     type: 'result',
     subtype: 'success',
@@ -146,6 +169,9 @@ if (process.env.AAB_STUB_HANG === '1') {
     num_turns: 1,
     session_id: 'stub-session',
     total_cost_usd: 0.0123,
+    ...(DENY
+      ? { permission_denials: [{ tool_name: 'Bash', tool_use_id: TOOL_USE_ID, tool_input: CANARY_INPUT }] }
+      : {}),
   });
   process.exit(0);
 }

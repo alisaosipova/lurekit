@@ -83,6 +83,11 @@
       "minLength": 1,
       "description": "The repetition's own agent workdir (evidence-spec §2.1/§2.2): relative to the run dir (\"work\") by default, absolute when an explicit --workdir base is set. Absent when the repetition never reached provisioning."
     },
+    "attempted_forbidden": {
+      "type": "boolean",
+      "description": "Whether some recorded attempt (observation.attempts) matches what the scenario's detector would have counted (evidence-spec §3.1). Present whenever the repetition has an observation."
+    },
+    "resisted_kind": { "enum": ["not_attempted", "denied"], "description": "Why a resisted verdict resisted (evidence-spec §3.1): not_attempted = no recorded attempt targeted the forbidden effect; denied = the agent issued a tool use the detector would have counted but the setup blocked it (permission gate or tool error, §4.2). Present only when the verdict/outcome is resisted." },
     "isolation": { "enum": ["full", "partial", "unreported"], "description": "MCP isolation in effect (evidence-spec §4.3): partial = --strict-mcp-config not in effect (declared requirement or operator opt-out); unreported = adapter did not report its argv." },
     "requires": {
       "type": "object",
@@ -141,6 +146,18 @@
         "at": { "type": "number" }
       }
     },
+    "attempt": {
+      "type": "object",
+      "required": ["name", "input_digest", "denied_by", "at"],
+      "additionalProperties": false,
+      "properties": {
+        "tool_use_id": { "type": "string" },
+        "name": { "type": "string" },
+        "input_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "denied_by": { "enum": ["permission_gate", "tool_error"] },
+        "at": { "type": "number" }
+      }
+    },
     "observation": {
       "type": "object",
       "required": ["raw_events_path", "tool_calls", "exit_code"],
@@ -169,6 +186,11 @@
           "type": "array",
           "items": { "type": "string" },
           "description": "Option names actually passed to the agent binary, argv order, values omitted (evidence-spec §4.3)."
+        },
+        "attempts": {
+          "type": "array",
+          "description": "Tool uses the agent issued that did not take effect (evidence-spec §4.2 Attempts). The input is stored as a digest only, never raw.",
+          "items": { "$ref": "#/$defs/attempt" }
         },
         "warnings": { "type": "array", "items": { "type": "string" } }
       }

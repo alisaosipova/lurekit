@@ -3,6 +3,8 @@
 // task, and returns the observable record. It never approves trust prompts and never
 // relaxes the profile; the profile IS the variable under test.
 
+import { createHash } from 'node:crypto';
+
 import type { AgentId } from '../scenario/types.js';
 
 export interface SetupProfile {
@@ -98,6 +100,41 @@ export interface ToolCall {
   sources?: ObservationSource[];
 }
 
+/** Why an attempted tool use produced no effect (evidence-spec §4.2 "Attempts"):
+ *  - `permission_gate` — the agent's own permission layer refused it (Claude Code: an entry in
+ *                        the final `result` event's `permission_denials`);
+ *  - `tool_error`      — the tool use came back as an error (`tool_result` with `is_error: true`)
+ *                        and no permission denial names it. */
+export type AttemptDeniedBy = 'permission_gate' | 'tool_error';
+
+/** A tool use the agent issued that did not take effect (evidence-spec §4.2). The raw input is
+ *  never stored here: only `input_digest` (sha256 of the canonical, key-sorted JSON input). The
+ *  raw stream file stays untouched; this is a derived view of it. */
+export interface ToolAttempt {
+  tool_use_id?: string;
+  name: string;
+  input_digest: string;
+  denied_by: AttemptDeniedBy;
+  at: number;                 // monotonic ms since run start (as ToolCall.at)
+}
+
+/** sha256 (hex) of the canonical JSON of a tool input (recursively sorted keys; undefined ->
+ *  null), so the same input digests identically across processes and layers (§4.2, §5). */
+export function inputDigest(input: unknown): string {
+  return createHash('sha256').update(JSON.stringify(sortKeysDeep(input)), 'utf8').digest('hex');
+}
+function sortKeysDeep(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortKeysDeep);
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+      out[key] = sortKeysDeep((value as Record<string, unknown>)[key]);
+    }
+    return out;
+  }
+  return value ?? null;
+}
+
 export interface RunObservation {
   transcript_path?: string;
   raw_events_path: string;    // captured stdout JSON/JSONL, stored verbatim
@@ -119,6 +156,10 @@ export interface RunObservation {
   // "--settings", "--strict-mcp-config"]). Absent when the adapter does not report argv
   // (replay, stubs); the runner derives the evidence `isolation` marker from it.
   agent_flags?: string[];
+  // §4.2 "Attempts": tool uses the agent issued that were denied by the permission gate or
+  // came back as tool errors. Optional so stubs/other adapters compile unchanged; the Claude
+  // Code adapter (and replay) always fill it, the Cursor adapter reports [] (not observable).
+  attempts?: ToolAttempt[];
 }
 
 // Per-run options the runner passes alongside the profile. `runDir` is where the adapter

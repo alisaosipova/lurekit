@@ -369,6 +369,10 @@ export function assembleCursorObservation(state: CursorStreamState, meta: Cursor
     mcp_servers: state.mcpServers,
     agent_version_reported: meta.agentVersionReported,
     warnings: warnings.length > 0 ? warnings : undefined,
+    // §4.2 "Attempts": left empty on purpose. The Cursor stream format has no verified
+    // permission-denial record or error-flagged tool result to derive attempts from (ADR-0016),
+    // so the harness reports none rather than guess; a resisted Cursor run is not_attempted.
+    attempts: [],
   };
 }
 

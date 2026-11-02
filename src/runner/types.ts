@@ -9,6 +9,7 @@ import type {
   RunObservation,
   RunRequirements,
   SetupProfile,
+  ToolAttempt,
   ToolCall,
 } from '../adapters/adapter.js';
 import type { DetectorHit } from '../detectors/detector.js';
@@ -20,6 +21,13 @@ export type RunOutcome =
   | 'vulnerable' // forbidden effect occurred
   | 'degraded' // forbidden effect absent BUT benign task failed (defence broke the agent)
   | 'inconclusive'; // agent errored, budget hit, fixture failed, or detector unverified
+
+/** Which kind of `resisted` a run is (evidence-spec §3.1 "Resisted kind"). The verdict stays
+ *  `resisted` either way (no effect occurred); this records why:
+ *  - `not_attempted` — no recorded attempt targeted the forbidden effect (the model declined);
+ *  - `denied`        — the agent issued a tool use the detector would have counted, but the
+ *                      deployed setup blocked it (permission gate or tool error, §4.2). */
+export type ResistedKind = 'not_attempted' | 'denied';
 
 /** MCP isolation actually in effect for a repetition (evidence-spec §2.2, §4.3), derived by
  *  the runner from the declared run requirements and the adapter's `agent_flags`:
@@ -100,8 +108,14 @@ export interface EvidenceRecord {
     effective_permission_mode?: string;
     mcp_servers?: McpServerStatus[]; // the agent's own init report (name/status/source), §4.3
     agent_flags?: string[]; // §4.3: option names actually passed to the agent (values omitted)
+    attempts?: ToolAttempt[]; // §4.2: denied/failed tool uses (input digest only)
     warnings?: string[];
   };
+  // §3.1: some attempt matched what the detector would have counted. Present whenever the
+  // repetition has an observation.
+  attempted_forbidden?: boolean;
+  // §3.1: present only when outcome is `resisted`.
+  resisted_kind?: ResistedKind;
   // §2.2/§4.3: MCP isolation in effect for this repetition, and the requirements the fixtures
   // declared for it. Absent when the repetition never reached the adapter.
   isolation?: IsolationMarker;
@@ -135,6 +149,8 @@ export interface SingleRun {
   evidence_path: string;
   workdir?: string; // absolute per-run workdir (absent for a repetition that never ran)
   isolation?: IsolationMarker; // §4.3 (absent for a repetition that never reached the adapter)
+  attempted_forbidden?: boolean; // §3.1 (absent for a repetition that never reached the adapter)
+  resisted_kind?: ResistedKind; // §3.1 (only when outcome is resisted)
 }
 
 /** Aggregated per-scenario result over k runs (extends the original sketch). */
@@ -146,6 +162,8 @@ export interface ScenarioResult {
   confidence: string; // raw tally, e.g. "2/3 vulnerable" or "0/3 vulnerable, 1 inconclusive"
   spend_usd: number;
   isolation?: IsolationMarker; // weakest isolation over the runs (partial > unreported > full)
+  // §3.1/§3.2: only when verdict is resisted — `denied` if any resisted run was denied.
+  resisted_kind?: ResistedKind;
 }
 
 /** Why a scenario was dropped at plan time (for logging; plan never throws). */
@@ -196,6 +214,8 @@ export interface RunManifest {
     spend_usd: number;
     // §2.3/§6.1: weakest per-run isolation; reporters mark `partial` next to the verdict.
     isolation?: IsolationMarker;
+    // §2.3/§3.1: only when verdict is resisted; reporters show it next to the verdict (§6.1).
+    resisted_kind?: ResistedKind;
   }>;
   totals: {
     resisted: number;
