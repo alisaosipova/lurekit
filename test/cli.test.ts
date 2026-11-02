@@ -83,7 +83,7 @@ describe('cli run (stub adapter, offline)', () => {
     copyFileSync(path.join(realScenarios, 'AAB-030.yaml'), path.join(scenDir, 'AAB-030.yaml'));
     const resultsRoot = path.join(tmp, 'runs');
 
-    const stub = new StubAdapter({ trigger: 'canary_command', benignText: 'here is a summary' });
+    const stub = new StubAdapter({ trigger: 'canary_command', benignText: 'SUMMARY: here is a summary' });
     const d = deps(() => stub);
     const code = await main(
       ['run', scenDir, '--model', 'test-model', '--results', resultsRoot, '--format', 'markdown'],
@@ -108,7 +108,7 @@ describe('cli run (stub adapter, offline)', () => {
     copyFileSync(path.join(realScenarios, 'AAB-030.yaml'), path.join(scenDir, 'AAB-030.yaml'));
     const resultsRoot = path.join(tmp, 'runs');
 
-    const stub = new StubAdapter({ benignText: 'here is a summary' });
+    const stub = new StubAdapter({ benignText: 'SUMMARY: here is a summary' });
     const code = await main(
       ['run', scenDir, '--model', 'test-model', '--results', resultsRoot],
       deps(() => stub),
@@ -118,5 +118,55 @@ describe('cli run (stub adapter, offline)', () => {
       readFileSync(path.join(resultsRoot, 'aab-test-run', 'manifest.json'), 'utf8'),
     ) as RunManifest;
     expect(manifest.totals.vulnerable).toBe(0);
+  });
+});
+
+describe('cli --setting-sources (§4.3 hardening knob)', () => {
+  it('plan records the value in the profile summary line', async () => {
+    const code = await main(['plan', realScenarios, '--model', 'test-model', '--setting-sources', 'user'], deps());
+    expect(code).toBe(0);
+    expect(out.join('')).toContain('setting_sources=user)');
+  });
+
+  it('plan without the flag prints no setting_sources (no default change)', async () => {
+    await main(['plan', realScenarios, '--model', 'test-model'], deps());
+    expect(out.join('')).not.toContain('setting_sources');
+  });
+
+  it('run passes the parsed list to the adapter profile and prints it in the run header', async () => {
+    const scenDir = path.join(tmp, 'corpus');
+    mkdirSync(scenDir, { recursive: true });
+    copyFileSync(path.join(realScenarios, 'AAB-030.yaml'), path.join(scenDir, 'AAB-030.yaml'));
+    const stub = new StubAdapter({ benignText: 'here is a summary' });
+    const seen: unknown[] = [];
+    const origRun = stub.run.bind(stub);
+    stub.run = (profile, task, signal, options) => {
+      seen.push(profile.setting_sources);
+      return origRun(profile, task, signal, options);
+    };
+    const code = await main(
+      ['run', scenDir, '--model', 'test-model', '--results', path.join(tmp, 'runs'), '--setting-sources', 'user, project'],
+      deps(() => stub),
+    );
+    expect(code).toBe(0);
+    expect(seen).toEqual([['user', 'project']]);
+    expect(err.join('')).toContain('setting_sources=user,project)');
+  });
+
+  it.each(['user,managed', '', 'user,,local', 'user,user'])(
+    'rejects --setting-sources %j before any run starts',
+    async (bad) => {
+      const stub = new StubAdapter({});
+      await expect(
+        main(['run', realScenarios, '--model', 'test-model', '--results', path.join(tmp, 'runs'), '--setting-sources', bad], deps(() => stub)),
+      ).rejects.toThrow(/setting.sources/);
+      expect(stub.runCount).toBe(0);
+    },
+  );
+
+  it('rejects --setting-sources for an agent other than claude-code', async () => {
+    await expect(
+      main(['plan', realScenarios, '--model', 'm', '--agent', 'codex-cli', '--setting-sources', 'user'], deps()),
+    ).rejects.toThrow(/claude-code flag/);
   });
 });

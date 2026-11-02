@@ -29,6 +29,42 @@ export interface SetupProfile {
   // cannot set it (mergeProfilePatch). The only other way to drop strict is a declared run
   // requirement (RunRequirements.project_mcp_autoload). Resolved by strictMcpConfigFor().
   strict_mcp_config?: boolean;
+  // Hardening knob (evidence-spec §4.3): which Claude Code setting sources load. When set, the
+  // Claude Code adapter passes `--setting-sources <csv>` ("Comma-separated list of setting
+  // sources to load (user, project, local)", `claude --help` 2.1.316, NOTES); when absent no flag
+  // is passed and the agent's own default applies. Values: SETTING_SOURCES only, non-empty, no
+  // duplicates (validateSettingSources). Never set by default; only the operator narrows it.
+  setting_sources?: string[];
+}
+
+/** The setting sources `claude --help` (2.1.316) lists for `--setting-sources` (NOTES). */
+export const SETTING_SOURCES: readonly string[] = ['user', 'project', 'local'];
+
+/** Validate a `setting_sources` list (evidence-spec §4.3): a non-empty array of distinct values
+ *  from SETTING_SOURCES. Throws on anything else, so an invalid value is rejected before any
+ *  agent process is spawned. Returns the list unchanged. */
+export function validateSettingSources(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(`setting_sources must be a non-empty list of: ${SETTING_SOURCES.join(', ')}`);
+  }
+  const seen = new Set<string>();
+  for (const v of value) {
+    if (typeof v !== 'string' || !SETTING_SOURCES.includes(v)) {
+      throw new Error(`setting_sources: unknown source ${JSON.stringify(v)} (allowed: ${SETTING_SOURCES.join(', ')})`);
+    }
+    if (seen.has(v)) throw new Error(`setting_sources: duplicate source "${v}"`);
+    seen.add(v);
+  }
+  return value as string[];
+}
+
+/** Parse a `--setting-sources` CSV (e.g. "user,project") into a validated list. Whitespace
+ *  around entries is trimmed; empty entries are rejected. */
+export function parseSettingSourcesCsv(csv: string | undefined): string[] {
+  if (csv === undefined || csv.trim() === '') {
+    throw new Error(`--setting-sources expects a comma-separated list of: ${SETTING_SOURCES.join(', ')}`);
+  }
+  return validateSettingSources(csv.split(',').map((s) => s.trim()));
 }
 
 /** The per-run workdir an adapter runs in. Throws when the profile carries none: an adapter

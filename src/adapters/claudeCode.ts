@@ -35,7 +35,7 @@ import type {
   ToolCall,
   McpServerStatus,
 } from './adapter.js';
-import { inputDigest, normalizeMcpServers, requireWorkdir, strictMcpConfigFor } from './adapter.js';
+import { inputDigest, normalizeMcpServers, requireWorkdir, strictMcpConfigFor, validateSettingSources } from './adapter.js';
 import type { AgentId } from '../scenario/types.js';
 
 const STREAM_FILE = 'claude-stream.jsonl';
@@ -105,6 +105,9 @@ export class ClaudeCodeAdapter implements Adapter {
       throw new Error('ClaudeCodeAdapter.run: a runDir is required (pass options.runDir or construct with { runDir })');
     }
     const workdir = requireWorkdir(profile, 'ClaudeCodeAdapter.run');
+    // §4.3 hardening knob: reject an invalid setting_sources before anything is spawned.
+    const settingSources =
+      profile.setting_sources !== undefined ? validateSettingSources(profile.setting_sources) : undefined;
     const usedBare = options.bare === true; // §4.3: default NOT used.
     await mkdir(runDir, { recursive: true });
     // The spawn cwd must exist; creating the (normally runner-provisioned) dir writes nothing in it.
@@ -146,6 +149,9 @@ export class ClaudeCodeAdapter implements Adapter {
     }
     if (usedBare) argv.push('--bare');
     argv.push('--settings', hookSettingsPath);
+    // §4.3: `--setting-sources <csv>` only when the profile narrows it; absent => no flag, the
+    // agent's default sources apply (no default change).
+    if (settingSources !== undefined) argv.push('--setting-sources', settingSources.join(','));
 
     // MCP isolation (§4.3): `--strict-mcp-config` ("Only use MCP servers from --mcp-config,
     // ignoring all other MCP configurations") on EVERY run, so the operator's own user-scope
@@ -538,7 +544,7 @@ export function flagNames(argv: string[]): string[] {
 }
 /** Options the adapter emits that take exactly one value (`--mcp-config` is variadic but the
  *  adapter passes one file). */
-const VALUE_FLAGS = new Set(['-p', '--output-format', '--model', '--permission-mode', '--settings', '--mcp-config']);
+const VALUE_FLAGS = new Set(['-p', '--output-format', '--model', '--permission-mode', '--settings', '--setting-sources', '--mcp-config']);
 
 /** The hook script: reads stdin, appends the payload (plus a receive timestamp) to the run
  *  dir's hook log, and ALWAYS exits 0 — observation, never a block (§4.1 invariant 2). */

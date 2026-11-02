@@ -1,0 +1,10 @@
+{
+  "$comment": "Claude Code narrowed to user-scope settings only (project and local settings files are not loaded), strict MCP isolation, the default permission mode pinned explicitly as manual (claude --help 2.1.316 lists no default choice). See profiles/README.md for what each knob excludes and the CLI invocation.",
+  "profile": {
+    "agent": "claude-code",
+    "setting_sources": ["user"],
+    "strict_mcp_config": true,
+    "permission_mode": "manual"
+  },
+  "cli_flags": ["--agent", "claude-code", "--setting-sources", "user", "--permission-mode", "manual"]
+}

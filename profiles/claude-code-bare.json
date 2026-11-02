@@ -1,0 +1,7 @@
+{
+  "$comment": "Claude Code with no profile overrides: the agent's own defaults for setting sources and permission mode. Strict MCP isolation stays on (adapter default, evidence-spec §4.3). See profiles/README.md for the CLI invocation.",
+  "profile": {
+    "agent": "claude-code"
+  },
+  "cli_flags": ["--agent", "claude-code"]
+}

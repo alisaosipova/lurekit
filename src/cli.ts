@@ -33,6 +33,7 @@ import { CodexCliAdapter } from './adapters/codexCli.js';
 import { OpenHandsAdapter } from './adapters/openhands.js';
 import { ReplayAdapter } from './adapters/replay.js';
 import type { Adapter, SetupProfile } from './adapters/adapter.js';
+import { parseSettingSourcesCsv } from './adapters/adapter.js';
 import type { AgentId } from './scenario/types.js';
 import { getDetector, IMPLEMENTED_DETECTORS } from './detectors/index.js';
 import { fixturesForScenario } from './fixtures/index.js';
@@ -95,7 +96,7 @@ interface Flags {
 const STRING_FLAGS = new Set([
   'model', 'agent', 'agent-version', 'mode', 'vulnerable-if', 'isolation',
   'results', 'workdir', 'format', 'output', 'permission-mode', 'settings', 'mcp', 'hooks',
-  'replay', 'out',
+  'replay', 'out', 'setting-sources',
 ]);
 const NUMBER_FLAGS = new Set(['k', 'budget']);
 const MULTI_FLAGS = new Set(['skill', 'allow-host', 'withhold']);
@@ -184,6 +185,13 @@ function buildProfile(flags: Flags, deps: CliDeps): SetupProfile {
   const workdirFlag = flags.str.get('workdir');
   const workdir = workdirFlag ? path.resolve(deps.cwd(), workdirFlag) : undefined;
   const skills = flags.multi.get('skill');
+  // §4.3 hardening knob: validated here so a bad value fails before any run starts.
+  const settingSources = flags.str.has('setting-sources')
+    ? parseSettingSourcesCsv(flags.str.get('setting-sources'))
+    : undefined;
+  if (settingSources && agent !== 'claude-code') {
+    throw new Error(`--setting-sources is a claude-code flag; agent "${agent}" has no equivalent`);
+  }
   return {
     agent,
     agent_version: flags.str.get('agent-version') ?? 'unpinned',
@@ -194,7 +202,13 @@ function buildProfile(flags: Flags, deps: CliDeps): SetupProfile {
     mcp: flags.str.has('mcp') ? readJsonFile(flags.str.get('mcp')!) : undefined,
     hooks: flags.str.has('hooks') ? readJsonFile(flags.str.get('hooks')!) : undefined,
     skills: skills && skills.length ? skills : undefined,
+    ...(settingSources ? { setting_sources: settingSources } : {}),
   };
+}
+
+/** Profile-summary fragment for the run/plan header line: the setting sources when narrowed. */
+function settingSourcesNote(profile: SetupProfile): string {
+  return profile.setting_sources ? `, setting_sources=${profile.setting_sources.join(',')}` : '';
 }
 
 function buildConfig(flags: Flags, deps: CliDeps): RunConfig {
@@ -227,7 +241,7 @@ export async function cmdPlan(flags: Flags, deps: CliDeps): Promise<number> {
   const plan = await runner.plan(scenarios, profile, cfg);
   for (const s of plan.kept) deps.stdout(`KEEP  ${s.id}  ${s.forbidden_effect.detector}  ${s.name}\n`);
   for (const sk of plan.skipped) deps.stdout(`SKIP  ${sk.scenario_id}  ${sk.reason}: ${sk.detail}\n`);
-  deps.stdout(`\nplan: ${plan.kept.length} would run, ${plan.skipped.length} skipped (profile agent=${profile.agent}, model=${profile.model})\n`);
+  deps.stdout(`\nplan: ${plan.kept.length} would run, ${plan.skipped.length} skipped (profile agent=${profile.agent}, model=${profile.model}${settingSourcesNote(profile)})\n`);
   return 0;
 }
 
@@ -280,7 +294,7 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
   const meta: RunMeta = { createdAt: deps.now(), toolVersion: toolVersion() };
 
   if (replayDir !== undefined) deps.stderr(`replaying recording ${replayDir} (offline, no live agent)\n`);
-  deps.stderr(`running ${scenarios.length} scenario(s) against ${profile.agent} (model=${profile.model}, k=${cfg.k}, mode=${cfg.mode})\n`);
+  deps.stderr(`running ${scenarios.length} scenario(s) against ${profile.agent} (model=${profile.model}, k=${cfg.k}, mode=${cfg.mode}${settingSourcesNote(profile)})\n`);
   deps.stderr(`results under ${path.join(cfg.resultsRoot, benchmarkRunId)}\n`);
 
   const { plan, manifest } = await runner.run(scenarios, adapter, profile, cfg, meta);
@@ -373,6 +387,8 @@ Commands:
                    --workdir <dir>  optional BASE for per-run agent workdirs (<dir>/<scenario>/<rep>);
                                     default <results>/<run_id>/<scenario>/<rep>/work
                    --permission-mode <m>  --settings/--mcp/--hooks <file.json>  --skill <dir> (repeatable)
+                   --setting-sources <csv>  claude-code only: load only these setting sources
+                                    (user, project, local); default: flag not passed (agent default)
                    --format json|markdown|sarif (default markdown)  --output <file>
                    --replay <dir>  re-drive a recorded claude-code run offline (no agent, no cost)
   validate [dir]   Schema-validate every scenario (exit 1 on any error). Offline.

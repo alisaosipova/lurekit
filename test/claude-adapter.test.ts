@@ -352,3 +352,37 @@ describe('ClaudeCodeAdapter observe hook leaves project settings untouched (§4.
     ]);
   });
 });
+
+describe('ClaudeCodeAdapter --setting-sources hardening knob (§4.3)', () => {
+  it('passes no --setting-sources when the profile leaves it unset (no default change)', async () => {
+    const { profile, runDir, argvPath } = await harness();
+    const obs = await adapter().run(profile, TASK, new AbortController().signal, { runDir });
+    expect(await readArgv(argvPath)).not.toContain('--setting-sources');
+    expect(obs.agent_flags).not.toContain('--setting-sources');
+  });
+
+  it('passes --setting-sources <csv> when set and records the flag name (value omitted)', async () => {
+    const { profile, runDir, argvPath } = await harness({ setting_sources: ['user', 'local'] });
+    const obs = await adapter().run(profile, TASK, new AbortController().signal, { runDir });
+    const argv = await readArgv(argvPath);
+    const i = argv.indexOf('--setting-sources');
+    expect(i).toBeGreaterThan(-1);
+    expect(argv[i + 1]).toBe('user,local');
+    expect(obs.agent_flags).toContain('--setting-sources');
+    expect(obs.agent_flags).not.toContain('user,local');
+  });
+
+  it.each([
+    [['user', 'managed']],
+    [[]],
+    [['user', 'user']],
+    [['User']],
+  ])('rejects invalid setting_sources %j before spawning the agent', async (bad) => {
+    const { profile, runDir, argvPath } = await harness({ setting_sources: bad as string[] });
+    await expect(adapter().run(profile, TASK, new AbortController().signal, { runDir })).rejects.toThrow(
+      /setting_sources/,
+    );
+    // The stub writes its argv on spawn; no argv file means nothing was spawned.
+    await expect(stat(argvPath)).rejects.toThrow();
+  });
+});
