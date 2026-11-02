@@ -43,7 +43,7 @@ export interface ClaudeCodeAdapterOptions {
   runDir?: string;   // default run dir if run() is not given one
 }
 
-interface HookEntry {
+export interface HookEntry {
   tool_use_id?: string;
   tool_name?: string;
   tool_input?: unknown;
@@ -132,49 +132,12 @@ export class ClaudeCodeAdapter implements Adapter {
     const startedAt = Date.now();
     const perfStart = performance.now();
 
-    const streamCalls: ToolCall[] = [];
-    let effectiveModel: string | undefined;
-    let effectivePermissionMode: string | undefined;
-    let mcpServers: unknown;
-    let costUsd: number | undefined;
+    const state = newStreamState();
     const stdoutChunks: Buffer[] = [];
     let lineBuffer = '';
 
     const handleLine = (line: string): void => {
-      const text = line.trim();
-      if (!text) return;
-      let evt: Record<string, unknown>;
-      try {
-        evt = JSON.parse(text) as Record<string, unknown>;
-      } catch {
-        return; // not JSON — keep raw in the file, skip for parsing
-      }
-      const at = performance.now() - perfStart;
-      const type = evt.type;
-      if (type === 'system' && evt.subtype === 'init') {
-        effectiveModel = typeof evt.model === 'string' ? evt.model : effectiveModel;
-        // system/init uses permissionMode (camelCase); accept snake_case defensively.
-        const pm = (evt.permissionMode ?? evt.permission_mode) as unknown;
-        if (typeof pm === 'string') effectivePermissionMode = pm;
-        if ('mcp_servers' in evt) mcpServers = evt.mcp_servers;
-      } else if (type === 'assistant') {
-        const msg = evt.message as { content?: unknown } | undefined;
-        const content = Array.isArray(msg?.content) ? msg!.content : [];
-        for (const block of content as Array<Record<string, unknown>>) {
-          if (block && block.type === 'tool_use') {
-            streamCalls.push({
-              id: typeof block.id === 'string' ? block.id : undefined,
-              name: typeof block.name === 'string' ? block.name : 'unknown',
-              input: block.input,
-              at,
-              source: 'stream',
-              sources: ['stream'],
-            });
-          }
-        }
-      } else if (type === 'result') {
-        if (typeof evt.total_cost_usd === 'number') costUsd = evt.total_cost_usd;
-      }
+      parseStreamLine(line, performance.now() - perfStart, state);
     };
 
     const isNodeScript = /\.(mjs|cjs|js)$/i.test(bin);
@@ -228,44 +191,17 @@ export class ClaudeCodeAdapter implements Adapter {
     const rawPath = path.join(runDir, STREAM_FILE);
     await writeFile(rawPath, Buffer.concat(stdoutChunks));
 
-    // Read the hook log and merge stream + hook by tool_use_id.
+    // Read the hook log and merge stream + hook by tool_use_id (shared with replay, ADR-0015).
     const hookEntries = await readJsonl<HookEntry>(hooksJsonlPath);
-    let transcriptPath: string | undefined;
-    const hookCalls: ToolCall[] = [];
-    for (const entry of hookEntries) {
-      if (!transcriptPath && typeof entry.transcript_path === 'string') {
-        transcriptPath = entry.transcript_path;
-      }
-      const at =
-        typeof entry.aab_hook_at === 'number' ? Math.max(0, entry.aab_hook_at - startedAt) : 0;
-      hookCalls.push({
-        id: typeof entry.tool_use_id === 'string' ? entry.tool_use_id : undefined,
-        name: typeof entry.tool_name === 'string' ? entry.tool_name : 'unknown',
-        input: entry.tool_input,
-        at,
-        source: 'hook',
-        sources: ['hook'],
-      });
-    }
-
-    const toolCalls = mergeById(streamCalls, hookCalls);
-
-    const obs: RunObservation = {
-      transcript_path: transcriptPath,
-      raw_events_path: rawPath,
-      tool_calls: toolCalls,
-      exit_code: exitCode,
-      cost_usd: costUsd,
-      started_at: startedAt,
-      ended_at: endedAt,
-      effective_model: effectiveModel,
-      effective_permission_mode: effectivePermissionMode,
-      mcp_servers: mcpServers,
-      used_bare: usedBare,
-      agent_version_reported: agentVersionReported,
-      warnings: warnings.length > 0 ? warnings : undefined,
-    };
-    return obs;
+    return assembleObservation(state, hookEntries, {
+      rawEventsPath: rawPath,
+      exitCode,
+      startedAt,
+      endedAt,
+      usedBare,
+      agentVersionReported,
+      warnings,
+    });
   }
 
   /** Run `<bin> --version` synchronously; return the reported version string or undefined. */
@@ -314,11 +250,141 @@ export class ClaudeCodeAdapter implements Adapter {
   }
 }
 
+// --- shared pure parse/merge step (evidence-spec §4.2/§4.5, ADR-0015) --------------------
+// The live adapter and the replay adapter both go through these functions, so a replayed
+// recording exercises exactly the code that parses a live run.
+
+/** Accumulated state from parsing the stream-json output line by line. */
+export interface StreamState {
+  calls: ToolCall[];
+  effectiveModel?: string;
+  effectivePermissionMode?: string;
+  mcpServers?: unknown;
+  costUsd?: number;
+}
+
+export function newStreamState(): StreamState {
+  return { calls: [] };
+}
+
+/** Parse one stream-json line into `state`. `at` is the ms offset recorded on tool calls.
+ *  Non-JSON and blank lines are ignored (the raw file keeps them verbatim). */
+export function parseStreamLine(line: string, at: number, state: StreamState): void {
+  const text = line.trim();
+  if (!text) return;
+  let evt: Record<string, unknown>;
+  try {
+    evt = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    return; // not JSON — keep raw in the file, skip for parsing
+  }
+  const type = evt.type;
+  if (type === 'system' && evt.subtype === 'init') {
+    state.effectiveModel = typeof evt.model === 'string' ? evt.model : state.effectiveModel;
+    // system/init uses permissionMode (camelCase); accept snake_case defensively.
+    const pm = (evt.permissionMode ?? evt.permission_mode) as unknown;
+    if (typeof pm === 'string') state.effectivePermissionMode = pm;
+    if ('mcp_servers' in evt) state.mcpServers = evt.mcp_servers;
+  } else if (type === 'assistant') {
+    const msg = evt.message as { content?: unknown } | undefined;
+    const content = Array.isArray(msg?.content) ? msg!.content : [];
+    for (const block of content as Array<Record<string, unknown>>) {
+      if (block && block.type === 'tool_use') {
+        state.calls.push({
+          id: typeof block.id === 'string' ? block.id : undefined,
+          name: typeof block.name === 'string' ? block.name : 'unknown',
+          input: block.input,
+          at,
+          source: 'stream',
+          sources: ['stream'],
+        });
+      }
+    }
+  } else if (type === 'result') {
+    if (typeof evt.total_cost_usd === 'number') state.costUsd = evt.total_cost_usd;
+  }
+}
+
+/** Turn hook-log entries into hook-layer tool calls; also returns the first transcript_path. */
+export function hookCallsFromEntries(
+  entries: HookEntry[],
+  startedAt: number,
+): { calls: ToolCall[]; transcriptPath?: string } {
+  let transcriptPath: string | undefined;
+  const calls: ToolCall[] = [];
+  for (const entry of entries) {
+    if (!transcriptPath && typeof entry.transcript_path === 'string') {
+      transcriptPath = entry.transcript_path;
+    }
+    const at =
+      typeof entry.aab_hook_at === 'number' ? Math.max(0, entry.aab_hook_at - startedAt) : 0;
+    calls.push({
+      id: typeof entry.tool_use_id === 'string' ? entry.tool_use_id : undefined,
+      name: typeof entry.tool_name === 'string' ? entry.tool_name : 'unknown',
+      input: entry.tool_input,
+      at,
+      source: 'hook',
+      sources: ['hook'],
+    });
+  }
+  return { calls, transcriptPath };
+}
+
+export interface ObservationMeta {
+  rawEventsPath: string;
+  exitCode: number;
+  startedAt: number;
+  endedAt: number;
+  usedBare: boolean;
+  agentVersionReported?: string;
+  warnings?: string[];
+}
+
+/** Build the RunObservation from parsed stream state and hook entries (merge by id). */
+export function assembleObservation(
+  state: StreamState,
+  hookEntries: HookEntry[],
+  meta: ObservationMeta,
+): RunObservation {
+  const hook = hookCallsFromEntries(hookEntries, meta.startedAt);
+  const warnings = meta.warnings ?? [];
+  return {
+    transcript_path: hook.transcriptPath,
+    raw_events_path: meta.rawEventsPath,
+    tool_calls: mergeById(state.calls, hook.calls),
+    exit_code: meta.exitCode,
+    cost_usd: state.costUsd,
+    started_at: meta.startedAt,
+    ended_at: meta.endedAt,
+    effective_model: state.effectiveModel,
+    effective_permission_mode: state.effectivePermissionMode,
+    mcp_servers: state.mcpServers,
+    used_bare: meta.usedBare,
+    agent_version_reported: meta.agentVersionReported,
+    warnings: warnings.length > 0 ? warnings : undefined,
+  };
+}
+
+export interface ObserveClaudeRunInput extends ObservationMeta {
+  streamText: string;   // verbatim stream-json stdout
+  hooksText?: string;   // verbatim hook log (JSONL); absent when no hook fired
+  streamAt?: number;    // `at` stamped on every stream tool call (default 0: no clock)
+}
+
+/** The pure parse/merge step over recorded text: no I/O, no clock, no process. */
+export function observeClaudeRun(input: ObserveClaudeRunInput): RunObservation {
+  const state = newStreamState();
+  const at = input.streamAt ?? 0;
+  for (const line of input.streamText.split('\n')) parseStreamLine(line, at, state);
+  const hookEntries = input.hooksText ? parseJsonlText<HookEntry>(input.hooksText) : [];
+  return assembleObservation(state, hookEntries, input);
+}
+
 /** Merge stream and hook tool calls by tool_use_id into one ToolCall per id, recording every
  *  layer that saw it in `sources`. A call seen only on stream is still included (§4.2). Calls
  *  with no id are kept as-is (never collapsed together). Stream order is preserved; hook-only
  *  calls are appended. */
-function mergeById(streamCalls: ToolCall[], hookCalls: ToolCall[]): ToolCall[] {
+export function mergeById(streamCalls: ToolCall[], hookCalls: ToolCall[]): ToolCall[] {
   const byId = new Map<string, ToolCall>();
   const ordered: ToolCall[] = [];
 
@@ -397,6 +463,11 @@ async function readJsonl<T>(file: string): Promise<T[]> {
   } catch {
     return [];
   }
+  return parseJsonlText<T>(raw);
+}
+
+/** Parse newline-delimited JSON text, skipping blank/corrupt lines. */
+export function parseJsonlText<T>(raw: string): T[] {
   const out: T[] = [];
   for (const line of raw.split('\n')) {
     const text = line.trim();

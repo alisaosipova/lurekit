@@ -16,6 +16,7 @@
 //
 // `run` is the only subcommand that launches a real agent (and therefore costs money / needs
 // auth); the others are fully offline.
+// `run --replay <dir>` re-drives a recorded Claude Code run instead (ADR-0015): offline, no spend.
 
 import { readFileSync, writeFileSync, existsSync, mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -26,6 +27,7 @@ import { fileURLToPath } from 'node:url';
 import { loadScenarioDir } from './scenario/load.js';
 import type { Scenario } from './scenario/types.js';
 import { ClaudeCodeAdapter } from './adapters/claudeCode.js';
+import { ReplayAdapter } from './adapters/replay.js';
 import type { Adapter, SetupProfile } from './adapters/adapter.js';
 import type { AgentId } from './scenario/types.js';
 import { getDetector, IMPLEMENTED_DETECTORS } from './detectors/index.js';
@@ -83,6 +85,7 @@ interface Flags {
 const STRING_FLAGS = new Set([
   'model', 'agent', 'agent-version', 'mode', 'vulnerable-if', 'isolation',
   'results', 'workdir', 'format', 'output', 'permission-mode', 'settings', 'mcp', 'hooks',
+  'replay',
 ]);
 const NUMBER_FLAGS = new Set(['k', 'budget']);
 const MULTI_FLAGS = new Set(['skill']);
@@ -253,13 +256,21 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
   }
   const profile = buildProfile(flags, deps);
   const cfg = buildConfig(flags, deps);
-  const adapter = deps.adapterFor(profile.agent);
+  // --replay <dir> (ADR-0015): re-drive a recorded claude-code run offline; no live agent.
+  const replayDir = flags.str.get('replay');
+  if (replayDir !== undefined && profile.agent !== 'claude-code') {
+    throw new Error('run: --replay only supports --agent claude-code (recordings are Claude Code runs)');
+  }
+  const adapter: Adapter = replayDir !== undefined
+    ? new ReplayAdapter({ recordingDir: path.resolve(deps.cwd(), replayDir) })
+    : deps.adapterFor(profile.agent);
 
   const benchmarkRunId = deps.newRunId();
   const ids = makeIds(benchmarkRunId);
   const runner = new BenchmarkRunner({ ids, fixtures: fixturesForScenario });
   const meta: RunMeta = { createdAt: deps.now(), toolVersion: toolVersion() };
 
+  if (replayDir !== undefined) deps.stderr(`replaying recording ${replayDir} (offline, no live agent)\n`);
   deps.stderr(`running ${scenarios.length} scenario(s) against ${profile.agent} (model=${profile.model}, k=${cfg.k}, mode=${cfg.mode})\n`);
   deps.stderr(`results under ${path.join(cfg.resultsRoot, benchmarkRunId)}\n`);
 
@@ -307,13 +318,14 @@ Commands:
                    --budget <usd>  --results <dir>  --workdir <dir>  --isolation container|container+netns
                    --permission-mode <m>  --settings/--mcp/--hooks <file.json>  --skill <dir> (repeatable)
                    --format json|markdown|sarif (default markdown)  --output <file>
+                   --replay <dir>  re-drive a recorded claude-code run offline (no agent, no cost)
   validate [dir]   Schema-validate every scenario (exit 1 on any error). Offline.
   list [dir]       List scenarios (id, detector, runnable, applies_to). Offline.
   plan [dir]       Show which scenarios would run for a profile, WITHOUT a live agent. Offline.
   selftest         Run each detector's positive/negative self-test. Offline.
   report <runDir>  Render a report from a completed run. --format --output.
 
-Only 'run' launches a real agent (cost / auth). Everything else is offline.
+Only 'run' launches a real agent (cost / auth), unless given --replay. Everything else is offline.
 `;
 
 export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promise<number> {
