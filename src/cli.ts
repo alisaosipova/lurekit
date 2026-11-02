@@ -94,7 +94,7 @@ const STRING_FLAGS = new Set([
   'replay', 'out',
 ]);
 const NUMBER_FLAGS = new Set(['k', 'budget']);
-const MULTI_FLAGS = new Set(['skill', 'allow-host']);
+const MULTI_FLAGS = new Set(['skill', 'allow-host', 'withhold']);
 
 function parseFlags(argv: string[]): Flags {
   const f: Flags = { _: [], str: new Map(), num: new Map(), bool: new Set(), multi: new Map() };
@@ -312,8 +312,9 @@ export function cmdReport(flags: Flags, deps: CliDeps): number {
   return 0;
 }
 
-/** publish <runDir> [--out <dir>] [--allow-host <host>]... [--redact-home] (ADR-0017). Builds the
- *  whole bundle in memory, optionally replaces the operator home dir with <HOME> in the copies,
+/** publish <runDir> [--out <dir>] [--allow-host <host>]... [--withhold <id>]... [--redact-home]
+ *  (ADR-0017). Builds the whole bundle in memory, optionally withholds scenarios (ADR-0014),
+ *  optionally replaces the operator home dir with <HOME> in the copies,
  *  runs the §5 redaction gate, and writes only if the gate is clean. */
 export function cmdPublish(flags: Flags, deps: CliDeps): number {
   const runArg = flags._[0];
@@ -323,8 +324,14 @@ export function cmdPublish(flags: Flags, deps: CliDeps): number {
     deps.stderr(`no manifest.json in ${runArg}\n`);
     return 1;
   }
+  const withhold = flags.multi.get('withhold') ?? [];
+  if (withhold.some((w) => typeof w !== 'string' || w === '' || w.startsWith('--'))) {
+    deps.stderr('publish: --withhold needs a scenario id; nothing written\n');
+    return 1;
+  }
   const plan = planPublish(readRunDir(runDir), {
     allowHosts: flags.multi.get('allow-host') ?? [],
+    withhold,
     homeDir: deps.homeDir ? deps.homeDir() : homedir(),
     redactHome: flags.bool.has('redact-home'),
   });
@@ -340,6 +347,9 @@ export function cmdPublish(flags: Flags, deps: CliDeps): number {
     return 1;
   }
   for (const f of plan.files) deps.stdout(`wrote ${f.rel}\n`);
+  if (plan.withheld.length > 0) {
+    deps.stdout(`withheld (ADR-0014): ${plan.withheld.join(', ')}\n`);
+  }
   if (plan.homeReplacements !== undefined) {
     deps.stdout(`redaction applied: home directory -> <HOME> (${plan.homeReplacements} replacements)\n`);
   }
@@ -369,6 +379,8 @@ Commands:
   publish <runDir> Write a shareable bundle (manifest, evidence, report.md/json/sarif, index.md)
                    after the redaction gate (no raw transcripts). Offline.
                    --out <dir> (default reports/<benchmark_run_id>)  --allow-host <host> (repeatable)
+                   --withhold <scenario-id> (repeatable)  leave a scenario out of the bundle
+                                  pending coordinated disclosure (ADR-0014); totals recomputed
                    --redact-home  replace YOUR home dir with <HOME> in the published copies (opt-in;
                                   run dir untouched; other home paths still fail the gate)
 

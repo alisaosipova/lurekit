@@ -514,6 +514,149 @@ describe('publish (ADR-0017)', () => {
     });
   });
 
+  describe('--withhold (ADR-0014)', () => {
+    function hashTree(dir: string, base = dir, acc = new Map<string, string>()): Map<string, string> {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) hashTree(p, base, acc);
+        else acc.set(path.relative(base, p), createHash('sha256').update(readFileSync(p)).digest('hex'));
+      }
+      return acc;
+    }
+    const read = (rel: string): string => readFileSync(path.join(defaultOut(), rel), 'utf8');
+
+    it('drops the scenario from manifest, evidence and renders; totals recomputed; source untouched', async () => {
+      const runDir = writeRun();
+      const before = hashTree(runDir);
+      const code = await main(['publish', path.join('.aab-runs', RUN_ID), '--withhold', 'AAB-001'], deps());
+      expect(err.join('')).toBe('');
+      expect(code).toBe(0);
+
+      const m = JSON.parse(read('manifest.json')) as RunManifest;
+      expect(m.results.map((r) => r.scenario_id)).toEqual(['AAB-002']);
+      // AAB-001 was the only vulnerable scenario: the count drops to 0.
+      expect(m.totals).toEqual({ resisted: 1, vulnerable: 0, degraded: 0, inconclusive: 0, spend_usd: 0 });
+      // The corpus block describes what ran and is kept as is (digest must keep matching).
+      expect(m.corpus).toEqual(manifest().corpus);
+
+      expect(existsSync(path.join(defaultOut(), 'AAB-001'))).toBe(false);
+      for (const rep of [0, 1]) expect(existsSync(path.join(defaultOut(), 'AAB-002', String(rep), 'evidence.json'))).toBe(true);
+
+      for (const f of ['report.md', 'report.json', 'report.sarif']) {
+        let t = read(f);
+        if (f === 'report.json') {
+          // report.json embeds the manifest; its corpus block (kept as is) lists every run id.
+          const j = JSON.parse(t) as { manifest: { corpus: unknown } };
+          expect(j.manifest.corpus).toEqual(manifest().corpus);
+          j.manifest.corpus = null;
+          t = JSON.stringify(j);
+        }
+        expect(t, f).not.toContain('AAB-001');
+        expect(t, f).not.toContain('Decoy tool');
+        expect(t, f).not.toContain('disclosure.example.org');
+      }
+      const rj = JSON.parse(read('report.json')) as { score: { headline: { vulnerable: number; of: number } } };
+      expect(rj.score.headline).toMatchObject({ vulnerable: 0, of: 1 });
+
+      const index = read('index.md');
+      expect(index).toContain('**Vulnerable to 0 of 1 scenarios**');
+      expect(index).toContain('## Withheld');
+      expect(index).toContain('1 scenario(s) withheld');
+      expect(index).toContain('- AAB-001: withheld pending coordinated disclosure (ADR-0014)');
+      expect(index).not.toContain('Decoy tool');
+      expect(index).not.toContain('AAB-001/');
+      expect(out.join('')).toContain('withheld (ADR-0014): AAB-001');
+
+      // Every written file: no name or source URL of the withheld scenario; its id only in the
+      // index.md Withheld line and the kept corpus.scenario_ids (manifest.json, report.json).
+      for (const rel of hashTree(defaultOut()).keys()) {
+        const t = read(rel);
+        expect(t, rel).not.toContain('disclosure.example.org');
+        expect(t, rel).not.toContain('Decoy tool');
+        const hits = t.split('\n').filter((l) => l.includes('AAB-001'));
+        if (rel === 'index.md') expect(hits, rel).toEqual(['- AAB-001: withheld pending coordinated disclosure (ADR-0014)']);
+        else if (rel === 'manifest.json' || rel === 'report.json') expect(hits.map((l) => l.trim()), rel).toEqual(['"AAB-001",']);
+        else expect(hits, rel).toEqual([]);
+      }
+
+      expect(hashTree(runDir)).toEqual(before);
+    });
+
+    it('is repeatable; a repeated id counts once', async () => {
+      writeRun();
+      const code = await main(
+        ['publish', path.join('.aab-runs', RUN_ID), '--withhold', 'AAB-002', '--withhold', 'AAB-001', '--withhold', 'AAB-002'],
+        deps(),
+      );
+      expect(code).toBe(0);
+      const m = JSON.parse(read('manifest.json')) as RunManifest;
+      expect(m.results).toEqual([]);
+      expect(m.totals).toEqual({ resisted: 0, vulnerable: 0, degraded: 0, inconclusive: 0, spend_usd: 0 });
+      const index = read('index.md');
+      expect(index).toContain('2 scenario(s) withheld');
+      expect(index.indexOf('- AAB-001: withheld')).toBeLessThan(index.indexOf('- AAB-002: withheld'));
+      expect(index.match(/: withheld pending/g)?.length).toBe(2);
+    });
+
+    it('recomputes spend and verdict counts from the remaining results', async () => {
+      const runDir = writeRun();
+      const m0 = manifest();
+      m0.results[0].spend_usd = 0.1234567;
+      m0.results[1].spend_usd = 0.2;
+      m0.results.push({ scenario_id: 'AAB-003', name: 'Degraded', source: 'https://disclosure.example.org/advisory/3', detector: 'canary_command', verdict: 'degraded', confidence: '-', runs: 2, spend_usd: 0.0000004 });
+      m0.totals = { resisted: 1, vulnerable: 1, degraded: 1, inconclusive: 0, spend_usd: 0.323457 };
+      writeFileSync(path.join(runDir, 'manifest.json'), JSON.stringify(m0, null, 2));
+      expect(await main(['publish', path.join('.aab-runs', RUN_ID), '--withhold', 'AAB-002'], deps())).toBe(0);
+      const m = JSON.parse(read('manifest.json')) as RunManifest;
+      expect(m.totals).toEqual({ resisted: 0, vulnerable: 1, degraded: 1, inconclusive: 0, spend_usd: 0.123457 });
+    });
+
+    it('an unknown id fails and nothing is written', async () => {
+      const runDir = writeRun();
+      const before = hashTree(runDir);
+      const code = await main(['publish', path.join('.aab-runs', RUN_ID), '--withhold', 'AAB-999'], deps());
+      expect(code).toBe(1);
+      expect(err.join('')).toMatch(/unknown scenario id\(s\) "AAB-999"/);
+      expect(err.join('')).toMatch(/nothing written/);
+      expect(existsSync(defaultOut())).toBe(false);
+      expect(hashTree(runDir)).toEqual(before);
+    });
+
+    it('a missing id value fails and nothing is written', async () => {
+      writeRun();
+      expect(await main(['publish', path.join('.aab-runs', RUN_ID), '--withhold'], deps())).toBe(1);
+      expect(existsSync(defaultOut())).toBe(false);
+    });
+
+    it('withheld evidence is not scanned; the gate still runs on the reduced bundle', async () => {
+      // A home path planted in AAB-002/1 fails the gate unless AAB-002 is withheld.
+      writeRun({ cwd: `${FAKE_HOME}/work` });
+      expect(await main(['publish', path.join('.aab-runs', RUN_ID), '--withhold', 'AAB-001'], deps())).toBe(1);
+      expect(err.join('')).toMatch(/AAB-002\/1\/evidence\.json: home_path/);
+      expect(existsSync(defaultOut())).toBe(false);
+      expect(await main(['publish', path.join('.aab-runs', RUN_ID), '--withhold', 'AAB-002'], deps())).toBe(0);
+      expect(existsSync(path.join(defaultOut(), 'AAB-002'))).toBe(false);
+    });
+
+    it('applies before MCP-name pseudonymisation: withheld names take no placeholder', async () => {
+      const runDir = writeRun();
+      const put = (id: string, rep: number, servers: { name: string; status: string; source: string }[]): void => {
+        const ev = evidence(id, rep);
+        if (ev.observation) ev.observation.mcp_servers = servers;
+        writeFileSync(path.join(runDir, id, String(rep), 'evidence.json'), JSON.stringify(ev, null, 2));
+      };
+      put('AAB-001', 0, [{ name: 'withheld-only-srv', status: 'connected', source: 'user' }]);
+      put('AAB-002', 0, [{ name: 'kept-srv', status: 'connected', source: 'user' }]);
+      expect(await main(['publish', path.join('.aab-runs', RUN_ID), '--withhold', 'AAB-001', '--redact-home'], deps())).toBe(0);
+      const ev = JSON.parse(read('AAB-002/0/evidence.json')) as EvidenceRecord;
+      expect(ev.observation?.mcp_servers?.map((e) => e.name)).toEqual(['<user-mcp-1>']);
+      const index = read('index.md');
+      expect(index).toContain('(1 replacements, 1 distinct names)');
+      expect(index).toContain('## Withheld');
+      expect(index).toContain('home directory -> <HOME> (0 replacements)');
+    });
+  });
+
   it('refuses a non-empty output directory and writes nothing', async () => {
     writeRun();
     mkdirSync(defaultOut(), { recursive: true });

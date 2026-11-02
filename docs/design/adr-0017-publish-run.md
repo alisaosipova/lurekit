@@ -3,7 +3,9 @@
 Status: proposed, implemented (2026-11-02); awaiting maintainer approval. Amended 2026-11-02:
 opt-in operator home redaction (`--redact-home`, see "Operator home redaction"). Amended
 2026-11-02: unconditional pseudonymisation of operator MCP server names (see "Operator MCP
-server names").
+server names"). Amended 2026-11-02: `--withhold <scenario-id>` (repeatable) to keep a
+scenario out of the published copy under the ADR-0014 disclosure policy (see "Withholding a
+scenario").
 Authorises `src/report/publish.ts`, the `publish` subcommand in `src/cli.ts`, the exported
 `findSecretShape()` / `extractHost()` helpers in `src/fixtures/fixture.ts` (and the
 path-before-userinfo order of `extractHost()`), and
@@ -33,7 +35,7 @@ that the evidence is free of local paths, tokens or third-party URLs.
 ## Decision
 Option 3.
 
-`agent-attack-bench publish <runDir> [--out <dir>] [--allow-host <host>]... [--redact-home]`
+`agent-attack-bench publish <runDir> [--out <dir>] [--allow-host <host>]... [--withhold <scenario-id>]... [--redact-home]`
 
 - Default output dir: `reports/<benchmark_run_id>` (relative to the cwd). A non-empty output
   dir is refused, so stale unscanned files cannot ride along.
@@ -111,6 +113,29 @@ Option 3.
     `redaction applied: operator MCP server names (mcp_servers entries whose source is not
     dynamic/project) -> <user-mcp-N> (R replacements, D distinct names)`;
   - the run dir is never modified.
+- **Withholding a scenario (`--withhold <scenario-id>`, repeatable, opt-in).** ADR-0014 keeps
+  a scenario citing a still-unpatched issue out of the public catalog until the fix ships or 90
+  days pass. A run may still include it (CI runs the private tier), so its verdict and evidence
+  must be keepable out of a published bundle without deleting it from the run. For each named
+  id:
+  - the id must be the `scenario_id` of a manifest result; an unknown id is an error and
+    nothing is written (a typo must not publish the scenario it meant to hold back); a repeated
+    id counts once;
+  - the scenario's entry is removed from the published copy of `manifest.results`, and
+    `manifest.totals` is recomputed from the remaining results with the runner's rule (one per
+    verdict, `spend_usd` summed and rounded to 6 decimals), so the vulnerable count drops when a
+    vulnerable scenario is withheld. The `corpus` block (count, ids, digest) is kept as is: it
+    describes what was run, its digest must keep matching, and the id is listed openly anyway;
+  - none of its `<scenario>/<rep>/evidence.json` files is copied, parsed or scanned;
+  - `report.md`, `report.json`, `report.sarif` and `index.md` are rendered from the reduced
+    manifest, so the headline, scenario tables and SARIF results never mention its verdict;
+    its source URL is no longer in the gate's allowlist (it is not in the bundle either);
+  - `index.md` gains a `## Withheld` section with the count and one line per id:
+    `<id>: withheld pending coordinated disclosure (ADR-0014)` (no name, source or verdict);
+  - it applies first: operator MCP name pseudonymisation (numbering, reserved names) and
+    `--redact-home` see only the reduced bundle, and the gate runs on the reduced bundle as
+    usual;
+  - the run dir is never modified.
 - Ids that become path segments (`benchmark_run_id`, scenario ids) must match
   `^[A-Za-z0-9][A-Za-z0-9._-]*$`; anything else fails the publish.
 - Offline: no network, no agent, no clock. The command writes local files only; uploading or
@@ -125,6 +150,8 @@ agent-attack-bench publish .aab-runs/<id> --allow-host docs.vendor.example
 # the run legitimately names the operator's own home (e.g. the agent listed the memory dir
 # the agent runtime announced); publish it as <HOME>
 agent-attack-bench publish .aab-runs/<id> --redact-home
+# keep a scenario citing a still-unpatched issue out of the bundle (ADR-0014)
+agent-attack-bench publish .aab-runs/<id> --withhold AAB-030
 ```
 A failing gate prints, for example:
 ```
@@ -168,3 +195,10 @@ publish: redaction gate failed (evidence-spec §5), 1 finding(s); nothing writte
   run and is published as is; a maintainer who must not disclose it should not publish that run.
 - Evidence records are published verbatim (save for operator MCP server names and `--redact-home`), including tool-call inputs. The gate, not the
   renderer, is what keeps those inputs safe to share.
+- `--withhold` changes the published numbers on purpose: the bundle's headline is over the
+  published scenarios only, and the `## Withheld` section says how many were held back, so a
+  reader does not mistake the reduced totals for the whole run. It is the maintainer's choice
+  per publish, like every other exception here; the tool does not read `source.fix_status` to
+  decide it, because the manifest does not carry it and the 90-day clock is a policy date the
+  maintainer owns (ADR-0014). Once the window closes, re-publishing the same run without the
+  flag yields the full bundle, since the run dir was never changed.

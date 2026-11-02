@@ -25,6 +25,12 @@
 // source are kept. These entries describe the operator's own MCP servers / connectors, which are
 // never part of the measurement. Applied before --redact-home and before the gate.
 //
+// Opt-in (--withhold <id>, ADR-0017 "Withholding a scenario", ADR-0014 disclosure policy): the
+// named scenario is dropped from the published manifest.results, totals are recomputed from the
+// rest, its evidence is not copied, and every render plus index.md comes from the reduced
+// manifest; index.md lists the withheld ids. Applied first, before the MCP-name rewrite,
+// --redact-home and the gate. An unknown id fails the publish.
+//
 // Structure: planPublish() / scanForLeaks() / renderIndex() are pure (data in, data out);
 // readRunDir() and writeBundle() are the only I/O; publishRun() glues them.
 
@@ -57,7 +63,13 @@ export interface PublishPolicy {
   /** --redact-home: replace every occurrence of `homeDir` in the published copies with
    *  HOME_PLACEHOLDER before the gate runs. Requires `homeDir`. */
   redactHome?: boolean;
+  /** --withhold: scenario ids kept out of the published copy (ADR-0014). Each must be a
+   *  manifest result id; duplicates count once. */
+  withhold?: string[];
 }
+
+/** The fixed index.md text for a withheld scenario. */
+export const WITHHELD_NOTE = 'withheld pending coordinated disclosure (ADR-0014)';
 
 /** The literal that replaces the operator home directory under --redact-home. */
 export const HOME_PLACEHOLDER = '<HOME>';
@@ -80,6 +92,8 @@ export type PublishPlan =
       homeReplacements?: number;
       /** Operator MCP server entries renamed to <user-mcp-N> (always counted; 0 = none). */
       mcpNameReplacements: number;
+      /** Scenario ids withheld via --withhold (in manifest order; empty = none). */
+      withheld: string[];
     }
   | { ok: false; benchmarkRunId?: string; error?: string; leaks: Leak[] };
 
@@ -324,6 +338,8 @@ export interface IndexNotes {
   mcpNameReplacements?: number;
   /** Distinct operator MCP server names behind those replacements. */
   mcpDistinctNames?: number;
+  /** Scenario ids withheld via --withhold; a `## Withheld` section is shown when non-empty. */
+  withheld?: string[];
 }
 
 export function renderIndex(manifest: RunManifest, evidenceRels: string[], notes: IndexNotes = {}): string {
@@ -387,6 +403,13 @@ export function renderIndex(manifest: RunManifest, evidenceRels: string[], notes
     }
     out.push('');
   }
+  const withheld = notes.withheld ?? [];
+  if (withheld.length > 0) {
+    out.push('## Withheld', '');
+    out.push(`${withheld.length} scenario(s) withheld from this bundle; the headline and tables cover the published scenarios only.`, '');
+    for (const w of withheld) out.push(`- ${cell(w)}: ${WITHHELD_NOTE}`);
+    out.push('');
+  }
   out.push(
     '_Raw agent transcripts and hook captures are kept with the local run and are not published ' +
       '(evidence-spec §5). Agent output is stochastic: the verdict is a k-run tally, not a ' +
@@ -397,6 +420,19 @@ export function renderIndex(manifest: RunManifest, evidenceRels: string[], notes
 }
 
 // --- plan (pure) ------------------------------------------------------------------------
+
+const VERDICTS: ReadonlySet<string> = new Set(['resisted', 'vulnerable', 'degraded', 'inconclusive']);
+
+/** Manifest totals over `results`, by the runner's rule (writeManifest): one per verdict, spend
+ *  summed and rounded to 6 decimals. Used when --withhold reduces the published results. */
+export function recomputeTotals(results: RunManifest['results']): RunManifest['totals'] {
+  const totals = { resisted: 0, vulnerable: 0, degraded: 0, inconclusive: 0, spend_usd: 0 };
+  for (const r of results) {
+    if (VERDICTS.has(r.verdict)) totals[r.verdict] += 1;
+    totals.spend_usd = Math.round((totals.spend_usd + (typeof r.spend_usd === 'number' ? r.spend_usd : 0)) * 1e6) / 1e6;
+  }
+  return totals;
+}
 
 /** Build and gate the bundle. Pure: nothing is read or written here. */
 export function planPublish(contents: RunDirContents, policy: PublishPolicy = {}): PublishPlan {
@@ -416,6 +452,26 @@ export function planPublish(contents: RunDirContents, policy: PublishPolicy = {}
     }
   }
 
+  // --withhold (ADR-0017 "Withholding a scenario"): applied first, so everything below sees
+  // only the reduced manifest and the kept evidence. Withheld evidence is never parsed.
+  const withholdSet = new Set(policy.withhold ?? []);
+  const resultIds = new Set(manifest.results.map((r) => r.scenario_id));
+  const unknown = [...withholdSet].filter((w) => !resultIds.has(w));
+  if (unknown.length > 0) {
+    return {
+      ok: false,
+      benchmarkRunId: id,
+      error: `--withhold: unknown scenario id(s) ${unknown.map((u) => JSON.stringify(u)).join(', ')} (not in manifest results)`,
+      leaks: [],
+    };
+  }
+  const withheld = manifest.results.map((r) => r.scenario_id).filter((s) => withholdSet.has(s));
+  if (withheld.length > 0) {
+    manifest.results = manifest.results.filter((r) => !withholdSet.has(r.scenario_id));
+    manifest.totals = recomputeTotals(manifest.results);
+  }
+  const keptEvidence = contents.evidence.filter((f) => !withholdSet.has(f.rel.split('/')[0]));
+
   // Operator MCP server names (unconditional): rewrite the parsed manifest and records, and
   // re-serialise only the files that changed, so every other file stays a byte copy. The
   // renders below are built from the rewritten objects. Manifest first, then evidence in
@@ -423,7 +479,7 @@ export function planPublish(contents: RunDirContents, policy: PublishPolicy = {}
   // of kept (harness) entries anywhere in the run are reserved before any placeholder is
   // assigned.
   const parsed: { rel: string; text: string; rec: EvidenceRecord }[] = [];
-  for (const f of contents.evidence) {
+  for (const f of keptEvidence) {
     try {
       parsed.push({ rel: f.rel, text: f.text, rec: JSON.parse(f.text) as EvidenceRecord });
     } catch (err) {
@@ -434,7 +490,8 @@ export function planPublish(contents: RunDirContents, policy: PublishPolicy = {}
   for (const p of parsed) collectHarnessMcpNames(p.rec, reserved);
   const mcpNames = new Map<string, string>();
   let mcpNameReplacements = pseudonymizeMcpServers(manifest, mcpNames, reserved);
-  const manifestText = mcpNameReplacements > 0 ? reserialize(contents.manifestText, manifest) : contents.manifestText;
+  const manifestText =
+    mcpNameReplacements > 0 || withheld.length > 0 ? reserialize(contents.manifestText, manifest) : contents.manifestText;
 
   const records = new Map<string, EvidenceRecord>();
   const evidenceFiles: BundleFile[] = [];
@@ -445,8 +502,8 @@ export function planPublish(contents: RunDirContents, policy: PublishPolicy = {}
     evidenceFiles.push({ rel, text: n > 0 ? reserialize(text, rec) : text });
   }
   const lookup = lookupFromRecords(manifest, records);
-  const evidenceRels = contents.evidence.map((f) => f.rel);
-  const mcpNotes: IndexNotes = { mcpNameReplacements, mcpDistinctNames: mcpNames.size };
+  const evidenceRels = keptEvidence.map((f) => f.rel);
+  const mcpNotes: IndexNotes = { mcpNameReplacements, mcpDistinctNames: mcpNames.size, withheld };
 
   let files: BundleFile[] = [
     { rel: 'manifest.json', text: manifestText },
@@ -490,8 +547,8 @@ export function planPublish(contents: RunDirContents, policy: PublishPolicy = {}
   const leaks = scanForLeaks(files, allowed, policy.homeDir);
   if (leaks.length > 0) return { ok: false, benchmarkRunId: id, leaks };
   return homeReplacements === undefined
-    ? { ok: true, benchmarkRunId: id, files, mcpNameReplacements }
-    : { ok: true, benchmarkRunId: id, files, homeReplacements, mcpNameReplacements };
+    ? { ok: true, benchmarkRunId: id, files, mcpNameReplacements, withheld }
+    : { ok: true, benchmarkRunId: id, files, homeReplacements, mcpNameReplacements, withheld };
 }
 
 /** Human-readable failure text for a rejected plan. */
