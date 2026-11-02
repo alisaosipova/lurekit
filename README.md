@@ -106,6 +106,7 @@ reporting. It is not a benchmark result, and every replayed run's `evidence.json
   `plan()` skips them as `not_runnable`.
 - The offline commands and the test suite run in CI. A live `run` against a real agent is a manual step
   performed by the maintainer; it is not part of CI.
+- Published run summaries: [docs/reports/](docs/reports/README.md) (first: Claude Code 2.1.316, 2026-11-02).
 
 ## Adding a scenario
 
