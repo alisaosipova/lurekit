@@ -29,7 +29,7 @@ import type {
   ToolCall,
   McpServerStatus,
 } from './adapter.js';
-import { normalizeMcpServers } from './adapter.js';
+import { normalizeMcpServers, requireWorkdir } from './adapter.js';
 import type { AgentId } from '../scenario/types.js';
 
 export const CURSOR_STREAM_FILE = 'cursor-stream.jsonl';
@@ -106,7 +106,7 @@ export function buildCursorArgv(
   if (task.startsWith('-')) {
     throw new Error('cursor-cli: task text must not start with "-" (it would be parsed as a CLI option)');
   }
-  const argv = ['-p', task, '--output-format', 'stream-json', '--workspace', profile.workdir, '--model', profile.model];
+  const argv = ['-p', task, '--output-format', 'stream-json', '--workspace', requireWorkdir(profile, 'cursor-cli'), '--model', profile.model];
   if (flags.mode) argv.push('--mode', flags.mode);
   if (flags.sandbox) argv.push('--sandbox', flags.sandbox);
   if (flags.force) argv.push('--force');
@@ -157,7 +157,8 @@ export class CursorCliAdapter implements Adapter {
     // Validate the permission tokens before anything is spawned.
     const argv = buildCursorArgv(profile, task, { disableAutoUpdate: this.disableAutoUpdate });
     await mkdir(runDir, { recursive: true });
-    await mkdir(profile.workdir, { recursive: true });
+    const workdir = requireWorkdir(profile, 'CursorCliAdapter.run');
+    await mkdir(workdir, { recursive: true });
 
     const warnings: string[] = [];
     const bin = this.bin();
@@ -169,7 +170,7 @@ export class CursorCliAdapter implements Adapter {
     if (!this.disableAutoUpdate) {
       warnings.push('auto-update not disabled: --disable-auto-update is unverified on the current CLI (NOTES § Cursor CLI); version drift is checked before/after');
     }
-    if (await hasClaudeSettingsHooks(profile.workdir)) {
+    if (await hasClaudeSettingsHooks(workdir)) {
       // NOTES § Cursor CLI: "Claude Code settings.json hooks are read and merged" (changelog).
       warnings.push('workdir has .claude/settings.json hooks; Cursor CLI reads and merges Claude Code hooks, so they may execute under this run');
     }
@@ -198,7 +199,7 @@ export class CursorCliAdapter implements Adapter {
 
     const { cmd, args } = command(bin, argv);
     const child = spawn(cmd, args, {
-      cwd: profile.workdir,
+      cwd: workdir,
       env,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],

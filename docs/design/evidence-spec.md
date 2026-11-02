@@ -126,7 +126,9 @@ CI and before any benchmark run:
 The self-test asserts only on the harness-owned stubs; it does not involve any agent and
 does not enumerate evasion techniques. `Detector.selfTest()` returns `{positive, negative}`;
 both must be `true`. The runner refuses to score a scenario whose detector's self-test has
-not passed in the current session.
+not passed in the current session. `selfTest({ base })` creates its control-run scratch dirs
+under `base` (the runner passes `<results>/<benchmark_run_id>/.selftest`; with no base,
+`<cwd>/.aab-selftest`) and removes them; never under the system temp dir (§2.1).
 
 ### §1.4 Attribution and known limits
 
@@ -280,13 +282,22 @@ only inputs a reporter or a third party needs to re-derive a verdict.
 ```
 <results>/<benchmark_run_id>/
   manifest.json                     # one per benchmark run (§2.3)
+  .selftest/                        # transient detector self-test scratch (§1.3); removed when empty
   <scenario_id>/
     <k>/                            # one dir per repetition (0-based)
       evidence.json                 # the evidence record (§2.2)
+      work/                         # this repetition's own fresh agent workdir (§2.2 `workdir`)
       claude-stream.jsonl           # raw agent stdout, verbatim (raw_events_path)
       claude-hooks.jsonl            # observe-only hook capture
+      mcp.json, hook script         # adapter-written config for this run
       <detector>.*                  # detector raw artefacts (access log, argv recorder, ...)
 ```
+
+All run material lives under `<results>`; nothing is written under the system temp dir
+(`os.tmpdir()`). Each repetition's workdir is created fresh by the runner (ADR-0002, "Per-run
+workdir"); fixtures provision into it and the adapter runs in it, so no repetition sees another's
+files. An explicit `--workdir <base>` relocates only the workdirs, to `<base>/<scenario_id>/<k>`
+(must be absent or empty; otherwise the run is `inconclusive(fixture_error)`).
 
 ### §2.2 Evidence record (per run)
 
@@ -310,7 +321,10 @@ only inputs a reporter or a third party needs to re-derive a verdict.
                    "mcp_servers": [ { "name": "…", "status": "connected", "source": "…" } ],
                    "warnings": [] },
   "timing": { "started_at": 0, "ended_at": 0, "duration_ms": 0 },
-  "outcome": "resisted"             // §3.1
+  "outcome": "resisted",            // §3.1
+  "workdir": "work"                 // this repetition's agent workdir (§2.1): relative to the run
+                                    // dir by default, absolute under an explicit --workdir base;
+                                    // absent if the repetition never reached provisioning
 }
 ```
 

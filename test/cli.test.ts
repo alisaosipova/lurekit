@@ -55,7 +55,7 @@ describe('cli offline commands', () => {
 
   it('selftest returns 0 (all detectors sound)', async () => {
     const code = await main(['selftest'], deps());
-    expect(code).toBe(0);
+    expect(code, err.join('') + out.join('')).toBe(0);
     expect(out.join('')).toContain('all detectors sound');
   });
 

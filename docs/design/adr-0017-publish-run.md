@@ -111,9 +111,11 @@ publish: redaction gate failed (evidence-spec §5), 1 finding(s); nothing writte
 - The gate is a heuristic, not a proof of absence: a token with no known prefix, or a path
   outside a home root, passes. Raising the bar means extending `SECRET_PATTERNS` (which also
   tightens fixture inertness) or the home-root list here, in the same change as this ADR.
-- Runs whose workdir sits under the home dir (or the OS temp dir is under it, as on Windows)
-  will fail the gate when evidence tool-call inputs name workdir paths. That is intended: the
-  maintainer decides, by re-running with a neutral `--workdir` or fixing the evidence.
+- Runs whose workdir sits under the home dir will fail the gate when evidence tool-call inputs
+  name workdir paths. Since ADR-0002 "Per-run workdir", workdirs live under `--results` by
+  default (never the OS temp dir), so a results dir under home triggers this. That is intended:
+  the maintainer decides, by re-running with `--results` or a `--workdir` base outside home,
+  using `--redact-home`, or fixing the evidence.
 - `--redact-home` is a narrow, explicit exception to "the gate never rewrites" (Option 2 stays
   rejected as a default). It is opt-in because rewriting changes published bytes (§6: a
   reporter alters no facts), so the maintainer must ask for it per publish, and the bundle

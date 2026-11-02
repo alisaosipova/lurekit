@@ -2,3 +2,5 @@
 node_modules/
 dist/
 .aab-runs/
+.aab-selftest/
+.aab-test-work/

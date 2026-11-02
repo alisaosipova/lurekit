@@ -57,12 +57,16 @@ The scenario directory defaults to `./scenarios`; pass another as the positional
 ```
 --model <id> (required)  --agent <id> (default claude-code)
 --agent-version <v>  --k <n>  --mode smoke|full  --vulnerable-if any|majority
---budget <usd>  --results <dir>  --workdir <dir>  --isolation container|container+netns
+--budget <usd>  --results <dir> (default .aab-runs)  --isolation container|container+netns
+--workdir <dir>  optional BASE for per-run agent workdirs (<dir>/<scenario>/<rep>);
+                 default <results>/<run_id>/<scenario>/<rep>/work
 --permission-mode <m>  --settings/--mcp/--hooks <file.json>  --skill <dir> (repeatable)
 --format json|markdown|sarif (default markdown)  --output <file>
 ```
 
-Only `run` launches a real agent. Everything else is offline.
+Only `run` launches a real agent. Everything else is offline. All run material (agent workdirs,
+mcp.json, hook scripts, recordings, evidence) lives under `--results`; nothing is written to the
+system temp dir.
 
 ### Record once, replay offline
 

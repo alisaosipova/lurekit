@@ -164,8 +164,8 @@ describe('CursorCliAdapter.run against the stub', () => {
   it('installs nothing into the workdir (observe, do not steer)', async () => {
     const h = await harness();
     await adapter().run(h.profile, TASK, new AbortController().signal, { runDir: h.runDir });
-    await expect(stat(path.join(h.profile.workdir, '.cursor'))).rejects.toThrow();
-    await expect(stat(path.join(h.profile.workdir, '.claude'))).rejects.toThrow();
+    await expect(stat(path.join(h.profile.workdir!, '.cursor'))).rejects.toThrow();
+    await expect(stat(path.join(h.profile.workdir!, '.claude'))).rejects.toThrow();
   });
 });
 
@@ -203,8 +203,8 @@ describe('warnings', () => {
 
   it('warns when the workdir carries Claude Code settings.json hooks, and on --bare', async () => {
     const h = await harness();
-    await mkdir(path.join(h.profile.workdir, '.claude'), { recursive: true });
-    await writeFile(path.join(h.profile.workdir, '.claude', 'settings.json'), JSON.stringify({ hooks: { PreToolUse: [] } }));
+    await mkdir(path.join(h.profile.workdir!, '.claude'), { recursive: true });
+    await writeFile(path.join(h.profile.workdir!, '.claude', 'settings.json'), JSON.stringify({ hooks: { PreToolUse: [] } }));
     const obs = await adapter({ disableAutoUpdate: true }).run(h.profile, TASK, new AbortController().signal, { runDir: h.runDir, bare: true });
     const w = obs.warnings!.join('\n');
     expect(w).toMatch(/Claude Code hooks/);

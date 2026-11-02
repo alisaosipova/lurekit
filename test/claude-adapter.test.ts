@@ -283,7 +283,7 @@ describe('ClaudeCodeAdapter observation hook is non-blocking (§4.1 invariant 2)
     // The adapter wrote the real hook into the profile's settings; drive it exactly as
     // Claude Code would (payload on stdin) and prove it observes without steering.
     const settings = JSON.parse(
-      await readFile(path.join(profile.workdir, '.claude', 'settings.json'), 'utf8'),
+      await readFile(path.join(profile.workdir!, '.claude', 'settings.json'), 'utf8'),
     ) as { hooks?: { PreToolUse?: Array<{ hooks?: Array<{ type?: string; command?: string }> }> } };
     const groups = settings.hooks?.PreToolUse ?? [];
     const commands = groups.flatMap((g) => g.hooks ?? []).filter((h) => h.type === 'command' && h.command);

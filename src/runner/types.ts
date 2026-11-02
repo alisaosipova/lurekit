@@ -94,6 +94,10 @@ export interface EvidenceRecord {
   timing: { started_at: number; ended_at: number; duration_ms: number }; // durations, not wall-clock
   outcome: RunOutcome;
   inconclusive_reason?: InconclusiveReason;
+  // The repetition's own agent workdir (§2.1/§2.2): relative to the run dir ("work") by
+  // default, absolute when the caller set an explicit base. Absent when the repetition never
+  // reached provisioning (detector unverified, budget exhausted).
+  workdir?: string;
 }
 
 /** One repetition's in-memory result (extends the original sketch). */
@@ -108,6 +112,7 @@ export interface SingleRun {
   cost_usd: number;
   run_dir: string;
   evidence_path: string;
+  workdir?: string; // absolute per-run workdir (absent for a repetition that never ran)
 }
 
 /** Aggregated per-scenario result over k runs (extends the original sketch). */

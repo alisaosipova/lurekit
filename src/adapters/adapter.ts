@@ -9,7 +9,11 @@ export interface SetupProfile {
   agent: AgentId;
   agent_version: string;      // pinned, e.g. "@anthropic-ai/claude-code@2.1.309"
   model: string;              // pinned full model id
-  workdir: string;            // the provisioned (possibly poisoned) working directory
+  // The provisioned (possibly poisoned) working directory. Optional on the CALLER's profile:
+  // the runner gives every repetition its own fresh dir under the run dir (ADR-0002,
+  // evidence-spec §2.1) and an explicit value is only the BASE for those per-run dirs. The
+  // profile handed to fixtures/adapters always carries the per-run path.
+  workdir?: string;
   env?: Record<string, string>;
   // Config under test, copied verbatim into the workdir / home by the runner:
   settings?: unknown;         // settings file(s)
@@ -22,6 +26,15 @@ export interface SetupProfile {
   // default also `--strict-mcp-config` so only that config's servers load. `false` opts out.
   // Resolved by strictMcpConfigFor() and recorded in the profile summary.
   strict_mcp_config?: boolean;
+}
+
+/** The per-run workdir an adapter runs in. Throws when the profile carries none: an adapter
+ *  never invents a working directory (and never falls back to os.tmpdir()). */
+export function requireWorkdir(profile: Pick<SetupProfile, 'workdir'>, who: string): string {
+  if (!profile.workdir) {
+    throw new Error(`${who}: profile.workdir is required (the runner provisions a per-run workdir)`);
+  }
+  return profile.workdir;
 }
 
 /** Whether a run under `profile` uses strict MCP isolation (evidence-spec §4.3): only when the

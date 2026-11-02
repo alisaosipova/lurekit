@@ -19,8 +19,8 @@
 // auth); the others are fully offline.
 // `run --replay <dir>` re-drives a recorded Claude Code run instead (ADR-0015): offline, no spend.
 
-import { readFileSync, writeFileSync, existsSync, mkdtempSync, realpathSync } from 'node:fs';
-import { tmpdir, homedir } from 'node:os';
+import { readFileSync, writeFileSync, existsSync, realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -174,7 +174,11 @@ function buildProfile(flags: Flags, deps: CliDeps): SetupProfile {
   const agent = (flags.str.get('agent') ?? 'claude-code') as AgentId;
   const model = flags.str.get('model');
   if (!model) throw new Error('run: --model <id> is required (the model id is pinned into the manifest)');
-  const workdir = flags.str.get('workdir') ?? mkdtempSync(path.join(tmpdir(), 'aab-work-'));
+  // No default workdir (and never os.tmpdir()): the runner gives every repetition its own
+  // fresh <results>/<benchmark_run_id>/<scenario_id>/<rep>/work. --workdir only sets a BASE
+  // for those per-run dirs (<base>/<scenario_id>/<rep>), ADR-0002 / evidence-spec §2.1.
+  const workdirFlag = flags.str.get('workdir');
+  const workdir = workdirFlag ? path.resolve(deps.cwd(), workdirFlag) : undefined;
   const skills = flags.multi.get('skill');
   return {
     agent,
@@ -351,7 +355,9 @@ Commands:
   run [dir]        Run the benchmark against a live agent and print a report.
                    --model <id> (required)  --agent <id> (default claude-code)
                    --agent-version <v>  --k <n>  --mode smoke|full  --vulnerable-if any|majority
-                   --budget <usd>  --results <dir>  --workdir <dir>  --isolation container|container+netns
+                   --budget <usd>  --results <dir> (default .aab-runs)  --isolation container|container+netns
+                   --workdir <dir>  optional BASE for per-run agent workdirs (<dir>/<scenario>/<rep>);
+                                    default <results>/<run_id>/<scenario>/<rep>/work
                    --permission-mode <m>  --settings/--mcp/--hooks <file.json>  --skill <dir> (repeatable)
                    --format json|markdown|sarif (default markdown)  --output <file>
                    --replay <dir>  re-drive a recorded claude-code run offline (no agent, no cost)
@@ -367,6 +373,8 @@ Commands:
                                   run dir untouched; other home paths still fail the gate)
 
 Only 'run' launches a real agent (cost / auth), unless given --replay. Everything else is offline.
+All run material (agent workdirs, mcp.json, hook scripts, recordings, evidence, detector
+self-test scratch) lives under --results; nothing is written to the system temp dir.
 `;
 
 export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promise<number> {

@@ -42,20 +42,41 @@ the profile under test in fixture order (`mergeProfilePatch`, `src/runner/runner
 - Never loosened: a patch that would loosen `permission_mode` is ignored with a warning, and a
   patch that changes `agent`, `agent_version` or `model` is ignored with a warning. A patch
   setting `strict_mcp_config: false` (disabling MCP isolation, evidence-spec §4.3) is likewise
-  ignored with a warning.
+  ignored with a warning. A patch that changes `workdir` is ignored with a warning (the runner
+  owns the per-run workdir, see "Per-run workdir" below).
 
 ### Runner lifecycle
 `plan → provision → run×k → observe → score → teardown`:
 1. **plan** — filter the corpus to scenarios whose `applies_to` includes the profile's agent
    and whose detector is implemented; refuse to score a scenario on a detector whose selfTest
    has not passed this session (§1.3).
-2. **provision** — build a per-run dir (§2.1), provision the scenario's fixtures and detectors,
-   merge each fixture's `profilePatch` into the profile under test (never loosening it).
+2. **provision** — build a per-run dir (§2.1) and a **fresh per-run workdir** for this
+   repetition (see "Per-run workdir" below), provision the scenario's fixtures and detectors
+   into it, merge each fixture's `profilePatch` into the profile under test (never loosening it).
 3. **run×k** — call the adapter; honour `budget_usd` (§3.3) and the abort signal.
 4. **observe/score** — evaluate detectors against the run dir, check the benign task, derive the
    per-run outcome (§3.1), write the evidence record (§2.2).
 5. **aggregate** — combine k outcomes into the scenario verdict and confidence (§3.2).
 6. **teardown** — tear down fixtures/detectors; the run dir and manifest persist as evidence.
+
+### Per-run workdir (no shared directory, nothing under the system temp dir)
+Maintainer rule: nothing a benchmark run produces is written under `os.tmpdir()` — not the
+agent workdir, not `mcp.json`, not hook scripts, not recordings, not detector self-test scratch.
+- Every repetition gets its own workdir, created by the runner before fixtures provision:
+  `<results>/<benchmark_run_id>/<scenario_id>/<rep>/work` (`WORKDIR_NAME`). Fixtures provision
+  into it, detectors baseline it, the adapter runs in it, the benign check resolves against it.
+  Scenario N therefore never sees files left by scenario N-1, nor repetition k by k-1.
+- The caller's `SetupProfile.workdir` is optional. When set (CLI `--workdir <dir>`) it is only a
+  BASE: the per-run dir becomes `<base>/<scenario_id>/<rep>`. A pre-existing non-empty per-run
+  dir under a base is refused (`inconclusive(fixture_error)`) and never cleared by the runner.
+- The profile handed to fixtures and the adapter is a per-run copy carrying the per-run path;
+  adapters refuse a profile without one (`requireWorkdir`) and never invent a directory.
+- The per-run workdir is recorded in evidence as `workdir` (evidence-spec §2.2).
+- Detector self-tests run with `selfTest({ base })`; the runner passes
+  `<results>/<benchmark_run_id>/.selftest` and removes it when empty. A caller with no run dir
+  (the `selftest` command, unit tests) gets `<cwd>/.aab-selftest`, removed when empty.
+- Note: the agent's cwd is now a child of the run dir, so run-dir artefacts are one `..` away;
+  they were already reachable by absolute path, and detectors read only harness-owned files.
 
 Determinism: the runner uses no wall-clock in its logic (durations only; timestamps are
 injected at the CLI boundary), so a replay over recorded runs yields identical verdicts.

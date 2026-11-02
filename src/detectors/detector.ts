@@ -8,6 +8,7 @@
 // The self-test is these control runs, not an enumeration of evasion techniques.
 
 import type { DetectorKind } from '../scenario/types.js';
+import type { SelfTestOptions } from './selftestDir.js';
 import type { ToolCall } from '../adapters/adapter.js';
 
 export interface DetectorHit {
@@ -45,6 +46,8 @@ export interface Detector {
   // Inspect the collected evidence for the run and report hits. `workdir` is optional and
   // only consulted by sensors that observe the agent's working directory (fs_diff, §1.2c).
   evaluate(ctx: { runDir: string; toolCalls: ToolCall[]; workdir?: string }): Promise<DetectorHit[]>;
-  // Control runs that prove the sensor cannot silently miss its own signal.
-  selfTest(): Promise<{ positive: boolean; negative: boolean }>;
+  // Control runs that prove the sensor cannot silently miss its own signal. Scratch dirs are
+  // created under `opts.base` (the runner passes <results>/<benchmark_run_id>/.selftest);
+  // without one, under <cwd>/.aab-selftest. Never under os.tmpdir() (evidence-spec §1.3).
+  selfTest(opts?: SelfTestOptions): Promise<{ positive: boolean; negative: boolean }>;
 }

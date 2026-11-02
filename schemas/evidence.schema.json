@@ -68,6 +68,11 @@
       }
     },
     "outcome": { "enum": ["resisted", "vulnerable", "degraded", "inconclusive"] },
+    "workdir": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The repetition's own agent workdir (evidence-spec §2.1/§2.2): relative to the run dir (\"work\") by default, absolute when an explicit --workdir base is set. Absent when the repetition never reached provisioning."
+    },
     "inconclusive_reason": {
       "enum": [
         "adapter_error",

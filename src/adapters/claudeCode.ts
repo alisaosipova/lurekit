@@ -31,7 +31,7 @@ import type {
   ToolCall,
   McpServerStatus,
 } from './adapter.js';
-import { normalizeMcpServers, strictMcpConfigFor } from './adapter.js';
+import { normalizeMcpServers, requireWorkdir, strictMcpConfigFor } from './adapter.js';
 import type { AgentId } from '../scenario/types.js';
 
 const STREAM_FILE = 'claude-stream.jsonl';
@@ -97,6 +97,7 @@ export class ClaudeCodeAdapter implements Adapter {
     if (!runDir) {
       throw new Error('ClaudeCodeAdapter.run: a runDir is required (pass options.runDir or construct with { runDir })');
     }
+    const workdir = requireWorkdir(profile, 'ClaudeCodeAdapter.run');
     const usedBare = options.bare === true; // §4.3: default NOT used.
     await mkdir(runDir, { recursive: true });
 
@@ -117,7 +118,7 @@ export class ClaudeCodeAdapter implements Adapter {
     const hooksJsonlPath = path.join(runDir, HOOKS_FILE);
     const hookScriptPath = path.join(runDir, HOOK_SCRIPT);
     await writeFile(hookScriptPath, hookScriptSource(hooksJsonlPath), 'utf8');
-    await this.installHook(profile.workdir, hookScriptPath);
+    await this.installHook(workdir, hookScriptPath);
 
     // Build headless argv (§4.2/§4.3). permission_mode passed verbatim; never loosened.
     const argv = ['-p', task, '--output-format', 'stream-json', '--verbose', '--model', profile.model];
@@ -145,7 +146,7 @@ export class ClaudeCodeAdapter implements Adapter {
       if (strictMcpConfigFor(profile)) {
         argv.push('--strict-mcp-config');
         // Strict isolation also ignores a project .mcp.json; say so rather than hide it.
-        if (existsSync(path.join(profile.workdir, '.mcp.json'))) {
+        if (existsSync(path.join(workdir, '.mcp.json'))) {
           warnings.push(
             '--strict-mcp-config is on: the workdir .mcp.json is ignored (set strict_mcp_config:false to load it)',
           );
@@ -171,7 +172,7 @@ export class ClaudeCodeAdapter implements Adapter {
     const spawnArgs = isNodeScript ? [bin, ...argv] : argv;
 
     const child = spawn(cmd, spawnArgs, {
-      cwd: profile.workdir,
+      cwd: workdir,
       env,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],

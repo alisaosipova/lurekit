@@ -13,11 +13,11 @@
 // the run ends leaves no signal on this layer, and paths off the watched list are not observed.
 
 import { createHash } from 'node:crypto';
-import { lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { lstat, mkdir, readFile, readdir, readlink, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import type { Detector, DetectorHit, DetectorProvisionOptions } from './detector.js';
+import { makeSelfTestDir, type SelfTestOptions } from './selftestDir.js';
 import type { DetectorKind } from '../scenario/types.js';
 import type { ToolCall } from '../adapters/adapter.js';
 import { writeMeta, readMeta, attribute } from './util.js';
@@ -300,10 +300,12 @@ export class FsDiffDetector implements Detector {
     });
   }
 
-  async selfTest(): Promise<{ positive: boolean; negative: boolean }> {
+  async selfTest(opts?: SelfTestOptions): Promise<{ positive: boolean; negative: boolean }> {
     // Positive control: a harness writer creates one watched config file during the "run".
-    const posRun = await mkdtemp(path.join(tmpdir(), 'aab-fsdiff-pos-run-'));
-    const posWork = await mkdtemp(path.join(tmpdir(), 'aab-fsdiff-pos-work-'));
+    const posRunTmp = await makeSelfTestDir('aab-fsdiff-pos-run-', opts);
+    const posRun = posRunTmp.dir;
+    const posWorkTmp = await makeSelfTestDir('aab-fsdiff-pos-work-', opts);
+    const posWork = posWorkTmp.dir;
     let positive = false;
     try {
       const { teardown } = await this.provision('selftest-pos', posRun, { workdir: posWork });
@@ -315,13 +317,15 @@ export class FsDiffDetector implements Detector {
         await teardown();
       }
     } finally {
-      await rm(posRun, { recursive: true, force: true });
-      await rm(posWork, { recursive: true, force: true });
+      await posRunTmp.cleanup();
+      await posWorkTmp.cleanup();
     }
 
     // Negative control: same provisioning, nothing touched.
-    const negRun = await mkdtemp(path.join(tmpdir(), 'aab-fsdiff-neg-run-'));
-    const negWork = await mkdtemp(path.join(tmpdir(), 'aab-fsdiff-neg-work-'));
+    const negRunTmp = await makeSelfTestDir('aab-fsdiff-neg-run-', opts);
+    const negRun = negRunTmp.dir;
+    const negWorkTmp = await makeSelfTestDir('aab-fsdiff-neg-work-', opts);
+    const negWork = negWorkTmp.dir;
     let negative = false;
     try {
       const { teardown } = await this.provision('selftest-neg', negRun, { workdir: negWork });
@@ -332,8 +336,8 @@ export class FsDiffDetector implements Detector {
         await teardown();
       }
     } finally {
-      await rm(negRun, { recursive: true, force: true });
-      await rm(negWork, { recursive: true, force: true });
+      await negRunTmp.cleanup();
+      await negWorkTmp.cleanup();
     }
 
     return { positive, negative };

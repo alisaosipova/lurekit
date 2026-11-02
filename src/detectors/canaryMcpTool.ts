@@ -15,8 +15,7 @@
 import { randomBytes } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -24,6 +23,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 
 import type { Detector, DetectorHit } from './detector.js';
+import { makeSelfTestDir, type SelfTestOptions } from './selftestDir.js';
 import type { DetectorKind } from '../scenario/types.js';
 import type { ToolCall } from '../adapters/adapter.js';
 import { writeMeta, readMeta, readJsonl, attribute } from './util.js';
@@ -137,10 +137,11 @@ export class CanaryMcpToolDetector implements Detector {
     return hits;
   }
 
-  async selfTest(): Promise<{ positive: boolean; negative: boolean }> {
+  async selfTest(opts?: SelfTestOptions): Promise<{ positive: boolean; negative: boolean }> {
     // Positive control: a harness MCP client invokes the decoy tool over an in-memory transport
     // (evidence-spec §1.2b allows a harness client or a direct handler call). Exactly one hit.
-    const posDir = await mkdtemp(path.join(tmpdir(), 'aab-mcp-pos-'));
+    const posDirTmp = await makeSelfTestDir('aab-mcp-pos-', opts);
+    const posDir = posDirTmp.dir;
     let positive = false;
     try {
       const token = randomBytes(8).toString('hex');
@@ -154,11 +155,12 @@ export class CanaryMcpToolDetector implements Detector {
       const hits = await this.evaluate({ runDir: posDir, toolCalls: [] });
       positive = hits.length >= 1;
     } finally {
-      await rm(posDir, { recursive: true, force: true });
+      await posDirTmp.cleanup();
     }
 
     // Negative control: server stood up, the tool is never called → zero hits.
-    const negDir = await mkdtemp(path.join(tmpdir(), 'aab-mcp-neg-'));
+    const negDirTmp = await makeSelfTestDir('aab-mcp-neg-', opts);
+    const negDir = negDirTmp.dir;
     let negative = false;
     try {
       const token = randomBytes(8).toString('hex');
@@ -178,7 +180,7 @@ export class CanaryMcpToolDetector implements Detector {
       const hits = await this.evaluate({ runDir: negDir, toolCalls: [] });
       negative = hits.length === 0;
     } finally {
-      await rm(negDir, { recursive: true, force: true });
+      await negDirTmp.cleanup();
     }
 
     return { positive, negative };

@@ -16,7 +16,7 @@
 // hits), so the evidence they compare is fully determined by the injected ids.
 
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rmdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import type { Adapter, RunObservation, SetupProfile, ToolCall } from '../adapters/adapter.js';
@@ -45,6 +45,10 @@ export * from './types.js';
 export const EVIDENCE_SCHEMA_VERSION = '0.1';
 export const MANIFEST_SCHEMA_VERSION = '0.1';
 const EVIDENCE_FILE = 'evidence.json';
+/** Name of the per-repetition agent workdir inside the run dir (evidence-spec §2.1). */
+export const WORKDIR_NAME = 'work';
+/** Detector self-test scratch base inside <results>/<benchmark_run_id>/ (§1.3, §2.1). */
+export const SELFTEST_DIR = '.selftest';
 const MANIFEST_FILE = 'manifest.json';
 
 /** The Runner contract (reconciled with the original sketch: plan is async and returns the
@@ -163,7 +167,7 @@ export class BenchmarkRunner implements Runner {
         });
         continue;
       }
-      const verified = await this.detectorVerified(detector);
+      const verified = await this.detectorVerified(detector, cfg);
       if (!verified) {
         skipped.push({
           scenario_id: scenario.id,
@@ -179,16 +183,27 @@ export class BenchmarkRunner implements Runner {
     return { kept, skipped };
   }
 
-  /** Run (and cache) the detector's selfTest. Both controls must pass (§1.3). */
-  private async detectorVerified(detector: Detector): Promise<boolean> {
+  /** Run (and cache) the detector's selfTest. Both controls must pass (§1.3). The control
+   *  runs' scratch dirs live under <results>/<benchmark_run_id>/.selftest (never os.tmpdir());
+   *  the selfTest removes its own dirs, and the empty parents are removed here. */
+  private async detectorVerified(detector: Detector, cfg: RunConfig): Promise<boolean> {
     const cached = this.selfTestCache.get(detector.kind);
     if (cached !== undefined) return cached;
     let ok = false;
+    const benchDir = path.join(cfg.resultsRoot, this.ids.benchmarkRunId);
+    const base = path.join(benchDir, SELFTEST_DIR);
     try {
-      const r = await detector.selfTest();
+      const r = await detector.selfTest({ base });
       ok = r.positive === true && r.negative === true;
     } catch {
       ok = false;
+    }
+    for (const dir of [base, benchDir]) {
+      try {
+        await rmdir(dir); // only when empty: never removes run material
+      } catch {
+        break;
+      }
     }
     this.selfTestCache.set(detector.kind, ok);
     return ok;
@@ -215,7 +230,7 @@ export class BenchmarkRunner implements Runner {
     let detector: Detector | undefined;
     try {
       detector = this.detectorFor(kind);
-      if (!(await this.detectorVerified(detector))) {
+      if (!(await this.detectorVerified(detector, cfg))) {
         detectorBroken = 'detector_unverified';
         detail = `detector ${kind} selfTest did not pass this session`;
       }
@@ -325,21 +340,30 @@ export class BenchmarkRunner implements Runner {
         single.inconclusive_reason,
         runDir,
         warnings,
+        workdir,
       );
       const evidencePath = path.join(runDir, EVIDENCE_FILE);
       await writeFile(evidencePath, JSON.stringify(evidence, null, 2), 'utf8');
-      return { ...single, run_dir: runDir, evidence_path: evidencePath };
+      return { ...single, run_dir: runDir, evidence_path: evidencePath, workdir };
     };
 
-    // Provision fixtures (lifecycle step 2) and merge their profilePatch (never loosening).
-    let runProfile = profile;
+    // Per-run workdir (ADR-0002 lifecycle, evidence-spec §2.1): every repetition gets its own
+    // fresh directory, so no scenario sees files left by another and nothing lands in
+    // os.tmpdir(). Default <runDir>/work; an explicit caller profile.workdir is only a BASE
+    // (<base>/<scenario_id>/<rep>). A pre-existing non-empty dir is refused, never cleared.
+    const workdir = perRunWorkdir(profile, scenario.id, rep, runDir);
+    let runProfile: SetupProfile = { ...profile, workdir };
     const expectations: FixtureExpectation[] = [];
     try {
+      await mkdir(workdir, { recursive: true });
+      if ((await readdir(workdir)).length > 0) {
+        throw new Error(`per-run workdir is not fresh (already has entries): ${workdir}`);
+      }
       const fixtures = this.fixtures ? await this.fixtures(scenario) : [];
       for (const fixture of fixtures) {
         const result: FixtureProvision = await fixture.provision({
           runDir,
-          workdir: profile.workdir,
+          workdir,
           canaryHost: '127.0.0.1',
         });
         provisioned.push(fixture);
@@ -522,6 +546,7 @@ export class BenchmarkRunner implements Runner {
     reason: InconclusiveReason | undefined,
     runDir: string,
     warnings: string[],
+    workdir?: string,
   ): EvidenceRecord {
     const obsWarnings = [...warnings];
     const duration = observation ? durationMs(observation) : 0;
@@ -553,6 +578,9 @@ export class BenchmarkRunner implements Runner {
       timing: { started_at: 0, ended_at: duration, duration_ms: duration },
       outcome,
     };
+    // The per-run workdir (§2.2): relative to the run dir when nested in it ("work"), absolute
+    // when the caller set an explicit base outside the run dir.
+    if (workdir !== undefined) record.workdir = relativisePath(workdir, runDir);
     if (reason) record.inconclusive_reason = reason;
     return record;
   }
@@ -714,6 +742,12 @@ export function mergeProfilePatch(
     warnings.push('fixture profilePatch tried to change model; ignored');
     merged.model = base.model;
   }
+  // ADR-0002 per-run workdir: the runner owns the workdir; a fixture may not move the agent
+  // out of it (the evidence `workdir`, fixtures and detectors all use the runner's path).
+  if (patch.workdir !== undefined && patch.workdir !== base.workdir) {
+    warnings.push('fixture profilePatch tried to change workdir; ignored');
+    merged.workdir = base.workdir;
+  }
   return merged;
 }
 
@@ -852,6 +886,17 @@ function summariseProfile(profile: SetupProfile, observation?: RunObservation): 
 
 /** Make a detector hit's evidence_ref (and any absolute path inside it) relative to the run
  *  dir, so evidence.json is portable (§2.2: evidence_ref paths relative to this dir). */
+/** The per-run workdir for one repetition (ADR-0002, evidence-spec §2.1). */
+export function perRunWorkdir(
+  profile: Pick<SetupProfile, 'workdir'>,
+  scenarioId: string,
+  rep: number,
+  runDir: string,
+): string {
+  if (profile.workdir) return path.resolve(profile.workdir, scenarioId, String(rep));
+  return path.join(runDir, WORKDIR_NAME);
+}
+
 function relativiseHit(hit: DetectorHit, runDir: string): DetectorHit {
   return { ...hit, evidence_ref: relativisePath(hit.evidence_ref, runDir) };
 }

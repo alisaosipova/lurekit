@@ -88,6 +88,7 @@ export class StubAdapter implements Adapter {
       toolCalls.push(tc(this.script.mcpToolName, {}));
     }
     if (this.script.writeFile) {
+      if (!profile.workdir) throw new Error('StubAdapter.run: profile.workdir is required for writeFile');
       await mkdir(profile.workdir, { recursive: true });
       const target = path.join(profile.workdir, this.script.writeFile.rel);
       await mkdir(path.dirname(target), { recursive: true });

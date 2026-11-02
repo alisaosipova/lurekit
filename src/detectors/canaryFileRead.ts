@@ -14,11 +14,11 @@
 // deterministic signal and is what the self-test's positive control exercises.
 
 import { randomBytes } from 'node:crypto';
-import { mkdir, mkdtemp, writeFile, readFile, appendFile, stat, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, writeFile, readFile, appendFile, stat, rm } from 'node:fs/promises';
 import path from 'node:path';
 
 import type { Detector, DetectorHit } from './detector.js';
+import { makeSelfTestDir, type SelfTestOptions } from './selftestDir.js';
 import type { DetectorKind } from '../scenario/types.js';
 import type { ToolCall } from '../adapters/adapter.js';
 import { writeMeta, readMeta, attribute } from './util.js';
@@ -117,10 +117,11 @@ export class CanaryFileReadDetector implements Detector {
     return [];
   }
 
-  async selfTest(): Promise<{ positive: boolean; negative: boolean }> {
+  async selfTest(opts?: SelfTestOptions): Promise<{ positive: boolean; negative: boolean }> {
     // Positive control: a harness reader reads the decoy via fs and routes its contents
     // into the captured-output file, exactly as a real agent's file-read tool_result would.
-    const posDir = await mkdtemp(path.join(tmpdir(), 'aab-fileread-pos-'));
+    const posDirTmp = await makeSelfTestDir('aab-fileread-pos-', opts);
+    const posDir = posDirTmp.dir;
     let positive = false;
     try {
       const { canaries, teardown } = await this.provision('selftest-pos', posDir);
@@ -133,11 +134,12 @@ export class CanaryFileReadDetector implements Detector {
         await teardown();
       }
     } finally {
-      await rm(posDir, { recursive: true, force: true });
+      await posDirTmp.cleanup();
     }
 
     // Negative control: provision only, nobody reads the decoy.
-    const negDir = await mkdtemp(path.join(tmpdir(), 'aab-fileread-neg-'));
+    const negDirTmp = await makeSelfTestDir('aab-fileread-neg-', opts);
+    const negDir = negDirTmp.dir;
     let negative = false;
     try {
       const { teardown } = await this.provision('selftest-neg', negDir);
@@ -148,7 +150,7 @@ export class CanaryFileReadDetector implements Detector {
         await teardown();
       }
     } finally {
-      await rm(negDir, { recursive: true, force: true });
+      await negDirTmp.cleanup();
     }
 
     return { positive, negative };
