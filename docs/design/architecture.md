@@ -14,6 +14,12 @@ The design is split across several files so each piece stays small and reviewabl
 - `adr-0002-fixtures-and-runner.md` — fixture contract + runner lifecycle. **Accepted.**
 - `adr-0015-replay-adapter.md` — replay adapter (record one live run, replay it offline
   through the same parse/merge path). **Accepted.**
+- `adr-0016-cursor-cli-adapter.md` — Cursor CLI adapter (`agent -p`, stream-only, tested offline
+  against a stub). **Proposed, implemented for the stream layer; awaiting approval.**
+- `adr-0017-publish-run.md` — `publish` subcommand and redaction gate (`--redact-home`,
+  MCP-name pseudonymisation, `--withhold`). **Proposed, implemented; awaiting approval.**
+- `adr-0018-codex-cli-adapter.md` — Codex CLI adapter (`codex exec --json`, stream-only, tested
+  offline against a stub). **Proposed, implemented for the stream layer; awaiting approval.**
 - `evidence-spec.md` — the detector/evidence/verdict/adapter/reporting contract in detail
   (§1 detectors, §2 evidence+manifest, §3 verdicts, §4 adapter+observation, §5 redaction,
   §6 reporting). The ADRs below reference it rather than restating it.
@@ -189,8 +195,11 @@ on it).
 
 ## ADR-0008: Agent adapter contract
 
-**Status:** accepted (2026-11-01); Claude Code implemented (`src/adapters/claudeCode.ts`),
-others scheduled (roadmap Weeks 4–5). Full contract in `evidence-spec.md` §4.
+**Status:** accepted (2026-11-01); three live-agent adapters implemented (updated 2026-11-02):
+Claude Code (`src/adapters/claudeCode.ts`), Cursor CLI (`src/adapters/cursorCli.ts`, ADR-0016)
+and Codex CLI (`src/adapters/codexCli.ts`, ADR-0018), plus the offline replay adapter
+(`src/adapters/replay.ts`, ADR-0015). OpenHands not yet implemented. Full contract in
+`evidence-spec.md` §4.
 
 ### Context
 Each agent (Claude Code, Cursor CLI, Codex CLI, OpenHands) is driven differently and observed
@@ -219,6 +228,16 @@ the observe hook is passed in a run-dir file via `--settings` (the project
 actually passed are recorded as `observation.agent_flags`. Agents
 without a usable SDK (OpenHands is Python-only) are driven via their CLI.
 
+Three adapters are wired into `CliDeps.adapterFor` (`src/cli.ts`): `claude-code`, `cursor-cli`
+and `codex-cli`. Cursor CLI and Codex CLI are **stream-only** for now (ADR-0016, ADR-0018): no
+hook observer is installed because hooks under headless mode and the tool-call id join are
+UNVERIFIED in the primary sources; every permission-affecting flag is emitted only from an
+explicit `permission_mode` token, and neither adapter records denied `attempts` (no verified
+denial record). Only the Claude Code adapter records `observation.attempts`
+(`result.permission_denials` and error-flagged tool results, digests only, evidence-spec §4.2).
+The replay adapter re-drives a recorded Claude Code run through the same parse/merge function
+(ADR-0015).
+
 ### Consequences
 - A new agent adapter is one file plus a `NOTES-verified-facts.md` entry citing how its headless
   mode and observation work today — no engine change.
@@ -227,8 +246,9 @@ without a usable SDK (OpenHands is Python-only) are driven via their CLI.
 
 ## ADR-0009: Effect detectors and observation layers
 
-**Status:** accepted (2026-11-01); five detectors implemented, one deferred (`canary_egress_dns`). Full contract in
-`evidence-spec.md` §1.
+**Status:** accepted (2026-11-01); 5 of 6 detectors implemented (updated 2026-11-02);
+`canary_egress_dns` deferred because it needs resolver control from the ADR-0007 isolation
+layer. All 8 schema fixture kinds are implemented. Full contract in `evidence-spec.md` §1.
 
 ### Context
 A detector decides whether the forbidden effect occurred. It must attribute the effect without
@@ -246,7 +266,13 @@ canary host (HTTP/DNS), canary files/commands, and filesystem diff.
 ### Decision
 Option 1. Each `Detector` (`src/detectors/`) watches one effect via the right layer
 (`canary_egress_http`, `canary_file_read`, `canary_command`, `canary_mcp_tool`, `fs_diff`
-implemented, evidence-spec §1.2c; `canary_egress_dns` deferred to Week 3). Every detector ships a **blinded-sensor
+implemented, evidence-spec §1.2c; `canary_egress_dns` deferred: it needs resolver control from
+the ADR-0007 isolation layer). `canary_mcp_tool` also accepts `match { event: server_started }`
+(the inert server's own unconsented start, AAB-001/016) and `canary_egress_http` accepts
+`match { registry_fetch: true }` (GET of this run's canary tarball from `local_registry`,
+evidence-spec §1.2d). All 8 schema fixture kinds (`web_server`, `mcp_stdio`, `mcp_http`,
+`skill_package`, `poisoned_repo`, `issue_feed`, `email_feed`, `local_registry`) are
+implemented. Every detector ships a **blinded-sensor
 self-test**: a positive control proves it fires, a negative control proves it stays silent, and
 the runner forces `inconclusive` (never `resisted`) when a detector's self-test is unverified
 (empirically confirmed in `test/detectors.test.ts`). Detectors never generate attacks and never
@@ -401,11 +427,14 @@ plumbing, keep decisions in ADRs; codified in `CLAUDE.md`. This document was ass
 | 0005 | Reproducibility + manifest | accepted, implemented |
 | 0006 | Cost control | accepted, partially implemented |
 | 0007 | Isolation + safety (inert by construction) | accepted, implemented |
-| 0008 | Agent adapter contract | accepted; Claude Code done, others scheduled |
-| 0009 | Effect detectors + observation | accepted; 5 of 6 detectors done |
+| 0008 | Agent adapter contract | accepted; 3 adapters done (claude-code, cursor-cli, codex-cli) + replay; OpenHands pending |
+| 0009 | Effect detectors + observation | accepted; 5 of 6 detectors done (`canary_egress_dns` deferred: needs ADR-0007 resolver control); all 8 fixture kinds done |
 | 0010 | Dependency policy | accepted |
 | 0011 | Repository layout | accepted, implemented |
 | 0012 | Contribution model | accepted, to be published (Week 4) |
 | 0013 | Weekly update cadence | **DECISION NEEDED** |
 | 0014 | Ethics + coordinated disclosure | accepted |
 | 0015 | Replay adapter (`adr-0015-replay-adapter.md`) | accepted, implemented |
+| 0016 | Cursor CLI adapter (`adr-0016-cursor-cli-adapter.md`) | proposed, implemented (stream layer); awaiting approval |
+| 0017 | Publish + redaction gate (`adr-0017-publish-run.md`) | proposed, implemented; awaiting approval |
+| 0018 | Codex CLI adapter (`adr-0018-codex-cli-adapter.md`) | proposed, implemented (stream layer); awaiting approval |

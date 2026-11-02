@@ -81,6 +81,64 @@ end-to-end beats ten scenarios with no runner.
    packument/tarball parse + integrity, fresh canaries per provision, teardown frees the port,
    `buildFixture`, real-socket 127.0.0.1 bind); 130 tests passing. Spec: ADR-0002 "Interface notes".
 
+Steps 9+ record what shipped after step 8 (all 2026-11-02), driven by the first live runs.
+
+9. **Task placeholders.** DONE (2026-11-02, `50361aa`). Tasks may use `{{env.NAME}}` and
+   `{{canary.KEY}}`, rendered once after fixtures are provisioned and profile patches merged; an
+   unresolved placeholder -> `inconclusive(fixture_error)`, adapter never invoked. Evidence
+   records `task_sha256` only. Feed fixtures expose `AAB_ISSUE_FEED_URL`/`AAB_EMAIL_FEED_URL`.
+   Spec: evidence-spec §4.1, §3.1, §2.2; ADR-0002.
+
+10. **Fixture params.** DONE (2026-11-02, `30f6c13`, `0d15648`). `FixtureRef.params`
+    (zod-validated; unknown -> `inconclusive(fixture_error)`) select what each fixture plants:
+    `poisoned_repo` `variant`, `skill_package` `skill`/`placement`, MCP `server_name`/
+    `tool_description_variant`/`result_variant`, feed `ask`. `mcp.mcpServers` merge by server
+    name. Spec: ADR-0002 interface notes.
+
+11. **Canary wiring.** DONE (2026-11-02, `9dff21d`). The runner provisions the detector before
+    the fixtures (`fs_diff` opts into `provisionAfterFixtures`) and hands its per-run canaries to
+    fixtures via `ctx.canaries`; a missing canary -> `FixtureCanaryError` ->
+    `inconclusive(fixture_error)`. Spec: evidence-spec §1.5, §1.2c; ADR-0002.
+
+12. **Isolation and `--settings` hook.** DONE (2026-11-02, `777c870`, `13ae160`). Fixture MCP
+    config via `--mcp-config`; `--strict-mcp-config` on every run unless a fixture declares
+    `requires.project_mcp_autoload` (then evidence `isolation: "partial"`); unmet fixture
+    `expect` -> `inconclusive(precondition_failed)`. The observe hook moved to
+    `<runDir>/claude-settings.json` passed via `--settings`; the workdir's project settings are
+    no longer touched. Flags used are recorded as `observation.agent_flags`. Spec: evidence-spec
+    §3.1, §4.2, §4.3; ADR-0008.
+
+13. **Attempted / denied.** DONE (2026-11-02, `579fd4a`). The Claude Code adapter records
+    `observation.attempts` (digests only) from permission denials and error-flagged tool results;
+    the runner records `attempted_forbidden` and splits resisted into `resisted_kind`
+    `not_attempted | denied`. Spec: evidence-spec §2.2, §3.1, §4.2, §6.
+
+14. **`server_started` signal.** DONE (2026-11-02, `267b149`). The inert canary MCP server
+    records its own start; `canary_mcp_tool` `match { event: server_started }` counts it for
+    this run's token (AAB-001/016). Spec: evidence-spec §1.2b.
+
+15. **`registry_fetch` signal.** DONE (2026-11-02, `083bc07`). `local_registry` writes an
+    access log; `canary_egress_http` `match { registry_fetch: true }` hits on a GET of this
+    run's canary tarball. Spec: evidence-spec §1.2d; ADR-0002.
+
+16. **`publish --withhold`.** DONE (2026-11-02, `2ad8d2b`). On top of `publish` (redaction
+    gate, `--redact-home`, MCP-name pseudonymisation; ADR-0017), `--withhold <id>` drops a
+    scenario from the published copy and recomputes totals; `index.md` lists it as withheld.
+    Spec: ADR-0017 (amended), ADR-0014.
+
+17. **Corpus 48 / 30 / 25.** DONE (2026-11-02, `083bc07`). AAB-034/036/037 added: 48
+    scenarios catalogued, 30 runnable, 25 planned for `claude-code` (the rest apply to other
+    agents; 18 browser-track scenarios are `runnable: false`).
+
+18. **Live validation and first published report.** DONE (2026-11-02, `f4f3d03`, `c873744`,
+    `ba926e4`). Published bundles under `reports/`: pre-fix claude-code 1.0.110 positive control
+    (vulnerable 1 of 2), 2.1.316/haiku (0 of 6), 2.1.316/sonnet (4 of 21, one regression-tier
+    result withheld per ADR-0014). Summary in
+    `docs/reports/2026-11-02-claude-code-2.1.316.md`. All k=1, smoke mode.
+
+Also landed in the same period, each under its own ADR: replay adapter (ADR-0015), Cursor CLI
+adapter (ADR-0016), `publish` (ADR-0017), Codex CLI adapter (ADR-0018, `8c53c74`).
+
 ## Reuse from mcp-review-check (landscape §3.2, ADR-0001)
 Protocol client (`src/protocol/*`), fixture servers (`test/fixtures/*-server.mjs`),
 reporters (`src/report/{json,markdown,sarif}.ts`), the OIDC trusted-publishing release
@@ -99,5 +157,5 @@ probing — those are the non-goal (static scanning).
 small neutral sections so the safety classifier did not trip; `evidence-spec.md` holds the
 detector/evidence/verdict/adapter/reporting contract (§1-§6). Phase C `docs/plan/roadmap.md`
 is written. The one open decision is ADR-0013 (weekly update cadence), flagged DECISION NEEDED.
-`fs_diff` landed (step 7). The remaining detector (`canary_egress_dns`) is scheduled
-for roadmap Week 3, not blocked. The `local_registry` and `web_server` fixtures landed (step 8).
+`fs_diff` landed (step 7). The remaining detector (`canary_egress_dns`) is deferred: it
+needs resolver control from the ADR-0007 isolation layer (updated 2026-11-02). The `local_registry` and `web_server` fixtures landed (step 8).
