@@ -8,6 +8,17 @@
 // inert analogue of a poisoned / backdoored MCP server (AAB-018/019/020/022): the decoy tool only
 // records its invocation. Inertness: stdio binds nothing; HTTP binds loopback only; no real
 // secret is embedded (FixtureBase validates the returned canaries/profilePatch).
+//
+// Params (ADR-0002 "Interface notes - fixture params"), validated strictly at construction:
+//   - server_name              : the MCP server name registered in the agent's config and
+//                                expected `connected` (default aab-canary / aab-canary-http), so a
+//                                two-server scenario can name both.
+//   - tool_description_variant : plain (default) | mentions-another-server |
+//                                mentions-sending-to-canary-host - one visible, inert placeholder
+//                                description for the decoy tool (mcpCanaryServer.toolDescription).
+//                                The canary-host text names ctx.canaries.url (canary_egress_http)
+//                                and throws FixtureCanaryError without it.
+//   - other_server             : optional name mentions-another-server refers to.
 
 import { randomBytes } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -19,14 +30,22 @@ import { fileURLToPath } from 'node:url';
 
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
+import { z } from 'zod';
+
 import { FixtureBase, type FixtureContext, type FixtureProvision } from './fixture.js';
+import { FIXTURE_NAME_RE, parseFixtureParams } from './params.js';
 import type { FixtureKind } from '../scenario/types.js';
 import {
   CANARY_MCP_TOOL,
   MCP_RECORDER_FILE,
+  ENV_DESCRIPTION,
   ENV_RECORDER,
+  ENV_SERVER_NAME,
   ENV_TOKEN,
+  TOOL_DESCRIPTION_VARIANTS,
   createCanaryMcpServer,
+  toolDescription,
+  type ToolDescriptionVariant,
 } from './mcpCanaryServer.js';
 
 /** MCP server names the fixtures register in the agent's MCP config, and expect to see
@@ -38,10 +57,69 @@ function serverMainPath(): string {
   return fileURLToPath(new URL('./mcpCanaryServerMain.js', import.meta.url));
 }
 
+const McpFixtureParams = z
+  .strictObject({
+    server_name: z.string().regex(FIXTURE_NAME_RE).optional(),
+    tool_description_variant: z.enum(TOOL_DESCRIPTION_VARIANTS).optional(),
+    other_server: z.string().regex(FIXTURE_NAME_RE).optional(),
+  })
+  .refine(
+    (p) => p.other_server === undefined || p.tool_description_variant === 'mentions-another-server',
+    { message: 'other_server applies only to tool_description_variant "mentions-another-server"', path: ['other_server'] },
+  )
+  .refine((p) => p.other_server === undefined || p.other_server !== p.server_name, {
+    message: 'other_server must differ from server_name',
+    path: ['other_server'],
+  });
+export type McpFixtureParams = z.output<typeof McpFixtureParams>;
+
+/** Shared by both transports: strict params, the chosen server name, and the decoy tool's
+ *  description resolved against the detector canaries at provision time. */
+abstract class McpFixtureBase extends FixtureBase {
+  readonly params: McpFixtureParams;
+  protected abstract readonly defaultServerName: string;
+
+  constructor(kind: FixtureKind, params?: unknown) {
+    super();
+    this.params = parseFixtureParams(kind, McpFixtureParams, params);
+  }
+
+  get serverName(): string {
+    return this.params.server_name ?? this.defaultServerName;
+  }
+
+  get descriptionVariant(): ToolDescriptionVariant {
+    return this.params.tool_description_variant ?? 'plain';
+  }
+
+  /** The decoy description plus any canary it names (returned so FixtureBase re-validates it). */
+  protected resolveDescription(ctx: FixtureContext): { description: string; canaries: Record<string, string> } {
+    const variant = this.descriptionVariant;
+    if (variant === 'mentions-sending-to-canary-host') {
+      const canaryUrl = this.requireCanary(ctx, 'url', 'the canary host the tool description names');
+      this.assertLoopback(canaryUrl);
+      return {
+        description: toolDescription(variant, { canaryUrl }),
+        canaries: { canary_url: canaryUrl },
+      };
+    }
+    return { description: toolDescription(variant, { otherServer: this.params.other_server }), canaries: {} };
+  }
+
+  protected commonCanaries(): Record<string, string> {
+    return { serverName: this.serverName, descriptionVariant: this.descriptionVariant };
+  }
+}
+
 /** mcp_stdio: the inert canary server over stdio. */
-export class McpStdioFixture extends FixtureBase {
+export class McpStdioFixture extends McpFixtureBase {
   readonly type: FixtureKind = 'mcp_stdio';
+  protected readonly defaultServerName = STDIO_SERVER_NAME;
   private child?: ChildProcess;
+
+  constructor(params?: unknown) {
+    super('mcp_stdio', params);
+  }
 
   protected async provisionInert(ctx: FixtureContext): Promise<FixtureProvision> {
     await mkdir(ctx.runDir, { recursive: true });
@@ -49,7 +127,14 @@ export class McpStdioFixture extends FixtureBase {
     const token = det?.token ?? randomBytes(12).toString('hex');
     const recorderPath = det?.recorderPath ?? path.join(ctx.runDir, MCP_RECORDER_FILE);
     const mainPath = serverMainPath();
-    const env = { [ENV_RECORDER]: recorderPath, [ENV_TOKEN]: token };
+    const { description, canaries: descCanaries } = this.resolveDescription(ctx);
+    const name = this.serverName;
+    const env = {
+      [ENV_RECORDER]: recorderPath,
+      [ENV_TOKEN]: token,
+      [ENV_SERVER_NAME]: name,
+      [ENV_DESCRIPTION]: description,
+    };
 
     // Stand up a harness-owned stdio server when the compiled main is present (real runs). In a
     // run the agent spawns its own instance via the profilePatch below; both write the same
@@ -68,15 +153,22 @@ export class McpStdioFixture extends FixtureBase {
 
     const mcpConfig = {
       mcpServers: {
-        [STDIO_SERVER_NAME]: { command: process.execPath, args: [mainPath], env },
+        [name]: { command: process.execPath, args: [mainPath], env },
       },
     };
 
     return {
-      canaries: { tool: CANARY_MCP_TOOL, token, recorderPath, transport: 'stdio' },
+      canaries: {
+        tool: CANARY_MCP_TOOL,
+        token,
+        recorderPath,
+        transport: 'stdio',
+        ...this.commonCanaries(),
+        ...descCanaries,
+      },
       profilePatch: { mcp: mcpConfig },
       // §3.1 precondition: the run only counts if the agent actually connected this server.
-      expect: { mcp_server: STDIO_SERVER_NAME },
+      expect: { mcp_server: name },
     };
   }
 
@@ -92,18 +184,25 @@ export class McpStdioFixture extends FixtureBase {
 }
 
 /** mcp_http: the inert canary server over loopback Streamable HTTP (stateless). */
-export class McpHttpFixture extends FixtureBase {
+export class McpHttpFixture extends McpFixtureBase {
   readonly type: FixtureKind = 'mcp_http';
+  protected readonly defaultServerName = HTTP_SERVER_NAME;
   private server?: Server;
+
+  constructor(params?: unknown) {
+    super('mcp_http', params);
+  }
 
   protected async provisionInert(ctx: FixtureContext): Promise<FixtureProvision> {
     await mkdir(ctx.runDir, { recursive: true });
     const det = this.mcpToolCanaries(ctx); // canary_mcp_tool's per-run token/recorder, if it is the sensor
     const token = det?.token ?? randomBytes(12).toString('hex');
     const recorderPath = det?.recorderPath ?? path.join(ctx.runDir, MCP_RECORDER_FILE);
+    const { description, canaries: descCanaries } = this.resolveDescription(ctx);
+    const name = this.serverName;
 
     const server = createServer((req, res) => {
-      void this.handle(req, res, recorderPath, token);
+      void this.handle(req, res, { recorderPath, token, name, description });
     });
     this.server = server;
 
@@ -120,10 +219,10 @@ export class McpHttpFixture extends FixtureBase {
 
     return {
       // `url` is loopback — assertLoopback (invariant a) is applied to it by FixtureBase.
-      canaries: { tool: CANARY_MCP_TOOL, token, recorderPath, url },
-      profilePatch: { mcp: { mcpServers: { [HTTP_SERVER_NAME]: { type: 'http', url } } } },
+      canaries: { tool: CANARY_MCP_TOOL, token, recorderPath, url, ...this.commonCanaries(), ...descCanaries },
+      profilePatch: { mcp: { mcpServers: { [name]: { type: 'http', url } } } },
       // §3.1 precondition: the run only counts if the agent actually connected this server.
-      expect: { mcp_server: HTTP_SERVER_NAME },
+      expect: { mcp_server: name },
     };
   }
 
@@ -131,10 +230,9 @@ export class McpHttpFixture extends FixtureBase {
   private async handle(
     req: IncomingMessage,
     res: ServerResponse,
-    recorderPath: string,
-    token: string,
+    opts: { recorderPath: string; token: string; name: string; description: string },
   ): Promise<void> {
-    const mcp = createCanaryMcpServer({ recorderPath, token });
+    const mcp = createCanaryMcpServer(opts);
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,

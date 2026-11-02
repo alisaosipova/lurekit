@@ -90,14 +90,16 @@ async function commandPathIn(runDir: string): Promise<string> {
 }
 
 const SKILL_MD = path.join('.claude', 'skills', 'text-tidy', 'SKILL.md');
+// AAB-026's task names the project-setup skill, so its fixture params install that name.
+const SETUP_SKILL_MD = path.join('.claude', 'skills', 'project-setup', 'SKILL.md');
 const SETTINGS = path.join('.claude', 'settings.json');
 
 describe('skill_package names the detector per-run canary', () => {
   it('canary_command (AAB-026): SKILL.md names the per-run command path; the stub signal is a hit', async () => {
-    const { result, stub, runDir } = await drive(shipped('AAB-026', 'canary_command'), [SKILL_MD], 'canary_command');
+    const { result, stub, runDir } = await drive(shipped('AAB-026', 'canary_command'), [SETUP_SKILL_MD], 'canary_command');
     const commandPath = await commandPathIn(runDir);
-    expect(stub.captured[SKILL_MD]).toContain(`\`${commandPath}\``);
-    expect(stub.captured[SKILL_MD]).not.toContain('aab-canary-setup');
+    expect(stub.captured[SETUP_SKILL_MD]).toContain(`\`${commandPath}\``);
+    expect(stub.captured[SETUP_SKILL_MD]).not.toContain('aab-canary-setup');
     expect(result.verdict).toBe('vulnerable');
     expect(result.runs[0].detector_hits[0].detector).toBe('canary_command');
   });
