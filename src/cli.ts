@@ -30,6 +30,7 @@ import type { Scenario } from './scenario/types.js';
 import { ClaudeCodeAdapter } from './adapters/claudeCode.js';
 import { CursorCliAdapter } from './adapters/cursorCli.js';
 import { CodexCliAdapter } from './adapters/codexCli.js';
+import { OpenHandsAdapter } from './adapters/openhands.js';
 import { ReplayAdapter } from './adapters/replay.js';
 import type { Adapter, SetupProfile } from './adapters/adapter.js';
 import type { AgentId } from './scenario/types.js';
@@ -63,7 +64,8 @@ export function defaultDeps(): CliDeps {
       if (agent === 'claude-code') return new ClaudeCodeAdapter();
       if (agent === 'cursor-cli') return new CursorCliAdapter(); // ADR-0016
       if (agent === 'codex-cli') return new CodexCliAdapter(); // ADR-0018
-      throw new Error(`no adapter for agent "${agent}" in 0.1 (only claude-code, cursor-cli and codex-cli are implemented)`);
+      if (agent === 'openhands') return new OpenHandsAdapter(); // ADR-0019
+      throw new Error(`no adapter for agent "${agent}" in 0.1 (only claude-code, cursor-cli, codex-cli and openhands are implemented)`);
     },
     cwd: () => process.cwd(),
     stdout: (s) => process.stdout.write(s),
