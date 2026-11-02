@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to a pull request cancels its older run; runs on main always finish, so every main commit gets a result.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: Node ${{ matrix.node }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        # engines: >=20.19. 20.19 is the oldest supported release (Node 20 reached end of life on 2026-04-30, so it
+        # runs on Linux only); 22 and 24 are the LTS lines and run on every OS.
+        node: ['20.19', '22', '24']
+        exclude:
+          - os: macos-latest
+            node: '20.19'
+          - os: windows-latest
+            node: '20.19'
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      # No dependency install scripts: the runtime dependencies have none, and esbuild (vitest) runs from its
+      # prebuilt @esbuild/<platform> package without its postinstall.
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+      # Offline: the tests use a stub adapter; no live agent is launched.
+      - run: npm test
+      - run: npm run build
+      - name: Validate scenarios (schema, required source.primary_url)
+        run: node dist/tools/validate-scenarios.js scenarios
+      - name: Smoke the bin (offline commands only)
+        run: |
+          node dist/cli.js --version
+          node dist/cli.js selftest
+
+  package:
+    # The installed bin, not `node dist/cli.js`: npm links bins as symlinks on Linux and macOS, so this is the only
+    # step that runs the CLI the way a user does.
+    name: Pack, install the tarball and run it
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      # No prepack script: build before packing, as release.yml does.
+      - run: npm run build
+      - name: Pack, install the tarball and run the installed bin (offline commands only)
+        run: |
+          npm pack --pack-destination "$RUNNER_TEMP"
+          mkdir "$RUNNER_TEMP/smoke" && cd "$RUNNER_TEMP/smoke"
+          npm init -y > /dev/null
+          npm install --ignore-scripts "$RUNNER_TEMP"/agent-attack-bench-*.tgz
+          bin="$RUNNER_TEMP/smoke/node_modules/.bin/agent-attack-bench"
+          test "$("$bin" --version)" = "$(node -p "require('$GITHUB_WORKSPACE/package.json').version")"
+          "$bin" validate node_modules/agent-attack-bench/scenarios
+          "$bin" selftest

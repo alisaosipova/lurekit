@@ -2,11 +2,33 @@
   "name": "agent-attack-bench",
   "version": "0.0.0",
   "description": "A runnable, disclosure-traced security benchmark for deployed coding-agent configurations.",
+  "homepage": "https://github.com/alisaosipova/agent-attack-bench#readme",
+  "bugs": {
+    "url": "https://github.com/alisaosipova/agent-attack-bench/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alisaosipova/agent-attack-bench.git"
+  },
   "type": "module",
   "license": "MIT",
-  "engines": { "node": ">=20.19" },
-  "bin": { "agent-attack-bench": "dist/cli.js" },
-  "publishConfig": { "access": "public", "provenance": true },
+  "files": [
+    "dist",
+    "schemas",
+    "scenarios",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "bin": {
+    "agent-attack-bench": "dist/cli.js"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.test.json",

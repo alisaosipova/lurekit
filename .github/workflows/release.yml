@@ -1,0 +1,109 @@
+name: Release
+
+# Push a tag like v0.1.0 (matching package.json) to publish to npm.
+# Publishing uses npm trusted publishing (OIDC): configure it on npmjs.com for this repository,
+# workflow file "release.yml" and environment "npm". No long-lived npm token is needed;
+# provenance is attached automatically (publishConfig.provenance is also set).
+# Only the publish job can mint the OIDC token and only gh-release can write to the repository; neither installs
+# dependencies, builds or runs tests: the build job does that without write permissions and hands over the tarball.
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+      # No dependency install scripts while building the release tarball (see ci.yml).
+      - run: npm ci --ignore-scripts
+      - name: Tag matches package.json version
+        run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm test
+      - run: node dist/tools/validate-scenarios.js scenarios
+      - run: npm pack
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: package
+          path: agent-attack-bench-*.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: npm
+    permissions:
+      id-token: write # npm trusted publishing and provenance
+    env:
+      # Secrets cannot be read in `if:`; this exposes only whether NPM_TOKEN is set, never its value.
+      HAS_NPM_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
+    steps:
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm 11.5.1 or newer; an exact version, so the release does not pick up whatever is newest.
+      - run: npm install -g npm@11.21.0
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: package
+      # Pre-release tags (v0.2.0-rc.1) go to the "next" dist-tag.
+      # Trusted publishing (OIDC): no token in the environment, so npm cannot fall back to a long-lived one.
+      - name: Publish to npm (trusted publishing)
+        if: env.HAS_NPM_TOKEN != 'true'
+        run: npm publish ./agent-attack-bench-*.tgz $([[ "$GITHUB_REF_NAME" == *-* ]] && echo "--tag next")
+      # Only for the very first publish (a trusted publisher can be configured only once the package exists):
+      # a short-lived granular token in the NPM_TOKEN secret. Delete the secret right afterwards, so later
+      # releases take the step above.
+      - name: Publish to npm (first release, NPM_TOKEN)
+        if: env.HAS_NPM_TOKEN == 'true'
+        run: |
+          echo "::warning::Publishing with the NPM_TOKEN secret. Configure the trusted publisher on npmjs.com and delete the secret."
+          npm publish ./agent-attack-bench-*.tgz $([[ "$GITHUB_REF_NAME" == *-* ]] && echo "--tag next")
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # Whichever step published, the registry must show a provenance attestation for this version; a publish
+      # that silently lost provenance (publishConfig ignored, OIDC missing) fails the release before the GitHub
+      # release is created. The registry can lag behind the publish, so retry for about a minute.
+      - name: Published version carries npm provenance
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          for attempt in 1 2 3 4 5 6 7; do
+            if npm view "agent-attack-bench@$version" --json > view.json 2> view.err &&
+               node -e "const d=require('./view.json'); const v=Array.isArray(d)?d[d.length-1]:d; process.exit(v?.dist?.attestations ? 0 : 1)"; then
+              echo "agent-attack-bench@$version has provenance: $(node -p "JSON.stringify((d=>Array.isArray(d)?d[d.length-1]:d)(require('./view.json')).dist.attestations)")"
+              exit 0
+            fi
+            echo "attempt $attempt: no dist.attestations for agent-attack-bench@$version yet"
+            sleep 10
+          done
+          cat view.err
+          echo "::error::agent-attack-bench@$version has no dist.attestations on the registry: it was published without provenance"
+          exit 1
+
+  gh-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write # create the GitHub release
+    steps:
+      - name: Create GitHub release
+        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes $([[ "$GITHUB_REF_NAME" == *-* ]] && echo "--prerelease")
+        env:
+          GH_TOKEN: ${{ github.token }}
