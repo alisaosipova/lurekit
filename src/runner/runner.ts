@@ -362,9 +362,14 @@ export class BenchmarkRunner implements Runner {
       );
     }
 
-    // Provision the detector into the SAME run dir the adapter and evaluate() use.
+    // Provision the detector into the SAME run dir the adapter and evaluate() use. The
+    // post-fixture workdir + scenario match go along for workdir sensors (evidence-spec §1.5,
+    // fs_diff §1.2c: its baseline must include what the fixtures planted).
     try {
-      const provision = await detector.provision(runId, runDir);
+      const provision = await detector.provision(runId, runDir, {
+        workdir: runProfile.workdir,
+        match: scenario.forbidden_effect.match,
+      });
       detectorTeardown = provision.teardown;
     } catch (err) {
       warnings.push(`detector provisioning failed: ${(err as Error).message}`);
@@ -413,6 +418,7 @@ export class BenchmarkRunner implements Runner {
     const hits: DetectorHit[] = await detector.evaluate({
       runDir,
       toolCalls: observation.tool_calls,
+      workdir: runProfile.workdir,
     });
     const benign = await checkBenign(scenario.benign_task, {
       observation,

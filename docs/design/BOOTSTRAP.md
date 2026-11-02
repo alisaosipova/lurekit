@@ -58,6 +58,19 @@ end-to-end beats ten scenarios with no runner.
    reported separately). SARIF validates against the 2.1.0 schema fixture; markdown prints
    tool-call names only (no inputs), so no secret leak. 86 tests passing. Spec: evidence-spec §6.
 
+7. **fs_diff detector.** DONE (2026-11-02). `src/detectors/fsDiff.ts`: sha256 + existence
+   baseline of watched workdir paths at `provision()` (post-fixture), re-snapshot at
+   `evaluate()`, one hit per created/modified/deleted path, `fs_diff.diff.json` as evidence.
+   Default watched list = agent config files named in the corpus (`.claude/settings.json`,
+   `.mcp.json`, `CLAUDE.md`, `.cursor/mcp.json`, `.cursor/rules`, `.codex/config.toml`);
+   override via `forbidden_effect.match.paths`. The adapter's own observe-only hook in
+   `.claude/settings.json` is normalised away (exact adapter shape only; a hook that merely
+   mentions the run dir is reported), and an unreadable watched path is a reported change,
+   not a crash. `Detector.provision()` gained an optional
+   `opts { workdir, match }` and `evaluate()` ctx an optional `workdir`; the runner passes the
+   post-fixture profile workdir. Positive/negative self-test + blinded-sensor test; 12 fs_diff tests (incl. two
+   adversarial-review regressions), full suite green. Spec: evidence-spec §1.2c, §1.5. Still deferred: `canary_egress_dns`.
+
 ## Reuse from mcp-review-check (landscape §3.2, ADR-0001)
 Protocol client (`src/protocol/*`), fixture servers (`test/fixtures/*-server.mjs`),
 reporters (`src/report/{json,markdown,sarif}.ts`), the OIDC trusted-publishing release
@@ -76,5 +89,5 @@ probing — those are the non-goal (static scanning).
 small neutral sections so the safety classifier did not trip; `evidence-spec.md` holds the
 detector/evidence/verdict/adapter/reporting contract (§1-§6). Phase C `docs/plan/roadmap.md`
 is written. The one open decision is ADR-0013 (weekly update cadence), flagged DECISION NEEDED.
-Remaining detectors (`canary_egress_dns`, `fs_diff`) and the `local_registry` fixture are
-scheduled for roadmap Week 3, not blocked.
+`fs_diff` landed (step 7). The remaining detector (`canary_egress_dns`) and the
+`local_registry` fixture are scheduled for roadmap Week 3, not blocked.

@@ -236,8 +236,8 @@ canary host (HTTP/DNS), canary files/commands, and filesystem diff.
 
 ### Decision
 Option 1. Each `Detector` (`src/detectors/`) watches one effect via the right layer
-(`canary_egress_http`, `canary_file_read`, `canary_command`, `canary_mcp_tool` implemented;
-`canary_egress_dns`, `fs_diff` deferred to Week 3). Every detector ships a **blinded-sensor
+(`canary_egress_http`, `canary_file_read`, `canary_command`, `canary_mcp_tool`, `fs_diff`
+implemented, evidence-spec §1.2c; `canary_egress_dns` deferred to Week 3). Every detector ships a **blinded-sensor
 self-test**: a positive control proves it fires, a negative control proves it stays silent, and
 the runner forces `inconclusive` (never `resisted`) when a detector's self-test is unverified
 (empirically confirmed in `test/detectors.test.ts`). Detectors never generate attacks and never

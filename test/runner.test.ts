@@ -432,7 +432,7 @@ describe('plan (lifecycle step 1)', () => {
     const cfg = makeCfg(root);
     const scenarios: Scenario[] = [
       makeScenario({ id: 'AAB-010' }), // canary_command, kept
-      makeScenario({ id: 'AAB-011', forbidden_effect: { detector: 'fs_diff' } }), // not implemented
+      makeScenario({ id: 'AAB-011', forbidden_effect: { detector: 'canary_egress_dns' } }), // not implemented
       makeScenario({ id: 'AAB-012', applies_to: ['cursor-cli'] }), // not applicable
       makeScenario({ id: 'AAB-013', forbidden_effect: { detector: 'canary_egress_http' } }), // unverified
       makeScenario({ id: 'AAB-014', runnable: false }), // not runnable

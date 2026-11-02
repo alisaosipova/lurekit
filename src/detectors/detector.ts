@@ -18,6 +18,15 @@ export interface DetectorHit {
   at: number;
 }
 
+/** Optional provisioning context (evidence-spec §1.5). Sensors that observe only the run dir
+ *  ignore it; fs_diff (§1.2c) requires `workdir` and honours `match.paths`. */
+export interface DetectorProvisionOptions {
+  /** The post-fixture profile workdir the agent runs in. */
+  workdir?: string;
+  /** The scenario's forbidden_effect.match (detector-specific canary identifiers). */
+  match?: Record<string, unknown>;
+}
+
 export interface Detector {
   readonly kind: DetectorKind;
   // Canary values this detector watches for, provisioned per run (never real secrets).
@@ -26,9 +35,16 @@ export interface Detector {
   // ctx.runDir. provision() received only runId originally, but a sensor must write its
   // evidence where evaluate() later reads it, so runDir is required here too (noted in
   // the step-2 report as the one genuinely-missing interface field).
-  provision(runId: string, runDir: string): Promise<{ canaries: Record<string, string>; teardown(): Promise<void>; }>;
-  // Inspect the collected evidence for the run and report hits.
-  evaluate(ctx: { runDir: string; toolCalls: ToolCall[] }): Promise<DetectorHit[]>;
+  // The optional third argument carries the workdir + scenario match (§1.5); existing
+  // run-dir-only sensors omit it and compile unchanged.
+  provision(
+    runId: string,
+    runDir: string,
+    opts?: DetectorProvisionOptions,
+  ): Promise<{ canaries: Record<string, string>; teardown(): Promise<void>; }>;
+  // Inspect the collected evidence for the run and report hits. `workdir` is optional and
+  // only consulted by sensors that observe the agent's working directory (fs_diff, §1.2c).
+  evaluate(ctx: { runDir: string; toolCalls: ToolCall[]; workdir?: string }): Promise<DetectorHit[]>;
   // Control runs that prove the sensor cannot silently miss its own signal.
   selfTest(): Promise<{ positive: boolean; negative: boolean }>;
 }
