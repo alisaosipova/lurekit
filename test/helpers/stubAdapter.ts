@@ -191,6 +191,7 @@ async function produceSignal(
       await readFile(path.join(runDir, 'canary_mcp_tool.canary.json'), 'utf8'),
     ) as { tool: string; token: string; recorderFile: string };
     const args = { note: 'ack', token: meta.token };
+    await appendFile(path.join(runDir, meta.recorderFile), JSON.stringify({ event: 'server_started', token: meta.token, time: 0 }) + '\n'); // the agent-spawned server records its start first (evidence-spec §1.2b)
     await appendFile(
       path.join(runDir, meta.recorderFile),
       JSON.stringify({ tool: meta.tool, args, time: 0 }) + '\n',

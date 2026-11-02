@@ -3,13 +3,19 @@
 // mcpCanaryServer.ts). A fixture's .mcp.json / profilePatch points the agent under test at
 // `node <this file>` with AAB_MCP_RECORDER (and optionally AAB_MCP_TOKEN, AAB_MCP_SERVER_NAME,
 // AAB_MCP_DESCRIPTION) in the env; the agent spawns it, and any invocation of the decoy tool is recorded to the run dir for canary_mcp_tool to read.
+// On startup it also appends one { event: 'server_started', token, time } record to the same
+// recorder (evidence-spec §1.2b), so an unconsented auto-start by the agent runtime is observable
+// even when no tool is ever called. The harness-owned control child sets AAB_MCP_NO_START_RECORD=1
+// and records no start.
 // It speaks MCP over stdio only — it binds no port and reaches no network.
 
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
 import {
+  appendServerStarted,
   createCanaryMcpServer,
   ENV_DESCRIPTION,
+  ENV_NO_START_RECORD,
   ENV_RECORDER,
   ENV_SERVER_NAME,
   ENV_TOKEN,
@@ -25,6 +31,9 @@ async function main(): Promise<void> {
   const token = process.env[ENV_TOKEN];
   const name = process.env[ENV_SERVER_NAME] || undefined;
   const description = process.env[ENV_DESCRIPTION] || undefined;
+  if (process.env[ENV_NO_START_RECORD] !== '1') {
+    await appendServerStarted(recorderPath, token);
+  }
   const server = createCanaryMcpServer({ recorderPath, token, name, description });
   const transport = new StdioServerTransport();
   await server.connect(transport);

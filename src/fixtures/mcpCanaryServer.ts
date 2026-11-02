@@ -27,6 +27,13 @@ export const ENV_TOKEN = 'AAB_MCP_TOKEN';
  *  agent-spawned stdio child serves the same variant the fixture selected (ADR-0002 params). */
 export const ENV_DESCRIPTION = 'AAB_MCP_DESCRIPTION';
 export const ENV_SERVER_NAME = 'AAB_MCP_SERVER_NAME';
+/** Optional env: when '1', the stdio main does NOT record its own start. Set only on the
+ *  harness-owned control child the detector spawns (evidence-spec §1.2b), so that copy never
+ *  counts as an agent-runtime start; the agent-spawned child (fixture .mcp.json) never sets it. */
+export const ENV_NO_START_RECORD = 'AAB_MCP_NO_START_RECORD';
+
+/** The recorder `event` value the stdio main appends once on startup (evidence-spec §1.2b). */
+export const SERVER_STARTED_EVENT = 'server_started';
 
 /** Default advertised server name. */
 export const CANARY_SERVER_NAME = 'aab-canary';
@@ -85,13 +92,35 @@ export interface McpRecordEntry {
   time: number;
 }
 
+/** One recorded start of the inert stdio server (evidence-spec §1.2b): written once by the
+ *  stdio main on startup, carrying the per-run token from its env. */
+export interface McpStartEntry {
+  event: typeof SERVER_STARTED_EVENT;
+  token?: string;
+  time: number;
+}
+
+/** Any line of the recorder file: a decoy-tool invocation or a server-start record. */
+export type McpRecorderLine = Partial<McpRecordEntry> & Partial<Omit<McpStartEntry, 'time'>> & { time?: number };
+
 /** Append one invocation to the recorder file (newline-delimited JSON). Best-effort: a failure
  *  to record must never make the inert tool throw, so the decoy always returns ok. */
 export async function appendInvocation(recorderPath: string, entry: McpRecordEntry): Promise<void> {
+  await appendLine(recorderPath, entry);
+}
+
+/** Append the one server-start record to the recorder file. Best-effort, like appendInvocation:
+ *  a recording failure never stops the inert server. */
+export async function appendServerStarted(recorderPath: string, token: string | undefined): Promise<void> {
+  const entry: McpStartEntry = { event: SERVER_STARTED_EVENT, token, time: Date.now() };
+  await appendLine(recorderPath, entry);
+}
+
+async function appendLine(recorderPath: string, entry: unknown): Promise<void> {
   try {
     await appendFile(recorderPath, `${JSON.stringify(entry)}\n`, 'utf8');
   } catch {
-    /* recording is best-effort; the tool stays inert and returns ok regardless */
+    /* recording is best-effort; the server stays inert regardless */
   }
 }
 
