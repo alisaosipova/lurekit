@@ -16,7 +16,11 @@
 // occurrence of the operator's OWN home directory in the published copies is replaced by the
 // literal <HOME>, the count is recorded in index.md, and the gate then runs on the redacted
 // bundle as usual, so any other home-style path, token or URL still fails. The run dir is never
-// modified: redaction applies to the in-memory copies only.
+// modified: redaction applies to the in-memory copies only. Encoded spellings of the same home
+// (ADR-0017 "Encoded home spellings": the agent runtime's project slug, `/` -> `-`, and the
+// percent-encoded path) fail the gate like a plain path and, under --redact-home, become
+// <HOME-SLUG> / <HOME>. A last check then fails the publish if the operator's bare username is
+// still a token anywhere in the bundle.
 //
 // Unconditional (ADR-0017 "Operator MCP server names"): every observation `mcp_servers` entry
 // whose `source` is not one the harness itself configures (`dynamic` = --mcp-config fixture
@@ -74,7 +78,11 @@ export const WITHHELD_NOTE = 'withheld pending coordinated disclosure (ADR-0014)
 /** The literal that replaces the operator home directory under --redact-home. */
 export const HOME_PLACEHOLDER = '<HOME>';
 
-export type LeakKind = 'url' | 'token' | 'home_path';
+/** The literal that replaces the operator home directory's dash-encoded project slug (the home
+ *  path with every separator replaced by `-`, as in `~/.claude/projects/-home-u-work`). */
+export const HOME_SLUG_PLACEHOLDER = '<HOME-SLUG>';
+
+export type LeakKind = 'url' | 'token' | 'home_path' | 'home_user';
 
 export interface Leak {
   file: string; // bundle-relative path
@@ -90,6 +98,8 @@ export type PublishPlan =
       benchmarkRunId: string;
       files: BundleFile[];
       homeReplacements?: number;
+      /** Set with homeReplacements: encoded home spellings rewritten (slug / percent). */
+      homeEncodedReplacements?: HomeEncodedCounts;
       /** Operator MCP server entries renamed to <user-mcp-N> (always counted; 0 = none). */
       mcpNameReplacements: number;
       /** Scenario ids withheld via --withhold (in manifest order; empty = none). */
@@ -238,7 +248,76 @@ function homePathPatterns(homeDir: string | undefined): RegExp[] {
     /\b[A-Za-z]:(?:\\|\\\\|\/)Users(?:\\|\\\\|\/)[^\\/\s"'`<>|]+/i,
   ];
   for (const v of homeVariants(homeDir)) out.push(new RegExp(`${escapeRe(v)}(?=[\\\\/\\s"'\`]|$)`));
+  // Percent-encoded home roots (any user): `%2Fhome%2F<u>`, `%2FUsers%2F<u>`.
+  out.push(/(?<![A-Za-z0-9])%2F(?:home|Users)%2F[A-Za-z0-9._-]+/i);
+  // The operator's own home in encoded spellings. Detection ends at any non-alphanumeric, which
+  // is wider than redaction's terminator set, so whatever redaction leaves still fails.
+  for (const src of homeSlugSources(homeDir)) out.push(new RegExp(`${src}${NOT_BEFORE_ALNUM}`));
+  for (const v of homePercentVariants(homeDir)) out.push(new RegExp(`${percentRe(v)}${NOT_BEFORE_ALNUM}`));
   return out;
+}
+
+const NOT_AFTER_ALNUM = '(?<![A-Za-z0-9])';
+const NOT_BEFORE_ALNUM = '(?![A-Za-z0-9])';
+
+/** The dash-encoded project-slug spellings of `homeDir`, without the leading `-`: every `/` or
+ *  `\` replaced by `-` (the stated rule), and every non-alphanumeric replaced by `-` (what the
+ *  agent runtime does, e.g. `/home/a.b` -> `-home-a-b`). Root-ish homes yield nothing. */
+function homeSlugCores(homeDir: string | undefined): string[] {
+  const home = homeDir?.replace(/[\\/]+$/, '');
+  if (!home || home.length <= 1) return [];
+  const cores = new Set<string>();
+  for (const slug of [home.replace(/[\\/]/g, '-'), home.replace(/[^A-Za-z0-9]/g, '-')]) {
+    const core = slug.replace(/^-+/, '');
+    if (/[A-Za-z0-9]/.test(core)) cores.add(core);
+  }
+  return [...cores].sort((a, b) => b.length - a.length); // longest first in the alternation
+}
+
+/** Regex sources (left boundary + slug, no right boundary) for the operator home's slugs. For a
+ *  multi-segment home (`/home/u`) the leading `-` is optional. For a single-segment home
+ *  (`/root`) the core is a bare word, so the leading `-` is required and must not follow another
+ *  `-`: otherwise ordinary text (`running as root`, `--root`) would match. */
+function homeSlugSources(homeDir: string | undefined): string[] {
+  const home = homeDir?.replace(/[\\/]+$/, '') ?? '';
+  const multi = home.split(/[\\/]+/).filter((s) => s.length > 0).length > 1;
+  return homeSlugCores(homeDir).map((core) =>
+    multi ? `${NOT_AFTER_ALNUM}-?${escapeRe(core)}` : `(?<![A-Za-z0-9-])-${escapeRe(core)}`,
+  );
+}
+
+/** The percent-encoded spellings of `homeDir`: encodeURIComponent of its raw and forward-slash
+ *  forms (`/home/u` -> `%2Fhome%2Fu`). */
+function homePercentVariants(homeDir: string | undefined): string[] {
+  const home = homeDir?.replace(/[\\/]+$/, '');
+  if (!home || home.length <= 1) return [];
+  const out = new Set<string>();
+  for (const v of [home, home.replace(/\\/g, '/')]) {
+    const enc = encodeURIComponent(v);
+    if (enc !== v) out.add(enc);
+  }
+  return [...out].sort((a, b) => b.length - a.length);
+}
+
+/** Regex source for a percent-encoded string, matching each `%XX` escape in either hex case. */
+function percentRe(enc: string): string {
+  return enc
+    .split(/(%[0-9A-F]{2})/)
+    .map((part) =>
+      /^%[0-9A-F]{2}$/.test(part)
+        ? `%[${part[1]}${part[1].toLowerCase()}][${part[2]}${part[2].toLowerCase()}]`
+        : escapeRe(part),
+    )
+    .join('');
+}
+
+/** The operator's bare username: the last path segment of `homeDir` (empty for a root-ish home
+ *  or a segment with no alphanumeric). */
+export function homeUsername(homeDir: string | undefined): string {
+  const home = homeDir?.replace(/[\\/]+$/, '') ?? '';
+  if (home.length <= 1) return '';
+  const seg = home.split(/[\\/]/).pop() ?? '';
+  return /[A-Za-z0-9]/.test(seg) ? seg : '';
 }
 
 /** The spellings of `homeDir` as they can appear in published text: as is, with JSON-escaped
@@ -267,6 +346,56 @@ export function redactHomeDir(text: string, homeDir: string): { text: string; co
     return HOME_PLACEHOLDER;
   });
   return { text: out, count };
+}
+
+export interface HomeEncodedCounts {
+  slug: number;
+  percent: number;
+}
+
+/** Replace the operator home directory's encoded spellings (ADR-0017 "Encoded home spellings"):
+ *  the dash-encoded project slug (`-home-u`, leading `-` optional) with HOME_SLUG_PLACEHOLDER, and
+ *  the percent-encoded path (`%2Fhome%2Fu`, either hex case) with HOME_PLACEHOLDER. A slug counts
+ *  only when not preceded by an alphanumeric and followed by `-`, a separator, whitespace, a
+ *  quote, `<>|` or the end; a percent spelling only when followed by `%`, a separator,
+ *  whitespace, a quote, `<>|&?#` or the end. Anything else is left as is and fails the gate
+ *  (fail closed). Pure. */
+export function redactHomeEncoded(text: string, homeDir: string): { text: string; counts: HomeEncodedCounts } {
+  const counts: HomeEncodedCounts = { slug: 0, percent: 0 };
+  let out = text;
+  const pct = homePercentVariants(homeDir);
+  if (pct.length > 0) {
+    const re = new RegExp(`(?:${pct.map(percentRe).join('|')})(?=%|[\\\\/\\s"'\`<>|&?#]|$)`, 'g');
+    out = out.replace(re, () => {
+      counts.percent++;
+      return HOME_PLACEHOLDER;
+    });
+  }
+  const slugs = homeSlugSources(homeDir);
+  if (slugs.length > 0) {
+    const re = new RegExp(`(?:${slugs.join('|')})(?=[-\\\\/\\s"'\`<>|]|$)`, 'g');
+    out = out.replace(re, () => {
+      counts.slug++;
+      return HOME_SLUG_PLACEHOLDER;
+    });
+  }
+  return { text: out, counts };
+}
+
+/** Final check under --redact-home: one leak per file in which the operator's bare username
+ *  (homeUsername()) still appears as a token bounded by non-alphanumerics (or the text ends).
+ *  The finding names the file, never the value. Pure. */
+export function findUsernameTokens(files: BundleFile[], homeDir: string | undefined): Leak[] {
+  const user = homeUsername(homeDir);
+  if (!user) return [];
+  const re = new RegExp(`${NOT_AFTER_ALNUM}${escapeRe(user)}${NOT_BEFORE_ALNUM}`);
+  const leaks: Leak[] = [];
+  for (const f of files) {
+    if (scanViews(f.text).some((v) => re.test(v))) {
+      leaks.push({ file: f.rel, kind: 'home_user', detail: 'operator username still present after --redact-home (value redacted)' });
+    }
+  }
+  return leaks;
 }
 
 /** The texts the gate scans for one file: the bytes as written, plus (when different) a view
@@ -310,12 +439,17 @@ export function scanForLeaks(files: BundleFile[], allowedHosts: Set<string>, hom
     for (const name of families) {
       leaks.push({ file: f.rel, kind: 'token', detail: `${name} (value redacted)` });
     }
-    // Home paths: fail, never rewrite to `~`.
+    // Home paths, plain or encoded: fail, never rewrite to `~`.
     home: for (const view of views) {
       for (const re of homeRes) {
         const m = re.exec(view);
         if (m) {
-          leaks.push({ file: f.rel, kind: 'home_path', detail: `absolute home path "${m[0]}"` });
+          const what = m[0].includes('%')
+            ? 'percent-encoded home path'
+            : /[\\/]/.test(m[0])
+              ? 'absolute home path'
+              : 'home directory slug';
+          leaks.push({ file: f.rel, kind: 'home_path', detail: `${what} "${m[0]}"` });
           break home;
         }
       }
@@ -334,6 +468,9 @@ const cell = (s: string): string =>
 export interface IndexNotes {
   /** Set when --redact-home ran: the number of home-dir occurrences replaced in the bundle. */
   homeReplacements?: number;
+  /** Set with homeReplacements: encoded home spellings replaced (slug -> <HOME-SLUG>,
+   *  percent-encoded -> <HOME>). */
+  homeEncodedReplacements?: HomeEncodedCounts;
   /** Operator MCP server entries renamed to <user-mcp-N>; the note is shown when > 0. */
   mcpNameReplacements?: number;
   /** Distinct operator MCP server names behind those replacements. */
@@ -393,6 +530,11 @@ export function renderIndex(manifest: RunManifest, evidenceRels: string[], notes
     out.push('## Redaction', '');
     if (notes.homeReplacements !== undefined) {
       out.push(`- redaction applied: home directory -> ${HOME_PLACEHOLDER} (${notes.homeReplacements} replacements)`);
+      const enc = notes.homeEncodedReplacements ?? { slug: 0, percent: 0 };
+      out.push(
+        `- redaction applied: encoded home directory: project slug -> ${HOME_SLUG_PLACEHOLDER} ` +
+          `(${enc.slug} replacements), percent-encoded -> ${HOME_PLACEHOLDER} (${enc.percent} replacements)`,
+      );
     }
     if (mcpNotes) {
       out.push(
@@ -518,20 +660,34 @@ export function planPublish(contents: RunDirContents, policy: PublishPolicy = {}
   // the note itself contains no home path, so redacting the noted index counts the same as the
   // un-noted one.
   let homeReplacements: number | undefined;
+  let homeEncodedReplacements: HomeEncodedCounts | undefined;
   if (policy.redactHome) {
     const home = policy.homeDir;
     if (homeVariants(home).length === 0) {
       return { ok: false, benchmarkRunId: id, error: '--redact-home needs a usable home directory', leaks: [] };
     }
+    // Plain spellings first, then the encoded ones (ADR-0017 "Encoded home spellings").
+    const redactAll = (text: string): { text: string; count: number; enc: HomeEncodedCounts } => {
+      const plain = redactHomeDir(text, home as string);
+      const encoded = redactHomeEncoded(plain.text, home as string);
+      return { text: encoded.text, count: plain.count, enc: encoded.counts };
+    };
     let total = 0;
-    files = files.map((f) => {
-      const r = redactHomeDir(f.text, home as string);
+    const enc: HomeEncodedCounts = { slug: 0, percent: 0 };
+    const add = (r: { count: number; enc: HomeEncodedCounts }): void => {
       total += r.count;
+      enc.slug += r.enc.slug;
+      enc.percent += r.enc.percent;
+    };
+    files = files.map((f) => {
+      const r = redactAll(f.text);
+      add(r);
       return { rel: f.rel, text: r.text };
     });
-    total += redactHomeDir(renderIndex(manifest, evidenceRels, mcpNotes), home as string).count;
+    add(redactAll(renderIndex(manifest, evidenceRels, mcpNotes)));
     homeReplacements = total;
-    const index = redactHomeDir(renderIndex(manifest, evidenceRels, { ...mcpNotes, homeReplacements }), home as string);
+    homeEncodedReplacements = enc;
+    const index = redactAll(renderIndex(manifest, evidenceRels, { ...mcpNotes, homeReplacements, homeEncodedReplacements }));
     files.push({ rel: 'index.md', text: index.text });
   } else {
     files.push({ rel: 'index.md', text: renderIndex(manifest, evidenceRels, mcpNotes) });
@@ -544,11 +700,13 @@ export function planPublish(contents: RunDirContents, policy: PublishPolicy = {}
   for (const h of policy.allowHosts ?? []) allowed.add(extractHost(h));
 
   // The gate always runs, and after redaction: a foreign home path, a token or a URL still fails.
+  // Under --redact-home, a final check: the operator's bare username must not survive anywhere.
   const leaks = scanForLeaks(files, allowed, policy.homeDir);
+  if (policy.redactHome) leaks.push(...findUsernameTokens(files, policy.homeDir));
   if (leaks.length > 0) return { ok: false, benchmarkRunId: id, leaks };
   return homeReplacements === undefined
     ? { ok: true, benchmarkRunId: id, files, mcpNameReplacements, withheld }
-    : { ok: true, benchmarkRunId: id, files, homeReplacements, mcpNameReplacements, withheld };
+    : { ok: true, benchmarkRunId: id, files, homeReplacements, homeEncodedReplacements, mcpNameReplacements, withheld };
 }
 
 /** Human-readable failure text for a rejected plan. */

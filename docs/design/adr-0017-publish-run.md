@@ -5,7 +5,9 @@ opt-in operator home redaction (`--redact-home`, see "Operator home redaction").
 2026-11-02: unconditional pseudonymisation of operator MCP server names (see "Operator MCP
 server names"). Amended 2026-11-02: `--withhold <scenario-id>` (repeatable) to keep a
 scenario out of the published copy under the ADR-0014 disclosure policy (see "Withholding a
-scenario").
+scenario"). Amended 2026-11-02: encoded spellings of the operator home (dash-encoded project
+slug, percent-encoded path) fail the gate and are rewritten by `--redact-home`, followed by a
+bare-username check (see "Encoded home spellings").
 Authorises `src/report/publish.ts`, the `publish` subcommand in `src/cli.ts`, the exported
 `findSecretShape()` / `extractHost()` helpers in `src/fixtures/fixture.ts` (and the
 path-before-userinfo order of `extractHost()`), and
@@ -90,6 +92,35 @@ Option 3.
     path (another user's `/home/<u>`, `/Users/<u>`, `/root`, `<drive>:\Users\<u>`), any token
     shape and any non-allowlisted URL still fail, and nothing is written;
   - a missing or root-ish home dir (empty, `/`) with the flag is an error, not a silent no-op.
+- **Encoded home spellings.** A live run (AAB-016) published after `--redact-home` still named
+  the operator: the agent read a transcript under the runtime's project dir
+  (`<HOME>/.claude/projects/-home-<u>-<rest>/...`), whose name is the home path with every
+  separator replaced by `-`, so the plain-path rewrite left the username in place. Therefore:
+  - the gate also fails, like a plain home path (`home_path` finding), on the operator home's
+    **dash-encoded slug**: the home with every `/` or `\` replaced by `-` (and, as the runtime
+    actually does, every non-alphanumeric replaced by `-`), not preceded or followed by an
+    alphanumeric. The leading `-` is optional for a multi-segment home (`/home/<u>`). For a
+    single-segment home (`/root`) the slug core is a bare word, so the leading `-` is required
+    and must not follow another `-` (`-root` matches; `running as root` and `--root` do not); on the operator home **percent-encoded**
+    (`encodeURIComponent` of the raw and forward-slash forms, e.g. `%2Fhome%2F<u>`, either hex
+    case); and on any percent-encoded home root (`%2Fhome%2F<u>`, `%2FUsers%2F<u>`). The
+    JSON-escaped and forward/back-slash spellings stay as above;
+  - with `--redact-home`, after the plain rewrite, a slug occurrence becomes `<HOME-SLUG>` and a
+    percent-encoded one becomes `<HOME>`. A slug counts only when followed by `-`, a separator,
+    whitespace, a quote or backtick, `<`, `>`, `|` or the end; a percent spelling only when
+    followed by `%`, a separator, whitespace, a quote or backtick, `<>|&?#` or the end. Gate
+    detection ends at any non-alphanumeric, wider than these sets, so whatever is not rewritten
+    still fails (fail closed);
+  - `index.md`'s `## Redaction` section gains the line
+    `redaction applied: encoded home directory: project slug -> <HOME-SLUG> (S replacements),
+    percent-encoded -> <HOME> (P replacements)`. The plain-path line and its stdout copy keep
+    their meaning (plain spellings only);
+  - the gate then re-runs on the redacted bundle as usual. As a final check, if the operator's
+    bare username (the last path segment of the home dir) still appears anywhere in the bundle
+    as a token bounded by non-alphanumerics (or the text ends), the publish fails with a
+    `home_user` finding per file. The finding names the file, never the value. The check is
+    case-sensitive and runs only with `--redact-home`. Without the flag, any spelling of the home
+    path already fails.
 - **Operator MCP server names (unconditional).** Evidence records carry the agent's own init
   report `observation.mcp_servers` (`name`/`status`/`source`, evidence-spec §4.3). Entries whose
   `source` is `user`, `local`, `claudeai`, `enterprise`, `managed` or anything else not
@@ -181,6 +212,13 @@ publish: redaction gate failed (evidence-spec §5), 1 finding(s); nothing writte
   itself announced) is always that home. Another user's home, a macOS/Windows home that is not
   the operator's, or a sibling such as `/home/u2` or `/home/u@old` is evidence the run captured something
   unexpected; masking it would hide that from the maintainer, so it keeps failing the gate.
+- The bare-username check is deliberately blunt. A username that is also a common word or
+  part of a version string (e.g. a distribution name that matches the login) fails the publish
+  even where it is not a path (with home `/root`, the word `root` in `uid=0(root)`; with
+  `/home/test`, the word `test`). The slug match is not blunt in this way: it needs the
+  separator-joined form, or the leading `-` for a single-segment home. The maintainer then sees the file and decides (fix the evidence,
+  or do not publish that run). It is a backstop for spellings the gate does not know, not a
+  substitute for them, which is why the encoded forms are matched and rewritten explicitly.
 - Operator MCP server names are rewritten unconditionally, not opt-in, unlike `--redact-home`.
   The two differ in what the value is to the measurement. A home path can be evidence (what the
   agent touched), so rewriting it alters a published fact and the maintainer must ask. The names

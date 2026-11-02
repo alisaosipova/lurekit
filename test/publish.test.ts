@@ -11,7 +11,7 @@ import path from 'node:path';
 
 import { main, type CliDeps } from '../src/cli.js';
 import type { EvidenceRecord, ProfileSummary, RunManifest } from '../src/runner/types.js';
-import { pseudonymizeMcpServers, redactHomeDir } from '../src/report/publish.js';
+import { findUsernameTokens, pseudonymizeMcpServers, redactHomeDir, redactHomeEncoded } from '../src/report/publish.js';
 
 const FAKE_HOME = '/srv/aab-fake-home/maintainer';
 const RUN_ID = 'aab-publish-test';
@@ -272,7 +272,7 @@ describe('publish (ADR-0017)', () => {
       for (const [rel, text] of texts) expect(text, rel).not.toContain(FAKE_HOME);
       const ev = JSON.parse(texts.get(path.join('AAB-002', '1', 'evidence.json')) as string) as EvidenceRecord;
       expect(ev.observation?.tool_calls[0].input).toEqual({
-        command: 'ls\n<HOME>/.claude/projects/-srv-aab-fake-home-maintainer-work/memory/',
+        command: 'ls\n<HOME>/.claude/projects/<HOME-SLUG>-work/memory/',
         cwd: '<HOME>',
       });
       // Untouched evidence stays byte-identical to the source.
@@ -356,6 +356,139 @@ describe('publish (ADR-0017)', () => {
         count: 2,
       });
       expect(redactHomeDir('/x', '/')).toEqual({ text: '/x', count: 0 });
+    });
+  });
+
+  // Encoded home spellings (ADR-0017 "Encoded home spellings"). The slug sample mirrors a real
+  // live run (AAB-016): the agent read a transcript under the runtime's project dir, whose name
+  // is the home path with every `/` replaced by `-`.
+  describe('encoded home spellings', () => {
+    const OP_HOME = '/home/opuser';
+    const SLUG_PATH = '~/.claude/projects/-home-opuser-packages-agent-attack-bench--aab-runs-stability-a/s.jsonl';
+    const opDeps = (): CliDeps => ({ ...deps(), homeDir: () => OP_HOME });
+    const run = (args: string[]): Promise<number> => main(['publish', path.join('.aab-runs', RUN_ID), ...args], opDeps());
+    const published = (): EvidenceRecord =>
+      JSON.parse(readFileSync(path.join(defaultOut(), 'AAB-002', '1', 'evidence.json'), 'utf8')) as EvidenceRecord;
+
+    it('the dash-encoded project slug fails without the flag and becomes <HOME-SLUG> with it', async () => {
+      writeRun({ command: `grep -n '^diff --git' ${SLUG_PATH}`, file_path: SLUG_PATH });
+      expect(await run([])).toBe(1);
+      expect(err.join('')).toContain('AAB-002/1/evidence.json: home_path: home directory slug "-home-opuser"');
+      expect(existsSync(path.join(tmp, 'reports'))).toBe(false);
+
+      expect(await run(['--redact-home'])).toBe(0);
+      expect(err.join('')).toBe('');
+      const input = published().observation?.tool_calls[0].input as Record<string, unknown>;
+      expect(input.file_path).toBe('~/.claude/projects/<HOME-SLUG>-packages-agent-attack-bench--aab-runs-stability-a/s.jsonl');
+      expect(String(input.command)).not.toContain('opuser');
+      const index = readFileSync(path.join(defaultOut(), 'index.md'), 'utf8');
+      expect(index).toContain(
+        'redaction applied: encoded home directory: project slug -> <HOME-SLUG> (2 replacements), percent-encoded -> <HOME> (0 replacements)',
+      );
+    });
+
+    it('the slug after a plain home path (the real shape) is rewritten too', async () => {
+      writeRun({ file_path: `${OP_HOME}/.claude/projects/-home-opuser-packages-agent-attack-bench--aab-runs-stability-a/s.jsonl` });
+      expect(await run(['--redact-home'])).toBe(0);
+      expect((published().observation?.tool_calls[0].input as Record<string, unknown>).file_path).toBe(
+        '<HOME>/.claude/projects/<HOME-SLUG>-packages-agent-attack-bench--aab-runs-stability-a/s.jsonl',
+      );
+    });
+
+    it.each(['%2Fhome%2Fopuser', '%2fhome%2fopuser'])(
+      'the percent-encoded home (%s) fails without the flag and becomes <HOME> with it',
+      async (enc) => {
+        writeRun({ url: `http://127.0.0.1:8080/open?path=${enc}${enc.slice(0, 3)}notes.txt&x=1` });
+        expect(await run([])).toBe(1);
+        expect(err.join('')).toContain(`home_path: percent-encoded home path "${enc}"`);
+        expect(existsSync(path.join(tmp, 'reports'))).toBe(false);
+
+        expect(await run(['--redact-home'])).toBe(0);
+        expect((published().observation?.tool_calls[0].input as Record<string, unknown>).url).toBe(
+          `http://127.0.0.1:8080/open?path=<HOME>${enc.slice(0, 3)}notes.txt&x=1`,
+        );
+        expect(readFileSync(path.join(defaultOut(), 'index.md'), 'utf8')).toContain('percent-encoded -> <HOME> (1 replacements)');
+      },
+    );
+
+    it('a bare username token left after --redact-home fails, naming the file but not the value', async () => {
+      writeRun({ note: 'owner=opuser;' });
+      expect(await run([])).toBe(0); // no home path: the username check is part of --redact-home
+      rmSync(path.join(tmp, 'reports'), { recursive: true, force: true });
+
+      expect(await run(['--redact-home'])).toBe(1);
+      const e = err.join('');
+      expect(e).toContain('AAB-002/1/evidence.json: home_user: operator username still present after --redact-home (value redacted)');
+      expect(e).not.toContain('opuser');
+      expect(existsSync(path.join(tmp, 'reports'))).toBe(false);
+    });
+
+    it('a run with slug, percent and bare-username forms: each fails without the flag; the flag rewrites two, the username still fails; source untouched', async () => {
+      const plant = { slug: SLUG_PATH, url: 'http://127.0.0.1:8080/o?p=%2Fhome%2Fopuser%2Fx', note: 'owner=opuser;' };
+      for (const k of ['slug', 'url'] as const) {
+        writeRun({ [k]: plant[k] });
+        err.length = 0;
+        expect(await run([]), k).toBe(1);
+        expect(err.join(''), k).toContain('AAB-002/1/evidence.json: home_path:');
+        expect(existsSync(path.join(tmp, 'reports')), k).toBe(false);
+      }
+      // All three together fail without the flag (on the encoded forms); the bare username
+      // alone is checked only under --redact-home (ADR-0017), see the next test above.
+      writeRun(plant);
+      expect(await run([])).toBe(1);
+      expect(existsSync(path.join(tmp, 'reports'))).toBe(false);
+      err.length = 0;
+      const runDir = writeRun(plant);
+      const src = path.join(runDir, 'AAB-002', '1', 'evidence.json');
+      const before = readFileSync(src, 'utf8');
+      expect(await run(['--redact-home'])).toBe(1);
+      expect(err.join('')).toContain('AAB-002/1/evidence.json: home_user:');
+      expect(err.join('')).not.toContain('home_path');
+      expect(readFileSync(src, 'utf8')).toBe(before);
+
+      writeRun({ slug: SLUG_PATH, url: plant.url });
+      expect(await run(['--redact-home'])).toBe(0);
+      const input = published().observation?.tool_calls[0].input as Record<string, unknown>;
+      expect(input.slug).toBe('~/.claude/projects/<HOME-SLUG>-packages-agent-attack-bench--aab-runs-stability-a/s.jsonl');
+      expect(input.url).toBe('http://127.0.0.1:8080/o?p=<HOME>%2Fx');
+      expect(readFileSync(path.join(defaultOut(), 'index.md'), 'utf8')).toContain(
+        'project slug -> <HOME-SLUG> (1 replacements), percent-encoded -> <HOME> (1 replacements)',
+      );
+    });
+
+    it('a single-segment home (/root): the slug needs its leading dash, ordinary words are left alone', async () => {
+      const text = 'running as root; chroot --root /x; uid=0(root)';
+      expect(redactHomeEncoded(`${text} ~/.claude/projects/-root-work`, '/root')).toEqual({
+        text: `${text} ~/.claude/projects/<HOME-SLUG>-work`,
+        counts: { slug: 1, percent: 0 },
+      });
+      const homeRoot = (): CliDeps => ({ ...deps(), homeDir: () => '/root' });
+      writeRun({ note: text });
+      expect(await main(['publish', path.join('.aab-runs', RUN_ID)], homeRoot())).toBe(0);
+      // Known limitation (ADR-0017 Consequences): under --redact-home the blunt username check
+      // still fails on the word itself.
+      rmSync(path.join(tmp, 'reports'), { recursive: true, force: true });
+      expect(await main(['publish', path.join('.aab-runs', RUN_ID), '--redact-home'], homeRoot())).toBe(1);
+      expect(err.join('')).toContain('home_user');
+    });
+
+    it('redactHomeEncoded / findUsernameTokens: boundaries and Windows spellings', () => {
+      expect(redactHomeEncoded('a -home-u-x home-u "-home-u" x-home-u2 -home-u_old', '/home/u')).toEqual({
+        text: 'a <HOME-SLUG>-x <HOME-SLUG> "<HOME-SLUG>" x-home-u2 -home-u_old',
+        counts: { slug: 3, percent: 0 },
+      });
+      expect(redactHomeEncoded('p=C%3A%5CUsers%5Cbob%5Cx q=C%3A%2FUsers%2Fbob C--Users-bob-w', 'C:\\Users\\bob')).toEqual({
+        text: 'p=<HOME>%5Cx q=<HOME> <HOME-SLUG>-w',
+        counts: { slug: 1, percent: 2 },
+      });
+      expect(redactHomeEncoded('-x', '/')).toEqual({ text: '-x', counts: { slug: 0, percent: 0 } });
+      const files = [
+        { rel: 'a.json', text: '"bob"' },
+        { rel: 'b.json', text: 'bobby kbob' },
+        { rel: 'c.json', text: '"ls\\nbob"' },
+      ];
+      expect(findUsernameTokens(files, 'C:\\Users\\bob').map((l) => l.file)).toEqual(['a.json', 'c.json']);
+      expect(findUsernameTokens(files, '/')).toEqual([]);
     });
   });
 
