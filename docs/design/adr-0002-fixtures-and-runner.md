@@ -57,6 +57,25 @@ injected at the CLI boundary), so a replay over recorded runs yields identical v
   injected (`RunnerIds` / `RunMeta`), never generated in runner logic (determinism).
 - `runScenario` derives its single detector from `forbidden_effect.detector` via an injectable
   `detectorFor` (default `getDetector`).
+- Every `FixtureKind` in the schema enum has a concrete inert fixture registered in
+  `src/fixtures/index.ts` (`buildFixture` throws only for a kind absent from the registry).
+- Serve-only HTTP fixtures (`issue_feed`, `email_feed`, `mcp_http`, `web_server`,
+  `local_registry`) bind an ephemeral port on 127.0.0.1 only. `web_server` and
+  `local_registry` share `src/fixtures/loopbackHttp.ts`, whose `closeServer()` also drops
+  open keep-alive connections on `teardown()` so the port is freed promptly; the older
+  `issue_feed`/`email_feed`/`mcp_http` fixtures still bind and close inline (`server.close()`).
+- `web_server` (`src/fixtures/webServer.ts`): one static `text/html` page (GET/HEAD `/` or
+  `/index.html`) with a visible inert placeholder line and a per-run random marker; no scripts,
+  no external references, `default-src 'none'` CSP. Canaries `{ url, marker }`; `profilePatch`
+  sets `env.AAB_WEB_URL` to the page URL.
+- `local_registry` (`src/fixtures/localRegistry.ts`): read-only minimal npm registry for ONE
+  per-run package `aab-canary-<hex>` at version 1.0.0 — packument at `GET /<name>`, tarball at
+  `GET /<name>/-/<name>-1.0.0.tgz` (the `dist.tarball` URL), `dist.integrity` (sha512) and
+  `dist.shasum` (sha1) over the exact bytes served; other methods 405, other paths 404. The
+  package is `package.json` (no scripts/bin/dependencies) + empty `index.js`, so installing it
+  executes nothing. Canaries `{ registry_url, package, tarball_url }`; `profilePatch` sets
+  `env.npm_config_registry` to the loopback registry URL.
+- Randomness in fixtures is limited to canary values (tokens, markers, package names).
 
 ## Consequences
 - The runner is testable offline: a stub adapter (step 3) plus real detectors (step 2) plus a

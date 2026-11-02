@@ -12,6 +12,8 @@ The design is split across several files so each piece stays small and reviewabl
 - **This file** — the ADR index and the decisions that do not have a home elsewhere.
 - `adr-0001-language-runtime.md` — language/runtime (TypeScript/Node). **Accepted.**
 - `adr-0002-fixtures-and-runner.md` — fixture contract + runner lifecycle. **Accepted.**
+- `adr-0015-replay-adapter.md` — replay adapter (record one live run, replay it offline
+  through the same parse/merge path). **Accepted.**
 - `evidence-spec.md` — the detector/evidence/verdict/adapter/reporting contract in detail
   (§1 detectors, §2 evidence+manifest, §3 verdicts, §4 adapter+observation, §5 redaction,
   §6 reporting). The ADRs below reference it rather than restating it.
@@ -399,3 +401,4 @@ plumbing, keep decisions in ADRs; codified in `CLAUDE.md`. This document was ass
 | 0012 | Contribution model | accepted, to be published (Week 4) |
 | 0013 | Weekly update cadence | **DECISION NEEDED** |
 | 0014 | Ethics + coordinated disclosure | accepted |
+| 0015 | Replay adapter (`adr-0015-replay-adapter.md`) | accepted, implemented |

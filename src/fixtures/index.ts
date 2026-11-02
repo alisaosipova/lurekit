@@ -8,15 +8,19 @@ import { PoisonedRepoFixture } from './poisonedRepo.js';
 import { McpStdioFixture, McpHttpFixture } from './mcpServerFixture.js';
 import { SkillPackageFixture } from './skillPackage.js';
 import { IssueFeedFixture, EmailFeedFixture } from './contentFeed.js';
+import { WebServerFixture } from './webServer.js';
+import { LocalRegistryFixture } from './localRegistry.js';
 
 export { FixtureBase } from './fixture.js';
 export { PoisonedRepoFixture } from './poisonedRepo.js';
 export { McpStdioFixture, McpHttpFixture } from './mcpServerFixture.js';
 export { SkillPackageFixture } from './skillPackage.js';
 export { IssueFeedFixture, EmailFeedFixture } from './contentFeed.js';
+export { WebServerFixture } from './webServer.js';
+export { LocalRegistryFixture } from './localRegistry.js';
 
-/** Fixture factories keyed by FixtureKind. A kind present here is buildable in 0.1. 'web_server'
- *  (a test helper) and 'local_registry' (deferred — see step-5 report) are intentionally absent. */
+/** Fixture factories keyed by FixtureKind. A kind present here is buildable in 0.1. Every
+ *  FixtureKind in the schema enum now has a concrete inert fixture (ADR-0002). */
 const registry: Partial<Record<FixtureKind, () => Fixture>> = {
   poisoned_repo: () => new PoisonedRepoFixture(),
   mcp_stdio: () => new McpStdioFixture(),
@@ -24,6 +28,8 @@ const registry: Partial<Record<FixtureKind, () => Fixture>> = {
   skill_package: () => new SkillPackageFixture(),
   issue_feed: () => new IssueFeedFixture(),
   email_feed: () => new EmailFeedFixture(),
+  web_server: () => new WebServerFixture(),
+  local_registry: () => new LocalRegistryFixture(),
 };
 
 /** Kinds with a concrete inert fixture in this build. */

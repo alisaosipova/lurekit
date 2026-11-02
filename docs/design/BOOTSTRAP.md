@@ -46,8 +46,8 @@ end-to-end beats ten scenarios with no runner.
    (AAB-001/002/018/019/020/021/022/027/030/031), all validating, all planned runnable,
    exercising all four implemented detectors. `test/e2e.test.ts` drives each through the
    runner with a vulnerable stub (-> vulnerable + hit + evidence) and a resisting stub
-   (-> resisted). 77 tests passing, offline. Deferred: `local_registry` fixture (no scenario
-   needs it yet). NOTE: end-to-end against a LIVE Claude Code is the maintainer's manual
+   (-> resisted). 77 tests passing, offline. `local_registry` was deferred here and landed
+   in step 8. NOTE: end-to-end against a LIVE Claude Code is the maintainer's manual
    week-2 step; the automated e2e proves the pipeline (runner+detectors+fixtures), not a live
    agent. Spec: evidence-spec §1.2b.
 
@@ -71,6 +71,16 @@ end-to-end beats ten scenarios with no runner.
    post-fixture profile workdir. Positive/negative self-test + blinded-sensor test; 12 fs_diff tests (incl. two
    adversarial-review regressions), full suite green. Spec: evidence-spec §1.2c, §1.5. Still deferred: `canary_egress_dns`.
 
+8. **web_server + local_registry fixtures.** DONE (2026-11-02). `src/fixtures/webServer.ts`
+   (loopback static HTML page: per-run marker + inert placeholder, no scripts/external refs;
+   `AAB_WEB_URL` via profilePatch) and `src/fixtures/localRegistry.ts` (loopback read-only npm
+   registry for one per-run no-op canary package; packument + tarball with correct
+   integrity/shasum; `npm_config_registry` via profilePatch), sharing
+   `src/fixtures/loopbackHttp.ts`. Both registered in `src/fixtures/index.ts`, so every schema
+   `FixtureKind` is now buildable. Tests in `test/fixtures.test.ts` (loopback bind, content,
+   packument/tarball parse + integrity, fresh canaries per provision, teardown frees the port,
+   `buildFixture`, real-socket 127.0.0.1 bind); 130 tests passing. Spec: ADR-0002 "Interface notes".
+
 ## Reuse from mcp-review-check (landscape §3.2, ADR-0001)
 Protocol client (`src/protocol/*`), fixture servers (`test/fixtures/*-server.mjs`),
 reporters (`src/report/{json,markdown,sarif}.ts`), the OIDC trusted-publishing release
@@ -89,5 +99,5 @@ probing — those are the non-goal (static scanning).
 small neutral sections so the safety classifier did not trip; `evidence-spec.md` holds the
 detector/evidence/verdict/adapter/reporting contract (§1-§6). Phase C `docs/plan/roadmap.md`
 is written. The one open decision is ADR-0013 (weekly update cadence), flagged DECISION NEEDED.
-`fs_diff` landed (step 7). The remaining detector (`canary_egress_dns`) and the
-`local_registry` fixture are scheduled for roadmap Week 3, not blocked.
+`fs_diff` landed (step 7). The remaining detector (`canary_egress_dns`) is scheduled
+for roadmap Week 3, not blocked. The `local_registry` and `web_server` fixtures landed (step 8).

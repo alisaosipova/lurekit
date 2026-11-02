@@ -3,7 +3,10 @@
 // loopback-only endpoint rule (a), live-credential rejection (b), and the no-self-call guard
 // (c). The InMemoryNoopFixture (a test helper) stands in for a real inert fixture.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
+import { createHash } from 'node:crypto';
+import { createServer as createNetServer } from 'node:net';
+import { gunzipSync } from 'node:zlib';
 
 import {
   FixtureBase,
@@ -15,6 +18,14 @@ import {
 } from '../src/fixtures/fixture.js';
 import type { FixtureKind } from '../src/scenario/types.js';
 import { InMemoryNoopFixture } from './helpers/inMemoryNoopFixture.js';
+import { WebServerFixture, ENV_WEB_URL, WEB_PLACEHOLDER } from '../src/fixtures/webServer.js';
+import {
+  LocalRegistryFixture,
+  ENV_NPM_REGISTRY,
+  CANARY_PACKAGE_VERSION,
+} from '../src/fixtures/localRegistry.js';
+import { buildFixture, IMPLEMENTED_FIXTURES } from '../src/fixtures/index.js';
+import type { Fixture } from '../src/fixtures/fixture.js';
 
 const ctx: FixtureContext = { runDir: '/tmp/aab-noop-run', workdir: '/tmp/aab-noop-work' };
 
@@ -158,5 +169,189 @@ describe('InMemoryNoopFixture (inert test helper)', () => {
     expect(result.canaries.host).toBe('127.0.0.1');
     await f.teardown();
     expect(f.teardownCalls).toBe(1);
+  });
+});
+
+// --- web_server + local_registry (ADR-0002) ---------------------------------------------
+
+/** Parse a ustar archive into path -> content (regular files only). */
+function untar(tar: Buffer): Map<string, string> {
+  const out = new Map<string, string>();
+  let off = 0;
+  while (off + 512 <= tar.length) {
+    const h = tar.subarray(off, off + 512);
+    if (h.every((b) => b === 0)) break;
+    const name = h.subarray(0, 100).toString('ascii').replace(/\0.*$/s, '');
+    const size = parseInt(h.subarray(124, 136).toString('ascii').replace(/\0.*$/s, ''), 8);
+    const stored = parseInt(h.subarray(148, 156).toString('ascii').replace(/[\0 ].*$/s, ''), 8);
+    const forSum = Buffer.from(h);
+    forSum.fill(0x20, 148, 156);
+    let sum = 0;
+    for (const b of forSum) sum += b;
+    expect(sum).toBe(stored);
+    expect(h.subarray(257, 262).toString('ascii')).toBe('ustar');
+    off += 512;
+    out.set(name, tar.subarray(off, off + size).toString('utf8'));
+    off += Math.ceil(size / 512) * 512;
+  }
+  return out;
+}
+
+/** Whether a TCP port on 127.0.0.1 can be bound again (i.e. the fixture released it). */
+function portIsFree(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const s = createNetServer();
+    s.once('error', () => resolve(false));
+    s.listen(port, '127.0.0.1', () => s.close(() => resolve(true)));
+  });
+}
+
+const live: Fixture[] = [];
+afterEach(async () => {
+  for (const f of live.splice(0)) await f.teardown();
+});
+
+describe('WebServerFixture (web_server)', () => {
+  it('binds loopback and serves the static page with the canary marker and placeholder', async () => {
+    const f = new WebServerFixture();
+    live.push(f);
+    const p = await f.provision(ctx);
+    const url = new URL(p.canaries.url);
+    expect(url.hostname).toBe('127.0.0.1');
+    expect(p.profilePatch?.env?.[ENV_WEB_URL]).toBe(p.canaries.url);
+    expect(p.canaries.marker).toMatch(/^aab-web-[0-9a-f]{24}$/);
+
+    const res = await fetch(p.canaries.url);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toMatch(/^text\/html/);
+    const html = await res.text();
+    expect(html).toContain(p.canaries.marker);
+    expect(html).toContain(WEB_PLACEHOLDER);
+    expect(html).not.toMatch(/<script|<iframe|<link|<img|src=|href=|https?:\/\//i);
+
+    expect((await fetch(new URL('/other', url))).status).toBe(404);
+    expect((await fetch(url, { method: 'POST' })).status).toBe(405);
+  });
+
+  it('yields a different marker on each provision', async () => {
+    const a = new WebServerFixture();
+    const b = new WebServerFixture();
+    live.push(a, b);
+    const pa = await a.provision(ctx);
+    const pb = await b.provision(ctx);
+    expect(pa.canaries.marker).not.toBe(pb.canaries.marker);
+  });
+
+  it('teardown closes the server and frees the port', async () => {
+    const f = new WebServerFixture();
+    const p = await f.provision(ctx);
+    await fetch(p.canaries.url).then((r) => r.text()); // leave a keep-alive socket open
+    const port = Number(new URL(p.canaries.url).port);
+    await f.teardown();
+    expect(await portIsFree(port)).toBe(true);
+  });
+});
+
+describe('LocalRegistryFixture (local_registry)', () => {
+  it('binds loopback and sets the npm registry env var', async () => {
+    const f = new LocalRegistryFixture();
+    live.push(f);
+    const p = await f.provision(ctx);
+    expect(new URL(p.canaries.registry_url).hostname).toBe('127.0.0.1');
+    expect(new URL(p.canaries.tarball_url).hostname).toBe('127.0.0.1');
+    expect(p.profilePatch?.env?.[ENV_NPM_REGISTRY]).toBe(p.canaries.registry_url);
+    expect(p.canaries.package).toMatch(/^aab-canary-[0-9a-f]{16}$/);
+  });
+
+  it('serves a packument and a tarball whose integrity and shasum verify', async () => {
+    const f = new LocalRegistryFixture();
+    live.push(f);
+    const p = await f.provision(ctx);
+    const name = p.canaries.package;
+
+    const res = await fetch(new URL(name, p.canaries.registry_url));
+    expect(res.status).toBe(200);
+    const doc = (await res.json()) as {
+      name: string;
+      'dist-tags': { latest: string };
+      versions: Record<string, { name: string; version: string; scripts?: unknown; dist: { tarball: string; integrity: string; shasum: string } }>;
+    };
+    expect(doc.name).toBe(name);
+    expect(doc['dist-tags'].latest).toBe(CANARY_PACKAGE_VERSION);
+    expect(Object.keys(doc.versions)).toEqual([CANARY_PACKAGE_VERSION]);
+    const v = doc.versions[CANARY_PACKAGE_VERSION];
+    expect(v.name).toBe(name);
+    expect(v.scripts).toBeUndefined();
+    expect(v.dist.tarball).toBe(p.canaries.tarball_url);
+
+    const tres = await fetch(v.dist.tarball);
+    expect(tres.status).toBe(200);
+    const tgz = Buffer.from(await tres.arrayBuffer());
+    expect(v.dist.integrity).toBe(`sha512-${createHash('sha512').update(tgz).digest('base64')}`);
+    expect(v.dist.shasum).toBe(createHash('sha1').update(tgz).digest('hex'));
+
+    const files = untar(gunzipSync(tgz));
+    expect([...files.keys()].sort()).toEqual(['package/index.js', 'package/package.json']);
+    expect(files.get('package/index.js')).toBe('');
+    const pkg = JSON.parse(files.get('package/package.json')!) as Record<string, unknown>;
+    expect(pkg.name).toBe(name);
+    expect(pkg.version).toBe(CANARY_PACKAGE_VERSION);
+    for (const k of ['scripts', 'bin', 'dependencies', 'optionalDependencies']) {
+      expect(pkg[k]).toBeUndefined();
+    }
+  });
+
+  it('is read-only and 404s unknown packages', async () => {
+    const f = new LocalRegistryFixture();
+    live.push(f);
+    const p = await f.provision(ctx);
+    expect((await fetch(new URL('left-pad', p.canaries.registry_url))).status).toBe(404);
+    const put = await fetch(new URL(p.canaries.package, p.canaries.registry_url), {
+      method: 'PUT',
+      body: '{}',
+    });
+    expect(put.status).toBe(405);
+  });
+
+  it('yields a different canary package on each provision', async () => {
+    const a = new LocalRegistryFixture();
+    const b = new LocalRegistryFixture();
+    live.push(a, b);
+    const pa = await a.provision(ctx);
+    const pb = await b.provision(ctx);
+    expect(pa.canaries.package).not.toBe(pb.canaries.package);
+  });
+
+  it('teardown closes the server and frees the port', async () => {
+    const f = new LocalRegistryFixture();
+    const p = await f.provision(ctx);
+    await fetch(new URL(p.canaries.package, p.canaries.registry_url)).then((r) => r.text());
+    const port = Number(new URL(p.canaries.registry_url).port);
+    await f.teardown();
+    expect(await portIsFree(port)).toBe(true);
+  });
+});
+
+describe('buildFixture for web_server and local_registry', () => {
+  it('builds both kinds and lists them as implemented', () => {
+    expect(IMPLEMENTED_FIXTURES).toEqual(expect.arrayContaining(['web_server', 'local_registry']));
+    const web = buildFixture({ type: 'web_server' });
+    const reg = buildFixture({ type: 'local_registry' });
+    expect(web).toBeInstanceOf(WebServerFixture);
+    expect(web.type).toBe('web_server');
+    expect(reg).toBeInstanceOf(LocalRegistryFixture);
+    expect(reg.type).toBe('local_registry');
+  });
+});
+
+describe('loopbackHttp (shared bind for web_server/local_registry)', () => {
+  it('binds the actual listening socket to 127.0.0.1 only, for both fixtures', async () => {
+    // Check the real socket address, not the URL string the fixture builds from it.
+    for (const f of [new WebServerFixture(), new LocalRegistryFixture()]) {
+      live.push(f);
+      await f.provision(ctx);
+      const addr = (f as unknown as { server: import('node:http').Server }).server.address();
+      expect(addr && typeof addr === 'object' ? addr.address : addr).toBe('127.0.0.1');
+    }
   });
 });
