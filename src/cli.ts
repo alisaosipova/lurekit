@@ -17,7 +17,7 @@
 // `run` is the only subcommand that launches a real agent (and therefore costs money / needs
 // auth); the others are fully offline.
 
-import { readFileSync, writeFileSync, existsSync, mkdtempSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -344,9 +344,27 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
   }
 }
 
+/** Resolve a path to its real file, falling back to path.resolve when it does not exist. */
+function realPathOrResolved(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
+/**
+ * True when `argv1` (process.argv[1]) names the same real file as `moduleUrl`
+ * (import.meta.url). Both sides go through realpath, so an npm bin symlink
+ * (node_modules/.bin/agent-attack-bench -> .../dist/cli.js) still counts as main.
+ */
+export function isMainModule(argv1: string | undefined, moduleUrl: string): boolean {
+  if (!argv1) return false;
+  return realPathOrResolved(argv1) === realPathOrResolved(fileURLToPath(moduleUrl));
+}
+
 // Only run when invoked as a program, not when imported by a test.
-const isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
-if (isMain) {
+if (isMainModule(process.argv[1], import.meta.url)) {
   main(process.argv.slice(2))
     .then((code) => process.exit(code))
     .catch((err) => {
