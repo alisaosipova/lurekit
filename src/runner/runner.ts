@@ -1,5 +1,6 @@
 // Runner: deterministic orchestration around a nondeterministic agent (brief §3.1, ADR-0002).
-// Lifecycle: plan -> provision detector+fixtures (detector first, its canaries handed to the fixtures) -> run x k in isolation -> observe/score ->
+// Lifecycle: plan -> provision detector+fixtures (detector first, its canaries handed to the fixtures)
+// -> render the task placeholders (evidence-spec §4.1) -> run x k in isolation -> observe/score ->
 // aggregate -> teardown. The runner's OWN behaviour is deterministic; only the agent is
 // stochastic. Concretely:
 //   - no Date.now()/new Date()/Math.random() in runner logic. The benchmark run id and the
@@ -24,6 +25,7 @@ import type { Detector, DetectorHit } from '../detectors/detector.js';
 import { getDetector } from '../detectors/index.js';
 import type { Fixture, FixtureExpectation, FixtureProvision } from '../fixtures/fixture.js';
 import type { DetectorKind, Scenario } from '../scenario/types.js';
+import { renderTask } from '../scenario/taskTemplate.js';
 import type {
   EvidenceRecord,
   FixtureProvider,
@@ -351,7 +353,11 @@ export class BenchmarkRunner implements Runner {
         runDir,
         warnings,
         workdir,
-        { isolation: single.isolation, requires: hasRequirement(requires) ? requires : undefined },
+        {
+          isolation: single.isolation,
+          requires: hasRequirement(requires) ? requires : undefined,
+          taskSha256,
+        },
       );
       const evidencePath = path.join(runDir, EVIDENCE_FILE);
       await writeFile(evidencePath, JSON.stringify(evidence, null, 2), 'utf8');
@@ -386,6 +392,8 @@ export class BenchmarkRunner implements Runner {
     // §3.1 "Run requirements": OR-ed over the fixtures; `requiredBy` names who declared it.
     const requires: RunRequirements = {};
     const requiredBy: string[] = [];
+    // §4.1: set once the task is rendered; recorded in evidence (hash only, never the text).
+    let taskSha256: string | undefined;
 
     // Provision the detector into the SAME run dir the adapter and evaluate() use. The
     // workdir + scenario match go along for workdir sensors (evidence-spec §1.5). By default
@@ -461,16 +469,39 @@ export class BenchmarkRunner implements Runner {
 
     if (!detectorFirst) {
       try {
-        await provisionDetector();
+        detectorCanaries = await provisionDetector();
       } catch (err) {
         return detectorFailed(err);
       }
     }
 
+    // §4.1 task placeholders: render against the merged profile env and the detector canaries.
+    // An unresolved placeholder is a fixture failure (§3.1); the adapter is never invoked with
+    // a raw placeholder.
+    const rendered = renderTask(scenario.task, { env: runProfile.env, canaries: detectorCanaries });
+    if (rendered.unresolved.length > 0) {
+      for (const ph of rendered.unresolved) warnings.push(`task placeholder unresolved: ${ph}`);
+      return finish(
+        {
+          run_id: runId,
+          repetition: rep,
+          outcome: 'inconclusive',
+          inconclusive_reason: 'fixture_error',
+          detector_hits: [],
+          benign_ok: false,
+          observation: undefined,
+          cost_usd: 0,
+        },
+        undefined,
+        'not evaluated (unresolved task placeholder)',
+      );
+    }
+    taskSha256 = sha256(rendered.text);
+
     // Run the adapter (lifecycle step 3). A thrown error => inconclusive(adapter_error).
     let observation: RunObservation;
     try {
-      observation = await adapter.run(runProfile, scenario.task, signal ?? neverAbort(), {
+      observation = await adapter.run(runProfile, rendered.text, signal ?? neverAbort(), {
         runDir,
         ...(hasRequirement(requires) ? { requires: { ...requires } } : {}),
       });
@@ -615,7 +646,7 @@ export class BenchmarkRunner implements Runner {
     runDir: string,
     warnings: string[],
     workdir?: string,
-    mcp: { isolation?: IsolationMarker; requires?: RunRequirements } = {},
+    mcp: { isolation?: IsolationMarker; requires?: RunRequirements; taskSha256?: string } = {},
   ): EvidenceRecord {
     const obsWarnings = [...warnings];
     const duration = observation ? durationMs(observation) : 0;
@@ -654,6 +685,11 @@ export class BenchmarkRunner implements Runner {
     if (reason) record.inconclusive_reason = reason;
     if (mcp.isolation) record.isolation = mcp.isolation;
     if (mcp.requires) record.requires = mcp.requires;
+    if (mcp.taskSha256) record.task_sha256 = mcp.taskSha256;
+    // A repetition that never produced an observation (fixture/detector failure, unresolved task
+    // placeholder, detector unverified, budget) keeps its warnings at the top level (§2.2), so
+    // the reason a run never reached the agent is in the artefact trail.
+    if (!observation && obsWarnings.length > 0) record.warnings = obsWarnings;
     return record;
   }
 

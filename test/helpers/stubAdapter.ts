@@ -54,6 +54,10 @@ function tc(name: string, input: unknown): ToolCall {
 export class StubAdapter implements Adapter {
   readonly id: AgentId = 'claude-code';
   runCount = 0;
+  /** Every task string handed to run(), in order (evidence-spec §4.1: the rendered task). */
+  readonly tasks: string[] = [];
+  /** The profile env of every run(), in order (to compare with the rendered task). */
+  readonly envs: Array<Record<string, string> | undefined> = [];
 
   constructor(private readonly script: StubScript = {}) {}
 
@@ -68,11 +72,13 @@ export class StubAdapter implements Adapter {
 
   async run(
     profile: SetupProfile,
-    _task: string,
+    task: string,
     _signal: AbortSignal,
     options: RunOptions = {},
   ): Promise<RunObservation> {
     this.runCount += 1;
+    this.tasks.push(task);
+    this.envs.push(profile.env ? { ...profile.env } : undefined);
     if (this.script.throwError) throw new Error(this.script.throwError);
 
     const runDir = options.runDir;

@@ -2,7 +2,8 @@
 // text/html page. The page carries a per-run random canary marker and a visible inert
 // placeholder line; it has no scripts, no forms, and no external references (every resource
 // is denied by a `default-src 'none'` CSP as a belt-and-braces guard). The server only serves
-// content — it never originates traffic (invariant c). The agent reaches it via an env var.
+// content — it never originates traffic (invariant c). The agent is pointed at it by the task,
+// rendered from {{env.AAB_WEB_URL}} (evidence-spec §4.1).
 
 import { randomBytes } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
@@ -11,7 +12,8 @@ import { FixtureBase, type FixtureContext, type FixtureProvision } from './fixtu
 import type { FixtureKind } from '../scenario/types.js';
 import { closeServer, listenLoopback } from './loopbackHttp.js';
 
-/** Env var the profilePatch sets to the page URL. */
+/** Env var the profilePatch sets to the page URL: the stable content-location name a scenario
+ *  task references as {{env.AAB_WEB_URL}} (ADR-0002 interface notes, evidence-spec §4.1). */
 export const ENV_WEB_URL = 'AAB_WEB_URL';
 
 /** The visible inert placeholder line shown on the page. */

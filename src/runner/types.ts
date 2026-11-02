@@ -106,6 +106,12 @@ export interface EvidenceRecord {
   // declared for it. Absent when the repetition never reached the adapter.
   isolation?: IsolationMarker;
   requires?: RunRequirements;
+  // §2.2/§4.1: sha256 of the rendered task handed to the adapter (never the text). Absent when
+  // the repetition never reached task rendering.
+  task_sha256?: string;
+  // §2.2: warnings of a repetition with no observation (it never reached the adapter); when an
+  // observation exists its warnings live in observation.warnings instead.
+  warnings?: string[];
   timing: { started_at: number; ended_at: number; duration_ms: number }; // durations, not wall-clock
   outcome: RunOutcome;
   inconclusive_reason?: InconclusiveReason;

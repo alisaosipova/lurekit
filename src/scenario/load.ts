@@ -4,7 +4,8 @@
 //                       schemas/scenario.schema.json.
 // loadScenarioFile()    parses one YAML file, schema-validates it, returns a typed Scenario.
 // loadScenarioDir()     loads every *.yaml/*.yml in a dir and enforces the cross-file
-//                       invariants the JSON Schema cannot express.
+//                       invariants the JSON Schema cannot express (incl. task placeholder
+//                       syntax, evidence-spec §4.1).
 
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -16,6 +17,7 @@ import type { ErrorObject, ValidateFunction } from 'ajv';
 import { parse as parseYaml } from 'yaml';
 
 import type { Scenario } from './types.js';
+import { malformedPlaceholders } from './taskTemplate.js';
 
 // ajv's CJS build sets both `module.exports` and `.default` to the class; unwrap either.
 type AjvCtor = new (opts: Record<string, unknown>) => {
@@ -185,6 +187,11 @@ export function loadScenarioDir(dir: string): LoadDirResult {
     // explicit false, not just an explicit true.
     if (scenario.track === 'browser' && scenario.runnable !== false) {
       fileErrors.push('track "browser" requires runnable:false');
+    }
+
+    // Task placeholders (evidence-spec §4.1): only {{env.NAME}} / {{canary.KEY}} are allowed.
+    for (const bad of malformedPlaceholders(scenario.task)) {
+      fileErrors.push(`task has a malformed placeholder: ${bad} (allowed: {{env.NAME}}, {{canary.KEY}})`);
     }
 
     if (fileErrors.length > 0) {

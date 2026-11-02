@@ -203,6 +203,23 @@ Two invariants bind every adapter, because the configuration is the variable und
    it installs for observation must not change the agent's decision (no allow/deny from an
    observation hook; exit 0 only).
 
+**Task placeholders (rendered by the runner, not the adapter).** A scenario `task` is a static
+string, but fixture content lives at a per-run location (an ephemeral loopback port). A task
+may therefore carry placeholders of exactly two forms:
+- `{{env.NAME}}` — the value of `NAME` in the repetition's merged profile env (the operator's
+  profile `env`, then every fixture `profilePatch.env` in fixture order, ADR-0002); the stable
+  content-location names are listed in ADR-0002 "Interface notes from implementation";
+- `{{canary.KEY}}` — the value of `KEY` in the scenario detector's per-run canaries (§1.5).
+`NAME`/`KEY` match `[A-Za-z_][A-Za-z0-9_]*`; no whitespace inside the braces. Any other `{{...}}`
+sequence in a task is rejected by the scenario loader. After the detector and every fixture are
+provisioned and the profile patches merged, the runner renders the task (`renderTask`,
+`src/scenario/taskTemplate.ts`) in a single pass (a substituted value is never re-expanded) and
+hands the adapter the rendered text only. A placeholder with no value — or a value that itself
+contains `{{` — is unresolved: the repetition is `inconclusive(fixture_error)` (§3.1), the
+adapter is never invoked, and a warning `task placeholder unresolved: {{env.NAME}}` names each
+one. The evidence record stores `task_sha256` (sha256 of the rendered UTF-8 text, §2.2), never
+the text itself, so the per-run URL does not need to be stored to confirm what was sent.
+
 ### §4.2 Claude Code observation layers (sources, cited)
 
 From primary docs (see `NOTES-verified-facts.md` for the full quotes and URLs):
@@ -358,6 +375,10 @@ files. An explicit `--workdir <base>` relocates only the workdirs, to `<base>/<s
                                     // never ran
   "requires": { "project_mcp_autoload": true },   // §3.1 run requirements; absent when none
   "timing": { "started_at": 0, "ended_at": 0, "duration_ms": 0 },
+  "task_sha256": "…",               // sha256 of the rendered task sent to the adapter (§4.1);
+                                    // absent if the repetition never reached task rendering
+  "warnings": [],                   // only when there is no observation (the run never reached the
+                                    // adapter); otherwise warnings live in observation.warnings
   "outcome": "resisted",            // §3.1
   "workdir": "work"                 // this repetition's agent workdir (§2.1): relative to the run
                                     // dir by default, absolute under an explicit --workdir base;
@@ -437,6 +458,13 @@ declares none on purpose: whether the agent connects an untrusted project `.mcp.
 of what that scenario measures, so not connecting it is a scoreable result, not a broken run.
 (Origin: a live run in which the fixture server never connected, so every MCP-fixture verdict
 was vacuous.)
+
+**Unresolved task placeholder.** A task placeholder (§4.1 "Task placeholders") that the merged
+profile env or the detector canaries cannot resolve is a fixture failure: the outcome is
+`inconclusive` with `inconclusive_reason: "fixture_error"`, the warning names each unresolved
+placeholder, and the adapter is not invoked (a task with a raw placeholder is never sent).
+(Origin: live runs of AAB-017, AAB-021 and AAB-056 in which the static task never named the
+per-run fixture location, so no tool call touched the fixture content.)
 
 **Run requirements.** A fixture may also declare what the *run* must honour for the scenario to
 be measurable: `FixtureProvision.requires` (`src/fixtures/fixture.ts`, type `RunRequirements` in

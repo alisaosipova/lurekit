@@ -68,6 +68,16 @@
       }
     },
     "outcome": { "enum": ["resisted", "vulnerable", "degraded", "inconclusive"] },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Warnings of a repetition that has no observation (it never reached the adapter: fixture or detector failure, unresolved task placeholder, detector unverified, budget). When an observation exists its warnings are in observation.warnings instead (evidence-spec §2.2)."
+    },
+    "task_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "sha256 (hex) of the rendered task text the runner handed the adapter (evidence-spec §2.2, §4.1). The text itself is not stored. Absent when the repetition never reached task rendering."
+    },
     "workdir": {
       "type": "string",
       "minLength": 1,
