@@ -11,7 +11,7 @@ import path from 'node:path';
 
 import { main, type CliDeps } from '../src/cli.js';
 import type { EvidenceRecord, ProfileSummary, RunManifest } from '../src/runner/types.js';
-import { redactHomeDir } from '../src/report/publish.js';
+import { pseudonymizeMcpServers, redactHomeDir } from '../src/report/publish.js';
 
 const FAKE_HOME = '/srv/aab-fake-home/maintainer';
 const RUN_ID = 'aab-publish-test';
@@ -356,6 +356,161 @@ describe('publish (ADR-0017)', () => {
         count: 2,
       });
       expect(redactHomeDir('/x', '/')).toEqual({ text: '/x', count: 0 });
+    });
+  });
+
+  // Operator MCP server names (ADR-0017 "Operator MCP server names"): unconditional.
+  describe('operator MCP server names', () => {
+    type Srv = { name: string; status: string; source?: string };
+    const FIXTURE: Srv[] = [
+      { name: 'canary-mcp', status: 'connected', source: 'dynamic' },
+      { name: 'planted-mcp', status: 'connected', source: 'project' },
+    ];
+
+    function hashTree(dir: string, base = dir, acc = new Map<string, string>()): Map<string, string> {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) hashTree(p, base, acc);
+        else acc.set(path.relative(base, p), createHash('sha256').update(readFileSync(p)).digest('hex'));
+      }
+      return acc;
+    }
+
+    /** Write a run dir whose evidence records carry `servers(id, rep)` as observation.mcp_servers. */
+    function writeMcpRun(servers: (id: string, rep: number) => Srv[] | undefined): string {
+      const runDir = writeRun();
+      for (const id of ['AAB-001', 'AAB-002']) {
+        for (const rep of [0, 1]) {
+          const list = servers(id, rep);
+          if (!list) continue;
+          const ev = evidence(id, rep);
+          if (ev.observation) ev.observation.mcp_servers = list;
+          writeFileSync(path.join(runDir, id, String(rep), 'evidence.json'), JSON.stringify(ev, null, 2));
+        }
+      }
+      return runDir;
+    }
+
+    const readEv = (id: string, rep: number): EvidenceRecord =>
+      JSON.parse(readFileSync(path.join(defaultOut(), id, String(rep), 'evidence.json'), 'utf8')) as EvidenceRecord;
+
+    it('user/claudeai entries are renamed consistently across files; fixture entries untouched; source unchanged', async () => {
+      const runDir = writeMcpRun((id, rep) => {
+        if (id === 'AAB-001' && rep === 0) {
+          return [
+            ...FIXTURE,
+            { name: 'my-private-github', status: 'connected', source: 'user' },
+            { name: 'claude.ai Gmail', status: 'needs-auth', source: 'claudeai' },
+          ];
+        }
+        if (id === 'AAB-002' && rep === 1) {
+          return [
+            { name: 'claude.ai Gmail', status: 'failed', source: 'claudeai' },
+            ...FIXTURE,
+            { name: 'my-private-github', status: 'connected', source: 'user' },
+          ];
+        }
+        if (id === 'AAB-002' && rep === 0) return [{ name: 'local-notes', status: 'pending', source: 'local' }];
+        return undefined; // AAB-001/1: no mcp_servers at all
+      });
+      const before = hashTree(runDir);
+
+      const code = await main(['publish', path.join('.aab-runs', RUN_ID)], deps());
+      expect(err.join('')).toBe('');
+      expect(code).toBe(0);
+
+      expect(readEv('AAB-001', 0).observation?.mcp_servers).toEqual([
+        ...FIXTURE,
+        { name: '<user-mcp-1>', status: 'connected', source: 'user' },
+        { name: '<user-mcp-2>', status: 'needs-auth', source: 'claudeai' },
+      ]);
+      expect(readEv('AAB-002', 1).observation?.mcp_servers).toEqual([
+        { name: '<user-mcp-2>', status: 'failed', source: 'claudeai' },
+        ...FIXTURE,
+        { name: '<user-mcp-1>', status: 'connected', source: 'user' },
+      ]);
+      expect(readEv('AAB-002', 0).observation?.mcp_servers).toEqual([
+        { name: '<user-mcp-3>', status: 'pending', source: 'local' },
+      ]);
+
+      // No published file (manifest, evidence, renders, index) names an operator server.
+      for (const rel of hashTree(defaultOut()).keys()) {
+        const text = readFileSync(path.join(defaultOut(), rel), 'utf8');
+        for (const secretName of ['my-private-github', 'claude.ai Gmail', 'local-notes']) {
+          expect(text, rel).not.toContain(secretName);
+        }
+      }
+      // A record without operator entries stays a byte copy; the layout of rewritten ones is kept.
+      expect(readFileSync(path.join(defaultOut(), 'AAB-001', '1', 'evidence.json'), 'utf8')).toBe(
+        readFileSync(path.join(runDir, 'AAB-001', '1', 'evidence.json'), 'utf8'),
+      );
+      expect(readFileSync(path.join(defaultOut(), 'AAB-001', '0', 'evidence.json'), 'utf8')).toBe(
+        JSON.stringify(readEv('AAB-001', 0), null, 2),
+      );
+
+      const index = readFileSync(path.join(defaultOut(), 'index.md'), 'utf8');
+      expect(index).toContain('## Redaction');
+      expect(index).toMatch(/operator MCP server names .*-> <user-mcp-N> \(5 replacements, 3 distinct names\)/);
+      expect(index).not.toContain('home directory ->');
+
+      // Source run artefacts are never modified.
+      expect(hashTree(runDir)).toEqual(before);
+      expect(readFileSync(path.join(runDir, 'AAB-001', '0', 'evidence.json'), 'utf8')).toContain('my-private-github');
+    });
+
+    it('an entry with no reported source is treated as the operator\'s (fail closed)', async () => {
+      writeMcpRun((id, rep) => (id === 'AAB-001' && rep === 0 ? [{ name: 'mystery', status: 'connected' }, ...FIXTURE] : undefined));
+      expect(await main(['publish', path.join('.aab-runs', RUN_ID)], deps())).toBe(0);
+      expect(readEv('AAB-001', 0).observation?.mcp_servers).toEqual([{ name: '<user-mcp-1>', status: 'connected' }, ...FIXTURE]);
+      expect(readFileSync(path.join(defaultOut(), 'index.md'), 'utf8')).toContain('(1 replacements, 1 distinct names)');
+    });
+
+    it('fixture-only servers: everything is a byte copy and index.md has no redaction note', async () => {
+      const runDir = writeMcpRun(() => FIXTURE);
+      expect(await main(['publish', path.join('.aab-runs', RUN_ID)], deps())).toBe(0);
+      for (const id of ['AAB-001', 'AAB-002']) {
+        for (const rep of [0, 1]) {
+          const rel = path.join(id, String(rep), 'evidence.json');
+          expect(readFileSync(path.join(defaultOut(), rel), 'utf8'), rel).toBe(readFileSync(path.join(runDir, rel), 'utf8'));
+        }
+      }
+      expect(readFileSync(path.join(defaultOut(), 'index.md'), 'utf8')).not.toContain('## Redaction');
+    });
+
+    it('combines with --redact-home: one Redaction section, both counts', async () => {
+      writeMcpRun((id, rep) =>
+        id === 'AAB-001' && rep === 0 ? [{ name: 'my-private-github', status: 'connected', source: 'user' }] : undefined,
+      );
+      expect(await main(['publish', path.join('.aab-runs', RUN_ID), '--redact-home'], deps())).toBe(0);
+      const index = readFileSync(path.join(defaultOut(), 'index.md'), 'utf8');
+      expect(index.match(/## Redaction/g)).toHaveLength(1);
+      expect(index).toContain('home directory -> <HOME> (0 replacements)');
+      expect(index).toContain('(1 replacements, 1 distinct names)');
+    });
+
+    it('a placeholder never collides with a kept fixture name, even one in a later file', async () => {
+      writeMcpRun((id, rep) => {
+        if (id === 'AAB-001' && rep === 0) return [{ name: 'my-private-github', status: 'connected', source: 'user' }];
+        if (id === 'AAB-002' && rep === 1) return [{ name: '<user-mcp-1>', status: 'connected', source: 'dynamic' }];
+        return undefined;
+      });
+      expect(await main(['publish', path.join('.aab-runs', RUN_ID)], deps())).toBe(0);
+      expect(readEv('AAB-001', 0).observation?.mcp_servers).toEqual([
+        { name: '<user-mcp-2>', status: 'connected', source: 'user' },
+      ]);
+      expect(readEv('AAB-002', 1).observation?.mcp_servers).toEqual([
+        { name: '<user-mcp-1>', status: 'connected', source: 'dynamic' },
+      ]);
+    });
+
+    it('pseudonymizeMcpServers: shared map, nested arrays, harness sources kept', () => {
+      const names = new Map<string, string>();
+      const a = { observation: { mcp_servers: [{ name: 'x', status: 's', source: 'user' }, { name: 'f', status: 's', source: 'dynamic' }] } };
+      const b = { list: [{ mcp_servers: [{ name: 'y', status: 's', source: 'enterprise' }, { name: 'x', status: 't', source: 'user' }] }] };
+      expect(pseudonymizeMcpServers(a, names)).toBe(1);
+      expect(pseudonymizeMcpServers(b, names)).toBe(2);
+      expect(a.observation.mcp_servers.map((e) => e.name)).toEqual(['<user-mcp-1>', 'f']);
+      expect(b.list[0].mcp_servers.map((e) => e.name)).toEqual(['<user-mcp-2>', '<user-mcp-1>']);
     });
   });
 

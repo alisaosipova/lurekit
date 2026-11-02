@@ -1,7 +1,9 @@
 # ADR-0017: Publishing a run (`publish` subcommand and redaction gate)
 
 Status: proposed, implemented (2026-11-02); awaiting maintainer approval. Amended 2026-11-02:
-opt-in operator home redaction (`--redact-home`, see "Operator home redaction").
+opt-in operator home redaction (`--redact-home`, see "Operator home redaction"). Amended
+2026-11-02: unconditional pseudonymisation of operator MCP server names (see "Operator MCP
+server names").
 Authorises `src/report/publish.ts`, the `publish` subcommand in `src/cli.ts`, the exported
 `findSecretShape()` / `extractHost()` helpers in `src/fixtures/fixture.ts` (and the
 path-before-userinfo order of `extractHost()`), and
@@ -36,9 +38,10 @@ Option 3.
 - Default output dir: `reports/<benchmark_run_id>` (relative to the cwd). A non-empty output
   dir is refused, so stale unscanned files cannot ride along.
 - Bundle contents, and nothing else:
-  - `manifest.json` (byte copy, except for `--redact-home` replacements);
+  - `manifest.json` (byte copy, except for operator MCP server names and `--redact-home`
+    replacements);
   - every `<scenario>/<rep>/evidence.json` for the manifest's scenarios (byte copy, layout kept,
-    except for `--redact-home` replacements);
+    except for operator MCP server names and `--redact-home` replacements);
   - `report.md`, `report.json`, `report.sarif`, rendered by `report()` (§6.1). The Markdown
     evidence excerpt uses the same selection rule as `report` (first vulnerable repetition,
     else repetition 0; `selectEvidence()` is shared);
@@ -85,6 +88,29 @@ Option 3.
     path (another user's `/home/<u>`, `/Users/<u>`, `/root`, `<drive>:\Users\<u>`), any token
     shape and any non-allowlisted URL still fail, and nothing is written;
   - a missing or root-ish home dir (empty, `/`) with the flag is an error, not a silent no-op.
+- **Operator MCP server names (unconditional).** Evidence records carry the agent's own init
+  report `observation.mcp_servers` (`name`/`status`/`source`, evidence-spec §4.3). Entries whose
+  `source` is `user`, `local`, `claudeai`, `enterprise`, `managed` or anything else not
+  configured by the harness describe the operator's own MCP servers and connectors: a
+  configuration disclosure the §5 gate does not catch (a server name is neither a URL, a token
+  nor a home path). Before `--redact-home` and before the gate:
+  - every `mcp_servers` array anywhere in the manifest and in each evidence record is walked;
+    an entry whose `source` is `dynamic` (the harness's `--mcp-config` fixture servers) or
+    `project` (a fixture-planted `.mcp.json`) is kept as is; every other entry, including one
+    with no `source` at all (fail closed), has its `name` replaced by `<user-mcp-N>`;
+  - `N` is assigned per distinct original name in first-seen order (manifest, then evidence in
+    bundle order), with one map for the whole publish, so the same server gets the same
+    placeholder in every file; `status` and `source` are kept; a placeholder that equals the
+    name of any kept (`dynamic`/`project`) entry anywhere in the run is skipped (all files are
+    parsed before the first placeholder is assigned), so a placeholder never collides with a
+    fixture server name;
+  - the rewrite is applied to the parsed objects; only files with at least one replacement are
+    re-serialised (indentation detected from the original, trailing newline kept), every other
+    file stays a byte copy; the three renders are built from the rewritten objects;
+  - when at least one entry was rewritten, `index.md`'s `## Redaction` section gains the line
+    `redaction applied: operator MCP server names (mcp_servers entries whose source is not
+    dynamic/project) -> <user-mcp-N> (R replacements, D distinct names)`;
+  - the run dir is never modified.
 - Ids that become path segments (`benchmark_run_id`, scenario ids) must match
   `^[A-Za-z0-9][A-Za-z0-9._-]*$`; anything else fails the publish.
 - Offline: no network, no agent, no clock. The command writes local files only; uploading or
@@ -128,5 +154,17 @@ publish: redaction gate failed (evidence-spec §5), 1 finding(s); nothing writte
   itself announced) is always that home. Another user's home, a macOS/Windows home that is not
   the operator's, or a sibling such as `/home/u2` or `/home/u@old` is evidence the run captured something
   unexpected; masking it would hide that from the maintainer, so it keeps failing the gate.
-- Evidence records are published verbatim (save for `--redact-home`), including tool-call inputs. The gate, not the
+- Operator MCP server names are rewritten unconditionally, not opt-in, unlike `--redact-home`.
+  The two differ in what the value is to the measurement. A home path can be evidence (what the
+  agent touched), so rewriting it alters a published fact and the maintainer must ask. The names
+  of the operator's own servers are never part of the measurement: a scenario's precondition
+  (`expect: mcp_server`, §4.3) names a fixture server, which arrives as `dynamic` or `project`
+  and is kept. What the published record still needs from operator entries (that they existed,
+  how many, their status and their source class, e.g. to see that strict MCP isolation was not
+  in effect) survives the rewrite. Making it opt-in would publish the operator's connector list
+  by default, which no reader needs. The bytes in the run dir are unchanged for local audit.
+- The rewrite covers only the structured `mcp_servers` field. If the agent actually called a
+  tool of an operator server, its `mcp__<server>__<tool>` name in `tool_calls` is a fact of the
+  run and is published as is; a maintainer who must not disclose it should not publish that run.
+- Evidence records are published verbatim (save for operator MCP server names and `--redact-home`), including tool-call inputs. The gate, not the
   renderer, is what keeps those inputs safe to share.

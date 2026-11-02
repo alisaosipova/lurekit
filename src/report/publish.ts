@@ -18,6 +18,13 @@
 // bundle as usual, so any other home-style path, token or URL still fails. The run dir is never
 // modified: redaction applies to the in-memory copies only.
 //
+// Unconditional (ADR-0017 "Operator MCP server names"): every observation `mcp_servers` entry
+// whose `source` is not one the harness itself configures (`dynamic` = --mcp-config fixture
+// servers, `project` = a fixture-planted .mcp.json) has its `name` replaced by a stable
+// placeholder <user-mcp-N> (one N per distinct name within the published run); status and
+// source are kept. These entries describe the operator's own MCP servers / connectors, which are
+// never part of the measurement. Applied before --redact-home and before the gate.
+//
 // Structure: planPublish() / scanForLeaks() / renderIndex() are pure (data in, data out);
 // readRunDir() and writeBundle() are the only I/O; publishRun() glues them.
 
@@ -66,7 +73,14 @@ export interface Leak {
 }
 
 export type PublishPlan =
-  | { ok: true; benchmarkRunId: string; files: BundleFile[]; homeReplacements?: number }
+  | {
+      ok: true;
+      benchmarkRunId: string;
+      files: BundleFile[];
+      homeReplacements?: number;
+      /** Operator MCP server entries renamed to <user-mcp-N> (always counted; 0 = none). */
+      mcpNameReplacements: number;
+    }
   | { ok: false; benchmarkRunId?: string; error?: string; leaks: Leak[] };
 
 /** URLs the tool itself emits in every render (SARIF $schema and driver.informationUri). They
@@ -100,6 +114,89 @@ export function lookupFromRecords(
   const runsById = new Map(manifest.results.map((r) => [r.scenario_id, r.runs]));
   return (scenarioId) =>
     selectEvidence(runsById.get(scenarioId) ?? 1, (rep) => records.get(`${scenarioId}/${rep}`));
+}
+
+// --- operator MCP server names (pure) ---------------------------------------------------
+
+/** `mcp_servers` sources the harness itself configures; every other source (user, local,
+ *  claudeai, enterprise, managed, ..., or none reported) is the operator's environment. */
+export const HARNESS_MCP_SOURCES: ReadonlySet<string> = new Set(['dynamic', 'project']);
+
+/** The placeholder for the n-th (1-based) distinct operator MCP server name. */
+export const userMcpPlaceholder = (n: number): string => `<user-mcp-${n}>`;
+
+/** Rewrite, in place, the `name` of every non-harness entry of every `mcp_servers` array found
+ *  anywhere in `value`. `names` maps an original name to its placeholder and is shared across
+ *  all files of one publish, so the same server gets the same placeholder everywhere. An entry
+ *  with no string `source` is treated as the operator's (fail closed). Returns the number of
+ *  entries rewritten. */
+export function pseudonymizeMcpServers(
+  value: unknown,
+  names: Map<string, string>,
+  reserved: ReadonlySet<string> = new Set(),
+): number {
+  if (!value || typeof value !== 'object') return 0;
+  let count = 0;
+  if (Array.isArray(value)) {
+    for (const v of value) count += pseudonymizeMcpServers(v, names, reserved);
+    return count;
+  }
+  for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
+    if (key === 'mcp_servers' && Array.isArray(v)) {
+      for (const entry of v) {
+        if (!entry || typeof entry !== 'object') continue;
+        const e = entry as Record<string, unknown>;
+        if (typeof e.name !== 'string') continue;
+        if (typeof e.source === 'string' && HARNESS_MCP_SOURCES.has(e.source)) continue;
+        let placeholder = names.get(e.name);
+        if (placeholder === undefined) {
+          // Never reuse a name a kept (harness) entry carries, so a placeholder cannot be
+          // mistaken for a fixture server.
+          const used = new Set(names.values());
+          let n = names.size + 1;
+          while (used.has(userMcpPlaceholder(n)) || reserved.has(userMcpPlaceholder(n))) n++;
+          placeholder = userMcpPlaceholder(n);
+          names.set(e.name, placeholder);
+        }
+        e.name = placeholder;
+        count++;
+      }
+    } else {
+      count += pseudonymizeMcpServers(v, names, reserved);
+    }
+  }
+  return count;
+}
+
+/** Add to `out` the name of every harness-configured entry (`source` in HARNESS_MCP_SOURCES)
+ *  of every `mcp_servers` array found anywhere in `value`: the names the rewrite keeps. */
+export function collectHarnessMcpNames(value: unknown, out: Set<string>): Set<string> {
+  if (!value || typeof value !== 'object') return out;
+  if (Array.isArray(value)) {
+    for (const v of value) collectHarnessMcpNames(v, out);
+    return out;
+  }
+  for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
+    if (key === 'mcp_servers' && Array.isArray(v)) {
+      for (const entry of v) {
+        if (!entry || typeof entry !== 'object') continue;
+        const e = entry as Record<string, unknown>;
+        if (typeof e.name === 'string' && typeof e.source === 'string' && HARNESS_MCP_SOURCES.has(e.source)) out.add(e.name);
+      }
+    } else {
+      collectHarnessMcpNames(v, out);
+    }
+  }
+  return out;
+}
+
+/** Re-serialise a rewritten JSON file in the layout of its original text (indent detected from
+ *  the second line; trailing newline kept), so only the rewritten values change. */
+function reserialize(original: string, value: unknown): string {
+  const m = /^[{[]\r?\n([ \t]+)/.exec(original);
+  const indent = m ? m[1] : 0; // no line break after the opening bracket: compact
+  const eol = /\r?\n$/.exec(original)?.[0] ?? '';
+  return JSON.stringify(value, null, indent) + eol;
 }
 
 // --- redaction gate (pure) --------------------------------------------------------------
@@ -223,6 +320,10 @@ const cell = (s: string): string =>
 export interface IndexNotes {
   /** Set when --redact-home ran: the number of home-dir occurrences replaced in the bundle. */
   homeReplacements?: number;
+  /** Operator MCP server entries renamed to <user-mcp-N>; the note is shown when > 0. */
+  mcpNameReplacements?: number;
+  /** Distinct operator MCP server names behind those replacements. */
+  mcpDistinctNames?: number;
 }
 
 export function renderIndex(manifest: RunManifest, evidenceRels: string[], notes: IndexNotes = {}): string {
@@ -271,9 +372,19 @@ export function renderIndex(manifest: RunManifest, evidenceRels: string[], notes
   out.push('- [report.md](report.md), [report.json](report.json), [report.sarif](report.sarif) — renders (evidence-spec §6)');
   for (const rel of evidenceRels) out.push(`- [${rel}](${rel})`);
   out.push('');
-  if (notes.homeReplacements !== undefined) {
+  const mcpNotes = (notes.mcpNameReplacements ?? 0) > 0;
+  if (notes.homeReplacements !== undefined || mcpNotes) {
     out.push('## Redaction', '');
-    out.push(`- redaction applied: home directory -> ${HOME_PLACEHOLDER} (${notes.homeReplacements} replacements)`);
+    if (notes.homeReplacements !== undefined) {
+      out.push(`- redaction applied: home directory -> ${HOME_PLACEHOLDER} (${notes.homeReplacements} replacements)`);
+    }
+    if (mcpNotes) {
+      out.push(
+        `- redaction applied: operator MCP server names (mcp_servers entries whose source is not ` +
+          `${[...HARNESS_MCP_SOURCES].join('/')}) -> <user-mcp-N> ` +
+          `(${notes.mcpNameReplacements} replacements, ${notes.mcpDistinctNames ?? 0} distinct names)`,
+      );
+    }
     out.push('');
   }
   out.push(
@@ -305,20 +416,41 @@ export function planPublish(contents: RunDirContents, policy: PublishPolicy = {}
     }
   }
 
-  const records = new Map<string, EvidenceRecord>();
+  // Operator MCP server names (unconditional): rewrite the parsed manifest and records, and
+  // re-serialise only the files that changed, so every other file stays a byte copy. The
+  // renders below are built from the rewritten objects. Manifest first, then evidence in
+  // order, so placeholder numbering is deterministic. Everything is parsed first so the names
+  // of kept (harness) entries anywhere in the run are reserved before any placeholder is
+  // assigned.
+  const parsed: { rel: string; text: string; rec: EvidenceRecord }[] = [];
   for (const f of contents.evidence) {
     try {
-      records.set(f.rel.replace(/\/evidence\.json$/, ''), JSON.parse(f.text) as EvidenceRecord);
+      parsed.push({ rel: f.rel, text: f.text, rec: JSON.parse(f.text) as EvidenceRecord });
     } catch (err) {
       return { ok: false, benchmarkRunId: id, error: `${f.rel} is not valid JSON: ${(err as Error).message}`, leaks: [] };
     }
   }
+  const reserved = collectHarnessMcpNames(manifest, new Set());
+  for (const p of parsed) collectHarnessMcpNames(p.rec, reserved);
+  const mcpNames = new Map<string, string>();
+  let mcpNameReplacements = pseudonymizeMcpServers(manifest, mcpNames, reserved);
+  const manifestText = mcpNameReplacements > 0 ? reserialize(contents.manifestText, manifest) : contents.manifestText;
+
+  const records = new Map<string, EvidenceRecord>();
+  const evidenceFiles: BundleFile[] = [];
+  for (const { rel, text, rec } of parsed) {
+    const n = pseudonymizeMcpServers(rec, mcpNames, reserved);
+    mcpNameReplacements += n;
+    records.set(rel.replace(/\/evidence\.json$/, ''), rec);
+    evidenceFiles.push({ rel, text: n > 0 ? reserialize(text, rec) : text });
+  }
   const lookup = lookupFromRecords(manifest, records);
   const evidenceRels = contents.evidence.map((f) => f.rel);
+  const mcpNotes: IndexNotes = { mcpNameReplacements, mcpDistinctNames: mcpNames.size };
 
   let files: BundleFile[] = [
-    { rel: 'manifest.json', text: contents.manifestText },
-    ...contents.evidence,
+    { rel: 'manifest.json', text: manifestText },
+    ...evidenceFiles,
     { rel: 'report.md', text: report(manifest, { format: 'markdown', evidenceLookup: lookup }) },
     { rel: 'report.json', text: report(manifest, { format: 'json' }) },
     { rel: 'report.sarif', text: report(manifest, { format: 'sarif' }) },
@@ -340,12 +472,12 @@ export function planPublish(contents: RunDirContents, policy: PublishPolicy = {}
       total += r.count;
       return { rel: f.rel, text: r.text };
     });
-    total += redactHomeDir(renderIndex(manifest, evidenceRels), home as string).count;
+    total += redactHomeDir(renderIndex(manifest, evidenceRels, mcpNotes), home as string).count;
     homeReplacements = total;
-    const index = redactHomeDir(renderIndex(manifest, evidenceRels, { homeReplacements }), home as string);
+    const index = redactHomeDir(renderIndex(manifest, evidenceRels, { ...mcpNotes, homeReplacements }), home as string);
     files.push({ rel: 'index.md', text: index.text });
   } else {
-    files.push({ rel: 'index.md', text: renderIndex(manifest, evidenceRels) });
+    files.push({ rel: 'index.md', text: renderIndex(manifest, evidenceRels, mcpNotes) });
   }
 
   const allowed = new Set<string>();
@@ -358,8 +490,8 @@ export function planPublish(contents: RunDirContents, policy: PublishPolicy = {}
   const leaks = scanForLeaks(files, allowed, policy.homeDir);
   if (leaks.length > 0) return { ok: false, benchmarkRunId: id, leaks };
   return homeReplacements === undefined
-    ? { ok: true, benchmarkRunId: id, files }
-    : { ok: true, benchmarkRunId: id, files, homeReplacements };
+    ? { ok: true, benchmarkRunId: id, files, mcpNameReplacements }
+    : { ok: true, benchmarkRunId: id, files, homeReplacements, mcpNameReplacements };
 }
 
 /** Human-readable failure text for a rejected plan. */
