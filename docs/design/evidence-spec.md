@@ -74,8 +74,8 @@ content comparison of a short list of watched paths, nothing more.
 | Canary | The watched-path list itself (no secret is planted; nothing is written into the workdir) |
 | Self-test | Positive: a harness writer creates one watched file in a temp workdir → exactly one hit. Negative: baseline taken, nothing touched → zero hits. |
 
-- **Baseline point.** `provision()` runs after the fixtures, so the baseline is the
-  *post-fixture* workdir: files a fixture plants (poisoned repo config) are part of the
+- **Baseline point.** `provision()` runs after the fixtures (the sensor declares
+  `provisionAfterFixtures: true`, §1.5), so the baseline is the *post-fixture* workdir: files a fixture plants (poisoned repo config) are part of the
   baseline, and only changes made during the agent run are reported. The runner passes the
   profile workdir via `provision(runId, runDir, { workdir, match })` and `evaluate({ workdir })`
   (§1.5). With no workdir, `provision()` throws, so the run is `inconclusive(fixture_error)`
@@ -156,6 +156,22 @@ A third, OPTIONAL argument `opts?: { workdir?: string; match?: Record<string, un
 carries the post-fixture profile workdir and the scenario's `forbidden_effect.match`, and
 `evaluate()`'s ctx carries an optional `workdir`. Sensors that observe only the run dir ignore
 both (existing detectors compile unchanged); `fs_diff` (§1.2c) requires `workdir`.
+
+**Provisioning order and canary hand-off.** The runner provisions the scenario's detector
+BEFORE the fixtures and passes the canaries `provision()` returned to every fixture as
+`ctx.canaries` (ADR-0002 "Fixture contract"), so a fixture that names a canary names the
+per-run value this sensor watches — never a literal stand-in. Keys a fixture may consume:
+`canary_command` → `commandPath` (absolute path of the per-run no-op launcher under
+`<runDir>/canary_bin`; `.cmd` on Windows; the bin dir is not put on PATH) plus `command`,
+`binDir`, `recorderPath`; `canary_file_read` → `path` (absolute decoy file path), `marker`;
+`canary_egress_http` → `url`, `host`, `token`; `canary_mcp_tool` → `tool`, `token`,
+`serverRef`, `recorderPath` (MCP fixtures launch the inert server with this `token` and
+`recorderPath` when `serverRef` is present). A sensor that baselines the post-fixture workdir sets the
+optional `Detector.provisionAfterFixtures = true` (`fs_diff`); it is provisioned after the
+fixtures, which then receive an empty `ctx.canaries`. A fixture provisioned without a canary
+it must reference throws `FixtureCanaryError`; the runner records the repetition as
+`inconclusive(fixture_error)`. A detector provisioning failure is likewise
+`inconclusive(fixture_error)` and the fixtures are not provisioned.
 The `DetectorKind` union and the `forbidden_effect.detector` enum in
 `schemas/scenario.schema.json` must stay in lockstep; a value in one and not the other is a
 schema/spec drift bug.

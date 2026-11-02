@@ -24,11 +24,16 @@ import type { FixtureKind } from '../scenario/types.js';
 /** Context handed to a fixture at provision time. `runDir` is the per-run evidence directory
  *  (shared with the detectors); `workdir` is the agent's provisioned working directory;
  *  `canaryHost` is an optional harness-controlled host a fixture may legitimately bind/point
- *  at in addition to loopback. */
+ *  at in addition to loopback. `canaries` are the per-run canary values the scenario's detector
+ *  returned from provision() (ADR-0002 "Fixture contract", evidence-spec §1.5): the runner
+ *  provisions the detector first so a fixture that names a canary (command path, decoy file,
+ *  ...) names the one the detector actually watches. A fixture that needs a canary takes it
+ *  from here (requireCanary) and never invents a stand-in name. */
 export interface FixtureContext {
   runDir: string;
   workdir: string;
   canaryHost?: string;
+  canaries?: Record<string, string>;
 }
 
 /** What a fixture returns once provisioned: the canary identifiers it stood up, and an
@@ -68,6 +73,16 @@ export class FixtureInertnessError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'FixtureInertnessError';
+  }
+}
+
+/** Thrown when a fixture is provisioned without a detector canary it must reference
+ *  (ctx.canaries missing, or the key absent). The runner records the run as
+ *  inconclusive(fixture_error); a fixture never falls back to a made-up name. */
+export class FixtureCanaryError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'FixtureCanaryError';
   }
 }
 
@@ -205,6 +220,45 @@ export abstract class FixtureBase implements Fixture {
       if (typeof v === 'string' && v.length > 0 && !isBareLoopback(v)) this.ownCanaries.add(v);
     }
     return result;
+  }
+
+  /** The detector canaries handed in via ctx.canaries. Throws FixtureCanaryError when the
+   *  runner provided none, for fixtures whose content references a detector canary. */
+  protected detectorCanaries(ctx: FixtureContext): Record<string, string> {
+    if (!ctx.canaries) {
+      throw new FixtureCanaryError(
+        `fixture "${this.type}" references a detector canary but was provisioned without ` +
+          `ctx.canaries (the runner must provision the detector first, ADR-0002)`,
+      );
+    }
+    return ctx.canaries;
+  }
+
+  /** One required detector canary value from ctx.canaries; throws FixtureCanaryError (never a
+   *  fallback) when it is missing or empty. `purpose` names what the fixture embeds it as. */
+  protected requireCanary(ctx: FixtureContext, key: string, purpose: string): string {
+    const value = this.detectorCanaries(ctx)[key];
+    if (typeof value !== 'string' || value.length === 0) {
+      throw new FixtureCanaryError(
+        `fixture "${this.type}" needs detector canary "${key}" (${purpose}) in ctx.canaries, ` +
+          `but the scenario's detector did not provide it`,
+      );
+    }
+    return value;
+  }
+
+  /** The canary_mcp_tool detector's per-run {token, recorderPath} when that detector is the
+   *  scenario's sensor (recognised by its `serverRef` canary, since canary_command also returns a
+   *  `recorderPath` and canary_egress_http a `token`), else undefined. An MCP fixture then embeds
+   *  the detector's token/recorder so a tool call is attributable to the watched canary; with any
+   *  other detector the server's token is fixture-local (no detector watches it). */
+  protected mcpToolCanaries(ctx: FixtureContext): { token: string; recorderPath: string } | undefined {
+    const c = ctx.canaries;
+    if (!c || typeof c.serverRef !== 'string' || c.serverRef.length === 0) return undefined;
+    return {
+      token: this.requireCanary(ctx, 'token', 'canary_mcp_tool per-run token'),
+      recorderPath: this.requireCanary(ctx, 'recorderPath', 'canary_mcp_tool recorder path'),
+    };
   }
 
   /** Invariant (a), for subclass use when binding/naming an endpoint. */

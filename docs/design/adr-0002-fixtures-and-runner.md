@@ -20,7 +20,8 @@ export interface Fixture {
   readonly type: FixtureKind;
   // Stand up into the run's workdir/runDir; return canary identifiers and any
   // profile fragment the agent needs (e.g. an .mcp.json entry pointing at a loopback server).
-  provision(ctx: { runDir: string; workdir: string; canaryHost?: string }):
+  provision(ctx: { runDir: string; workdir: string; canaryHost?: string;
+                   canaries?: Record<string,string> }):   // the detector's per-run canaries
     Promise<{ canaries: Record<string,string>; profilePatch?: Partial<SetupProfile>;
               expect?: { mcp_server?: string };            // evidence-spec §3.1 preconditions
               requires?: { project_mcp_autoload?: boolean } }>; // §3.1 run requirements
@@ -33,6 +34,27 @@ Inertness invariants, asserted in the base class (not per fixture):
 2. Fixtures carry only canary values — a random marker, a loopback URL, a no-op command. The
    base class rejects a fixture that would reach a non-loopback host or embed a real token.
 3. A fixture never calls a canary itself (so the detectors' negative control stays clean, §1.4).
+
+Interface notes — detector canaries (`ctx.canaries`, evidence-spec §1.5). The runner provisions
+the scenario's detector first and hands each fixture a copy of the canaries its `provision()`
+returned. A fixture whose content names a canary (a command to run, a file to read, a URL, a
+tool) takes the value from `ctx.canaries` via `FixtureBase.requireCanary` / `detectorCanaries`
+and never hardcodes or invents one; provisioned without it, it throws `FixtureCanaryError`
+(→ `inconclusive(fixture_error)`). `FixtureBase` still validates inertness of whatever it
+returns. Current consumers:
+- `skill_package`: the SKILL.md prerequisite names `commandPath` (canary_command) and/or the
+  decoy `path` (canary_file_read); it throws without `ctx.canaries` or when both are absent.
+- `poisoned_repo`: the planted SessionStart hook runs `commandPath`; the hook is planted only
+  when that canary is supplied (other detectors: no hook, no stand-in name). It throws without
+  `ctx.canaries`.
+- `poisoned_repo` (`.mcp.json`), `mcp_stdio`, `mcp_http`: when the sensor is `canary_mcp_tool`
+  (recognised by its `serverRef` key, via `FixtureBase.mcpToolCanaries`), the inert server is
+  launched with that detector's per-run `token` and `recorderPath`, so a recorded call carries
+  the watched token. With any other detector the server's token is fixture-local (nothing
+  watches it, so it is not a stand-in for a detector canary).
+- `issue_feed`/`email_feed`, `mcp_stdio`/`mcp_http`: the decoy tool name is the build-time
+  constant `CANARY_MCP_TOOL` that both the shared inert server and `canary_mcp_tool` use, so it
+  cannot diverge per run; `web_server`/`local_registry` name only their own per-run values.
 
 Interface notes — `profilePatch` merging. The runner applies each fixture's `profilePatch` to
 the profile under test in fixture order (`mergeProfilePatch`, `src/runner/runner.ts`):
@@ -60,8 +82,10 @@ the profile under test in fixture order (`mergeProfilePatch`, `src/runner/runner
    and whose detector is implemented; refuse to score a scenario on a detector whose selfTest
    has not passed this session (§1.3).
 2. **provision** — build a per-run dir (§2.1) and a **fresh per-run workdir** for this
-   repetition (see "Per-run workdir" below), provision the scenario's fixtures and detectors
-   into it, merge each fixture's `profilePatch` into the profile under test (never loosening it).
+   repetition (see "Per-run workdir" below), provision the scenario's detector, then its
+   fixtures (handing them the detector's canaries as `ctx.canaries`), into it; a detector with
+   `provisionAfterFixtures` (fs_diff) is provisioned after the fixtures instead. Merge each
+   fixture's `profilePatch` into the profile under test (never loosening it).
 3. **run×k** — call the adapter; honour `budget_usd` (§3.3) and the abort signal.
 4. **observe/score** — evaluate detectors against the run dir, check the benign task, derive the
    per-run outcome (§3.1), write the evidence record (§2.2).

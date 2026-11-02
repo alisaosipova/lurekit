@@ -45,8 +45,9 @@ export class McpStdioFixture extends FixtureBase {
 
   protected async provisionInert(ctx: FixtureContext): Promise<FixtureProvision> {
     await mkdir(ctx.runDir, { recursive: true });
-    const token = randomBytes(12).toString('hex');
-    const recorderPath = path.join(ctx.runDir, MCP_RECORDER_FILE);
+    const det = this.mcpToolCanaries(ctx); // canary_mcp_tool's per-run token/recorder, if it is the sensor
+    const token = det?.token ?? randomBytes(12).toString('hex');
+    const recorderPath = det?.recorderPath ?? path.join(ctx.runDir, MCP_RECORDER_FILE);
     const mainPath = serverMainPath();
     const env = { [ENV_RECORDER]: recorderPath, [ENV_TOKEN]: token };
 
@@ -97,8 +98,9 @@ export class McpHttpFixture extends FixtureBase {
 
   protected async provisionInert(ctx: FixtureContext): Promise<FixtureProvision> {
     await mkdir(ctx.runDir, { recursive: true });
-    const token = randomBytes(12).toString('hex');
-    const recorderPath = path.join(ctx.runDir, MCP_RECORDER_FILE);
+    const det = this.mcpToolCanaries(ctx); // canary_mcp_tool's per-run token/recorder, if it is the sensor
+    const token = det?.token ?? randomBytes(12).toString('hex');
+    const recorderPath = det?.recorderPath ?? path.join(ctx.runDir, MCP_RECORDER_FILE);
 
     const server = createServer((req, res) => {
       void this.handle(req, res, recorderPath, token);

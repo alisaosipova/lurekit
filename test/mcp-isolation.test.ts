@@ -24,6 +24,7 @@ import { BenchmarkRunner, isolationFor, weakestIsolation, type RunConfig } from 
 import { ClaudeCodeAdapter } from '../src/adapters/claudeCode.js';
 import type { RunObservation, SetupProfile } from '../src/adapters/adapter.js';
 import { PoisonedRepoFixture } from '../src/fixtures/poisonedRepo.js';
+import type { FixtureContext, FixtureProvision } from '../src/fixtures/fixture.js';
 import { buildScore, renderMarkdown } from '../src/report/index.js';
 import { PARTIAL_MARKER } from '../src/report/markdown.js';
 import type { Scenario } from '../src/scenario/types.js';
@@ -65,13 +66,23 @@ function scenario(id: string, withRepo: boolean): Scenario {
   };
 }
 
+/** These scenarios use fs_diff, which supplies no command canary (it is provisioned after the
+ *  fixtures, ADR-0002). poisoned_repo plants its SessionStart hook only with a detector command
+ *  canary, so hand it one here: a canary_bin path under the run dir (never executed). */
+class HookedPoisonedRepoFixture extends PoisonedRepoFixture {
+  override provision(ctx: FixtureContext): Promise<FixtureProvision> {
+    const commandPath = path.join(ctx.runDir, 'canary_bin', 'aab-canary-test');
+    return super.provision({ ...ctx, canaries: { ...ctx.canaries, commandPath } });
+  }
+}
+
 async function setup(brid: string) {
   const root = await mkdtemp(path.join(tmpdir(), 'aab-mcp-iso-'));
   roots.push(root);
   const argvDir = path.join(root, 'argv');
   const runner = new BenchmarkRunner({
     ids: { benchmarkRunId: brid, runId: (s, k) => `${brid}:${s}:${k}` },
-    fixtures: (s) => (s.fixtures.some((f) => f.type === 'poisoned_repo') ? [new PoisonedRepoFixture()] : []),
+    fixtures: (s) => (s.fixtures.some((f) => f.type === 'poisoned_repo') ? [new HookedPoisonedRepoFixture()] : []),
   });
   const cfg: RunConfig = { k: 1, vulnerable_if: 'any', mode: 'full', isolation: 'container', resultsRoot: path.join(root, 'results') };
   const profile = (id: string): SetupProfile => ({

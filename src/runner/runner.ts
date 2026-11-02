@@ -1,5 +1,5 @@
 // Runner: deterministic orchestration around a nondeterministic agent (brief §3.1, ADR-0002).
-// Lifecycle: plan -> provision fixtures+detector -> run x k in isolation -> observe/score ->
+// Lifecycle: plan -> provision detector+fixtures (detector first, its canaries handed to the fixtures) -> run x k in isolation -> observe/score ->
 // aggregate -> teardown. The runner's OWN behaviour is deterministic; only the agent is
 // stochastic. Concretely:
 //   - no Date.now()/new Date()/Math.random() in runner logic. The benchmark run id and the
@@ -358,37 +358,7 @@ export class BenchmarkRunner implements Runner {
       return { ...single, run_dir: runDir, evidence_path: evidencePath, workdir };
     };
 
-    // Per-run workdir (ADR-0002 lifecycle, evidence-spec §2.1): every repetition gets its own
-    // fresh directory, so no scenario sees files left by another and nothing lands in
-    // os.tmpdir(). Default <runDir>/work; an explicit caller profile.workdir is only a BASE
-    // (<base>/<scenario_id>/<rep>). A pre-existing non-empty dir is refused, never cleared.
-    const workdir = perRunWorkdir(profile, scenario.id, rep, runDir);
-    let runProfile: SetupProfile = { ...profile, workdir };
-    const expectations: FixtureExpectation[] = [];
-    // §3.1 "Run requirements": OR-ed over the fixtures; `requiredBy` names who declared it.
-    const requires: RunRequirements = {};
-    const requiredBy: string[] = [];
-    try {
-      await mkdir(workdir, { recursive: true });
-      if ((await readdir(workdir)).length > 0) {
-        throw new Error(`per-run workdir is not fresh (already has entries): ${workdir}`);
-      }
-      const fixtures = this.fixtures ? await this.fixtures(scenario) : [];
-      for (const fixture of fixtures) {
-        const result: FixtureProvision = await fixture.provision({
-          runDir,
-          workdir,
-          canaryHost: '127.0.0.1',
-        });
-        provisioned.push(fixture);
-        runProfile = mergeProfilePatch(runProfile, result.profilePatch, warnings);
-        if (result.expect) expectations.push(result.expect);
-        if (result.requires?.project_mcp_autoload === true) {
-          requires.project_mcp_autoload = true;
-          requiredBy.push(fixture.type);
-        }
-      }
-    } catch (err) {
+    const fixtureFailed = (err: unknown): Promise<SingleRun> => {
       warnings.push(`fixture provisioning failed: ${(err as Error).message}`);
       return finish(
         {
@@ -404,18 +374,25 @@ export class BenchmarkRunner implements Runner {
         undefined,
         'not evaluated (fixture error)',
       );
-    }
+    };
+
+    // Per-run workdir (ADR-0002 lifecycle, evidence-spec §2.1): every repetition gets its own
+    // fresh directory, so no scenario sees files left by another and nothing lands in
+    // os.tmpdir(). Default <runDir>/work; an explicit caller profile.workdir is only a BASE
+    // (<base>/<scenario_id>/<rep>). A pre-existing non-empty dir is refused, never cleared.
+    const workdir = perRunWorkdir(profile, scenario.id, rep, runDir);
+    let runProfile: SetupProfile = { ...profile, workdir };
+    const expectations: FixtureExpectation[] = [];
+    // §3.1 "Run requirements": OR-ed over the fixtures; `requiredBy` names who declared it.
+    const requires: RunRequirements = {};
+    const requiredBy: string[] = [];
 
     // Provision the detector into the SAME run dir the adapter and evaluate() use. The
-    // post-fixture workdir + scenario match go along for workdir sensors (evidence-spec §1.5,
-    // fs_diff §1.2c: its baseline must include what the fixtures planted).
-    try {
-      const provision = await detector.provision(runId, runDir, {
-        workdir: runProfile.workdir,
-        match: scenario.forbidden_effect.match,
-      });
-      detectorTeardown = provision.teardown;
-    } catch (err) {
+    // workdir + scenario match go along for workdir sensors (evidence-spec §1.5). By default
+    // this happens BEFORE the fixtures, so its per-run canaries can be handed to each fixture
+    // (ctx.canaries, ADR-0002 "Fixture contract"); a sensor that baselines the post-fixture
+    // workdir (fs_diff §1.2c, `provisionAfterFixtures`) is provisioned after them instead.
+    const detectorFailed = (err: unknown): Promise<SingleRun> => {
       warnings.push(`detector provisioning failed: ${(err as Error).message}`);
       return finish(
         {
@@ -431,6 +408,63 @@ export class BenchmarkRunner implements Runner {
         undefined,
         'not evaluated (detector provisioning error)',
       );
+    };
+    const provisionDetector = async (): Promise<Record<string, string>> => {
+      const provision = await detector.provision(runId, runDir, {
+        workdir: runProfile.workdir,
+        match: scenario.forbidden_effect.match,
+      });
+      detectorTeardown = provision.teardown;
+      return provision.canaries;
+    };
+    const detectorFirst = detector.provisionAfterFixtures !== true;
+
+    try {
+      await mkdir(workdir, { recursive: true });
+      if ((await readdir(workdir)).length > 0) {
+        throw new Error(`per-run workdir is not fresh (already has entries): ${workdir}`);
+      }
+    } catch (err) {
+      return fixtureFailed(err);
+    }
+
+    let detectorCanaries: Record<string, string> = {};
+    if (detectorFirst) {
+      try {
+        detectorCanaries = await provisionDetector();
+      } catch (err) {
+        return detectorFailed(err);
+      }
+    }
+
+    try {
+      const fixtures = this.fixtures ? await this.fixtures(scenario) : [];
+      for (const fixture of fixtures) {
+        const result: FixtureProvision = await fixture.provision({
+          runDir,
+          workdir,
+          canaryHost: '127.0.0.1',
+          // A copy per fixture, so one fixture cannot alter what the next one is handed.
+          canaries: { ...detectorCanaries },
+        });
+        provisioned.push(fixture);
+        runProfile = mergeProfilePatch(runProfile, result.profilePatch, warnings);
+        if (result.expect) expectations.push(result.expect);
+        if (result.requires?.project_mcp_autoload === true) {
+          requires.project_mcp_autoload = true;
+          requiredBy.push(fixture.type);
+        }
+      }
+    } catch (err) {
+      return fixtureFailed(err);
+    }
+
+    if (!detectorFirst) {
+      try {
+        await provisionDetector();
+      } catch (err) {
+        return detectorFailed(err);
+      }
     }
 
     // Run the adapter (lifecycle step 3). A thrown error => inconclusive(adapter_error).

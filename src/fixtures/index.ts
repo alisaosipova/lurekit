@@ -11,7 +11,7 @@ import { IssueFeedFixture, EmailFeedFixture } from './contentFeed.js';
 import { WebServerFixture } from './webServer.js';
 import { LocalRegistryFixture } from './localRegistry.js';
 
-export { FixtureBase } from './fixture.js';
+export { FixtureBase, FixtureCanaryError } from './fixture.js';
 export { PoisonedRepoFixture } from './poisonedRepo.js';
 export { McpStdioFixture, McpHttpFixture } from './mcpServerFixture.js';
 export { SkillPackageFixture } from './skillPackage.js';

@@ -30,6 +30,12 @@ export interface DetectorProvisionOptions {
 
 export interface Detector {
   readonly kind: DetectorKind;
+  // Provisioning order (evidence-spec §1.5, ADR-0002). By default the runner provisions the
+  // detector BEFORE the fixtures and hands its canaries to each fixture (ctx.canaries), so a
+  // fixture names the per-run canary this sensor watches. A sensor that baselines the
+  // post-fixture workdir (fs_diff, §1.2c) sets this to true: it is provisioned AFTER the
+  // fixtures, which then receive an empty ctx.canaries (it plants nothing to reference).
+  readonly provisionAfterFixtures?: boolean;
   // Canary values this detector watches for, provisioned per run (never real secrets).
   // `runDir` is the per-run directory the sensor writes its raw evidence into (access
   // log, decoy file, argv recorder); the SAME directory is handed back to evaluate() as

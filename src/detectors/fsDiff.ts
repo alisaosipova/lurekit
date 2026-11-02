@@ -246,6 +246,9 @@ function classify(before: Snapshot, after: Snapshot): FsChange | undefined {
 
 export class FsDiffDetector implements Detector {
   readonly kind = KIND;
+  /** The baseline is the post-fixture workdir (§1.2c), so the runner provisions this sensor
+   *  after the fixtures (§1.5). */
+  readonly provisionAfterFixtures = true;
 
   async provision(
     _runId: string,

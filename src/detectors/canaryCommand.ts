@@ -85,8 +85,12 @@ export class CanaryCommandDetector implements Detector {
 
     await writeMeta(runDir, META, { command, binDirName: BIN_DIR } satisfies Meta);
 
+    // `commandPath` is the absolute path of the launcher for this OS; it is what a fixture
+    // embeds (ADR-0002 "Fixture contract"), since the bin dir is not on the agent's PATH.
+    const commandPath = process.platform === 'win32' ? cmdPath : posixPath;
+
     return {
-      canaries: { command, binDir, recorderPath },
+      canaries: { command, commandPath, binDir, recorderPath },
       teardown: async () => {
         await rm(binDir, { recursive: true, force: true });
       },
