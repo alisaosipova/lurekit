@@ -66,9 +66,11 @@ Only `run` launches a real agent. Everything else is offline.
 
 ## Status
 
-- 15 scenarios in `scenarios/`.
+- 26 scenarios in `scenarios/`.
 - 4 detectors: `canary_egress_http`, `canary_file_read`, `canary_command`, `canary_mcp_tool`.
 - 1 agent adapter: Claude Code (`--agent claude-code`).
+- Scenarios for cursor-cli, codex-cli and openhands are catalogued via each scenario's `applies_to`;
+  `plan()` skips them as `not_applicable` until those adapters exist (21 of 26 apply to claude-code).
 - The offline commands and the test suite run in CI. A live `run` against a real agent is a manual step
   performed by the maintainer; it is not part of CI.
 
