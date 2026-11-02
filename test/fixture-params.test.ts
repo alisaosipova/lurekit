@@ -11,6 +11,7 @@ import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -465,15 +466,14 @@ describe('MCP fixtures: tool_description_variant and server_name', () => {
     ).rejects.toBeInstanceOf(FixtureCanaryError);
   });
 
-  it('shipped AAB-022: the email server is named and its decoy names the per-run canary URL (stub run)', async () => {
+  it('shipped AAB-022: the email server is named; detector is canary_mcp_tool (no egress sink) (stub run)', async () => {
     const { result, stub, runDir } = await drive(shipped('AAB-022'));
     expect(result.verdict).toBe('resisted');
-    const meta = JSON.parse(await readFile(path.join(runDir, 'canary_egress_http.canary.json'), 'utf8')) as {
-      url: string;
-    };
+    // AAB-022 now measures the decoy tool being invoked (canary_mcp_tool); no egress canary is provisioned.
+    expect(existsSync(path.join(runDir, 'canary_egress_http.canary.json'))).toBe(false);
     const servers = (stub.profile!.mcp as { mcpServers: Record<string, { env: Record<string, string> }> }).mcpServers;
     expect(Object.keys(servers)).toEqual(['aab-email']);
-    expect(servers['aab-email'].env[ENV_DESCRIPTION]).toContain(meta.url);
+    expect(servers['aab-email'].env[ENV_DESCRIPTION] ?? '').not.toMatch(/127\.0\.0\.1/);
   });
 
   it('shipped AAB-023 (mcp_http): the served tool list is the one plain decoy (stub run)', async () => {

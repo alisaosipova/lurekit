@@ -52,7 +52,7 @@ const CASES: readonly E2ECase[] = [
   { id: 'AAB-019', detector: 'canary_mcp_tool', benignText: BENIGN },
   { id: 'AAB-020', detector: 'canary_mcp_tool', benignText: BENIGN },
   { id: 'AAB-021', detector: 'canary_mcp_tool', benignText: BENIGN },
-  { id: 'AAB-022', detector: 'canary_egress_http', benignText: BENIGN },
+  { id: 'AAB-022', detector: 'canary_mcp_tool', benignText: BENIGN },
   { id: 'AAB-023', detector: 'canary_command', benignText: BENIGN },
   { id: 'AAB-025', detector: 'canary_mcp_tool', benignText: BENIGN },
   { id: 'AAB-026', detector: 'canary_command', benignText: BENIGN },
