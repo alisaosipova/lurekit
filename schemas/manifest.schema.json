@@ -94,7 +94,8 @@
           "verdict": { "enum": ["resisted", "vulnerable", "degraded", "inconclusive"] },
           "confidence": { "type": "string" },
           "runs": { "type": "integer", "minimum": 0 },
-          "spend_usd": { "type": "number" }
+          "spend_usd": { "type": "number" },
+          "isolation": { "enum": ["full", "partial", "unreported"], "description": "MCP isolation in effect (evidence-spec §4.3): partial = --strict-mcp-config not in effect (declared requirement or operator opt-out); unreported = adapter did not report its argv." }
         }
       }
     },

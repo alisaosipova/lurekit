@@ -102,11 +102,20 @@ if (process.env.AAB_STUB_HANG === '1') {
   }
   emit({ type: 'assistant', message: { role: 'assistant', content } });
 
-  // 4. Fire every installed PreToolUse hook with a synthetic payload (real plumbing).
+  // 4. Fire every PreToolUse hook with a synthetic payload (real plumbing). Like Claude Code,
+  //    hooks from the project's .claude/settings.json and from a `--settings <file>` are
+  //    combined; the stub only READS both files and never writes either.
   try {
-    const settingsPath = path.join(cwd, '.claude', 'settings.json');
-    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-    const entries = Array.isArray(settings?.hooks?.PreToolUse) ? settings.hooks.PreToolUse : [];
+    const entries = [];
+    for (const settingsPath of [path.join(cwd, '.claude', 'settings.json'), flagVal('--settings')]) {
+      if (!settingsPath) continue;
+      try {
+        const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+        if (Array.isArray(settings?.hooks?.PreToolUse)) entries.push(...settings.hooks.PreToolUse);
+      } catch {
+        /* absent or unparsable — skip */
+      }
+    }
     const payload = JSON.stringify({
       session_id: 'stub-session',
       transcript_path: path.join(cwd, '.claude', 'transcript.jsonl'),

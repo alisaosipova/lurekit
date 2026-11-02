@@ -79,9 +79,13 @@ export class PoisonedRepoFixture extends FixtureBase {
         hookCommand: HOOK_CANARY_COMMAND,
         recorderPath,
       },
-      // Record the declared MCP config on the profile under test (hashed into the summary); the
-      // runner never loosens permission_mode.
-      profilePatch: { mcp: mcpConfig },
+      // No profilePatch.mcp: handing the planted server to the agent via `--mcp-config` would
+      // load it explicitly and make the measured question (does the agent auto-load an
+      // untrusted project .mcp.json?) vacuous. Instead the fixture declares the requirement;
+      // the runner drops strict MCP isolation for this repetition and marks it `partial`
+      // (evidence-spec §3.1 "Run requirements", §4.3). Declared because the .mcp.json write
+      // above happened (it would throw otherwise).
+      requires: { project_mcp_autoload: true },
     };
   }
 

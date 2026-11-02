@@ -19,7 +19,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, rmdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import type { Adapter, RunObservation, SetupProfile, ToolCall } from '../adapters/adapter.js';
+import type { Adapter, RunObservation, RunRequirements, SetupProfile, ToolCall } from '../adapters/adapter.js';
 import type { Detector, DetectorHit } from '../detectors/detector.js';
 import { getDetector } from '../detectors/index.js';
 import type { Fixture, FixtureExpectation, FixtureProvision } from '../fixtures/fixture.js';
@@ -28,6 +28,7 @@ import type {
   EvidenceRecord,
   FixtureProvider,
   InconclusiveReason,
+  IsolationMarker,
   PlanResult,
   PlanSkip,
   ProfileSummary,
@@ -288,7 +289,16 @@ export class BenchmarkRunner implements Runner {
       cfg.vulnerable_if,
     );
     const spend_usd = round6(runs.reduce((s, r) => s + r.cost_usd, 0));
-    return { scenario_id: scenario.id, profile, runs, verdict, confidence, spend_usd };
+    const isolation = weakestIsolation(runs.map((r) => r.isolation));
+    return {
+      scenario_id: scenario.id,
+      profile,
+      runs,
+      verdict,
+      confidence,
+      spend_usd,
+      ...(isolation ? { isolation } : {}),
+    };
   }
 
   /** One repetition: provision fixtures + detector, run the adapter, evaluate, score, write
@@ -341,6 +351,7 @@ export class BenchmarkRunner implements Runner {
         runDir,
         warnings,
         workdir,
+        { isolation: single.isolation, requires: hasRequirement(requires) ? requires : undefined },
       );
       const evidencePath = path.join(runDir, EVIDENCE_FILE);
       await writeFile(evidencePath, JSON.stringify(evidence, null, 2), 'utf8');
@@ -354,6 +365,9 @@ export class BenchmarkRunner implements Runner {
     const workdir = perRunWorkdir(profile, scenario.id, rep, runDir);
     let runProfile: SetupProfile = { ...profile, workdir };
     const expectations: FixtureExpectation[] = [];
+    // §3.1 "Run requirements": OR-ed over the fixtures; `requiredBy` names who declared it.
+    const requires: RunRequirements = {};
+    const requiredBy: string[] = [];
     try {
       await mkdir(workdir, { recursive: true });
       if ((await readdir(workdir)).length > 0) {
@@ -369,6 +383,10 @@ export class BenchmarkRunner implements Runner {
         provisioned.push(fixture);
         runProfile = mergeProfilePatch(runProfile, result.profilePatch, warnings);
         if (result.expect) expectations.push(result.expect);
+        if (result.requires?.project_mcp_autoload === true) {
+          requires.project_mcp_autoload = true;
+          requiredBy.push(fixture.type);
+        }
       }
     } catch (err) {
       warnings.push(`fixture provisioning failed: ${(err as Error).message}`);
@@ -420,6 +438,7 @@ export class BenchmarkRunner implements Runner {
     try {
       observation = await adapter.run(runProfile, scenario.task, signal ?? neverAbort(), {
         runDir,
+        ...(hasRequirement(requires) ? { requires: { ...requires } } : {}),
       });
     } catch (err) {
       warnings.push(`adapter run failed: ${(err as Error).message}`);
@@ -439,6 +458,20 @@ export class BenchmarkRunner implements Runner {
       );
     }
     if (observation.warnings) warnings.push(...observation.warnings);
+    // §4.3: the isolation actually in effect, from the declared requirement + the real argv.
+    const isolation = isolationFor(requires, observation);
+    if (requires.project_mcp_autoload === true) {
+      warnings.push(
+        `isolation partial: --strict-mcp-config omitted because fixture ${requiredBy.join(', ')} ` +
+          'declared requires.project_mcp_autoload (the scenario measures whether a project .mcp.json ' +
+          'auto-loads); the operator\'s user-scope MCP servers may also be visible to the agent',
+      );
+    } else if (isolation === 'partial') {
+      warnings.push(
+        'isolation partial: --strict-mcp-config was not passed (profile strict_mcp_config:false); ' +
+          'the operator\'s user-scope MCP servers may be visible to the agent',
+      );
+    }
 
     // Observe/score (lifecycle step 4): detector, benign task, per-run outcome (§3.1).
     const hits: DetectorHit[] = await detector.evaluate({
@@ -488,6 +521,7 @@ export class BenchmarkRunner implements Runner {
         benign_ok: benign.ok,
         observation,
         cost_usd: Number.isFinite(observation.cost_usd) ? (observation.cost_usd as number) : 0,
+        isolation,
       },
       observation,
       benign.evidence_ref,
@@ -547,6 +581,7 @@ export class BenchmarkRunner implements Runner {
     runDir: string,
     warnings: string[],
     workdir?: string,
+    mcp: { isolation?: IsolationMarker; requires?: RunRequirements } = {},
   ): EvidenceRecord {
     const obsWarnings = [...warnings];
     const duration = observation ? durationMs(observation) : 0;
@@ -572,6 +607,7 @@ export class BenchmarkRunner implements Runner {
             effective_model: observation.effective_model,
             effective_permission_mode: observation.effective_permission_mode,
             mcp_servers: observation.mcp_servers,
+            agent_flags: observation.agent_flags,
             warnings: obsWarnings.length > 0 ? obsWarnings : undefined,
           }
         : undefined,
@@ -582,6 +618,8 @@ export class BenchmarkRunner implements Runner {
     // when the caller set an explicit base outside the run dir.
     if (workdir !== undefined) record.workdir = relativisePath(workdir, runDir);
     if (reason) record.inconclusive_reason = reason;
+    if (mcp.isolation) record.isolation = mcp.isolation;
+    if (mcp.requires) record.requires = mcp.requires;
     return record;
   }
 
@@ -656,6 +694,7 @@ export class BenchmarkRunner implements Runner {
           confidence: r.confidence,
           runs: r.runs.length,
           spend_usd: r.spend_usd,
+          ...(r.isolation ? { isolation: r.isolation } : {}),
         };
       }),
       totals,
@@ -723,12 +762,21 @@ export function mergeProfilePatch(
       merged.permission_mode = base.permission_mode;
     }
   }
-  // §4.3: strict MCP isolation is part of the profile under test; a fixture may not switch it
-  // off (that would let the operator's own servers into the run, and the profile summary,
-  // taken from the base profile, would misrecord the policy).
-  if (patch.strict_mcp_config === false && base.strict_mcp_config !== false) {
-    warnings.push('fixture profilePatch tried to disable strict_mcp_config; ignored');
-    merged.strict_mcp_config = base.strict_mcp_config;
+  // §4.3: strict MCP isolation is operator policy, never a fixture's to change in EITHER
+  // direction: switching it off would let the operator's own servers into the run; switching it
+  // on (or clearing an explicit opt-out with an `undefined` key) would silently override the
+  // operator's choice. The only fixture path that relaxes isolation is a declared run
+  // requirement (FixtureProvision.requires, §3.1), which is recorded as `isolation: partial`.
+  if ('strict_mcp_config' in patch) {
+    if (patch.strict_mcp_config !== base.strict_mcp_config) {
+      warnings.push(
+        patch.strict_mcp_config === false
+          ? 'fixture profilePatch tried to disable strict_mcp_config; ignored'
+          : 'fixture profilePatch tried to change strict_mcp_config; ignored',
+      );
+    }
+    if ('strict_mcp_config' in base) merged.strict_mcp_config = base.strict_mcp_config;
+    else delete merged.strict_mcp_config;
   }
   if (patch.agent !== undefined && patch.agent !== base.agent) {
     warnings.push('fixture profilePatch tried to change agent; ignored');
@@ -749,6 +797,30 @@ export function mergeProfilePatch(
     merged.workdir = base.workdir;
   }
   return merged;
+}
+
+/** The MCP isolation in effect for one repetition (evidence-spec §2.2, §4.3). A declared
+ *  `project_mcp_autoload` requirement is always `partial`; otherwise the adapter's reported argv
+ *  decides (`--strict-mcp-config` present => `full`, absent => `partial`); an adapter that
+ *  reports no argv yields `unreported`. */
+export function isolationFor(requires: RunRequirements, observation: RunObservation): IsolationMarker {
+  if (requires.project_mcp_autoload === true) return 'partial';
+  const flags = observation.agent_flags;
+  if (!flags) return 'unreported';
+  return flags.includes('--strict-mcp-config') ? 'full' : 'partial';
+}
+
+/** Weakest isolation over a scenario's runs: partial > unreported > full; undefined when no
+ *  run reached the adapter. */
+export function weakestIsolation(markers: Array<IsolationMarker | undefined>): IsolationMarker | undefined {
+  if (markers.includes('partial')) return 'partial';
+  if (markers.includes('unreported')) return 'unreported';
+  if (markers.includes('full')) return 'full';
+  return undefined;
+}
+
+function hasRequirement(requires: RunRequirements): boolean {
+  return requires.project_mcp_autoload === true;
 }
 
 /** Check fixture-declared preconditions (evidence-spec §3.1) against the observation. Returns
@@ -874,7 +946,11 @@ function summariseProfile(profile: SetupProfile, observation?: RunObservation): 
     permission_mode: profile.permission_mode ?? null,
     used_bare: observation?.used_bare ?? false,
     mcp: profile.mcp === undefined || profile.mcp === null ? 'none' : sha256(canonical(profile.mcp)),
-    strict_mcp_config: profile.strict_mcp_config !== false,
+    // Per-run evidence records what was actually passed (agent_flags, §4.3); the manifest
+    // (no observation) records the profile's policy.
+    strict_mcp_config: observation?.agent_flags
+      ? observation.agent_flags.includes('--strict-mcp-config')
+      : profile.strict_mcp_config !== false,
     hooks:
       profile.hooks === undefined || profile.hooks === null
         ? 'none'

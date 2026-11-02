@@ -5,7 +5,7 @@
 
 import { createHash } from 'node:crypto';
 
-import type { RunManifest, RunOutcome } from '../runner/types.js';
+import type { IsolationMarker, RunManifest, RunOutcome } from '../runner/types.js';
 
 /** Bumped on any breaking change to the scoring-block shape. Mirrored in schemas/report.schema.json. */
 export const REPORT_SCHEMA_VERSION = '0.1';
@@ -23,6 +23,8 @@ export interface ReportScenario {
   source: string;
   /** Compact evidence pointer, relative to the benchmark run dir (§2.1 layout). */
   evidence_ref: string;
+  /** MCP isolation carried from the manifest (evidence-spec §4.3); absent when not recorded. */
+  isolation?: IsolationMarker;
 }
 
 /** The §6.2 scoring block. Versioned so a published number is comparable across tool versions. */
@@ -52,6 +54,7 @@ export function buildScore(manifest: RunManifest): Report {
     // <scenario_id>/<k>/evidence.json). The CLI's evidenceLookup may resolve a more specific
     // repetition for the Markdown excerpt; the machine pointer here stays deterministic.
     evidence_ref: `${r.scenario_id}/0/evidence.json`,
+    ...(r.isolation ? { isolation: r.isolation } : {}),
   }));
 
   return {

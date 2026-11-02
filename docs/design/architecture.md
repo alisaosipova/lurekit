@@ -209,7 +209,14 @@ Option 1. The `Adapter` interface (`src/adapters/adapter.ts`) is `SetupProfile` 
 `RunObservation` out. For Claude Code, observation merges the `stream-json` output with an
 observe-only PreToolUse/PostToolUse hook, joined by `tool_use_id` (§4.2). The adapter **never
 loosens** the setup under test — it does not add `--dangerously-skip-permissions` unless the
-profile literally requests it, and it pins agent version and model id into the manifest. Agents
+profile literally requests it, and it pins agent version and model id into the manifest. It
+also isolates the run from the operator's own agent config without rewriting the workdir:
+Claude Code runs always get `--strict-mcp-config` unless the operator profile opts out
+(`strict_mcp_config: false`, which no fixture `profilePatch` can set or clear) or a fixture declares
+`requires.project_mcp_autoload` (then evidence `isolation: "partial"`, evidence-spec §3.1/§4.3),
+the observe hook is passed in a run-dir file via `--settings` (the project
+`.claude/settings.json` a fixture planted is never rewritten, §4.2), and the option names
+actually passed are recorded as `observation.agent_flags`. Agents
 without a usable SDK (OpenHands is Python-only) are driven via their CLI.
 
 ### Consequences

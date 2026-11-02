@@ -6,13 +6,13 @@
 // cost, effective model/mode from system/init, and that the AbortSignal kills the child.
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, rm, readFile, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, readFile, stat, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
-import { ClaudeCodeAdapter } from '../src/adapters/claudeCode.js';
+import { ClaudeCodeAdapter, HOOK_SETTINGS_FILE, flagNames } from '../src/adapters/claudeCode.js';
 import type { RunObservation, SetupProfile } from '../src/adapters/adapter.js';
 
 const STUB = fileURLToPath(new URL('./fixtures/agents/stub-claude.mjs', import.meta.url));
@@ -107,6 +107,10 @@ describe('ClaudeCodeAdapter.run argv construction (§4.2/§4.3)', () => {
       MODEL,
       '--permission-mode',
       'plan',
+      '--settings',
+      path.join(runDir, HOOK_SETTINGS_FILE),
+      // §4.3: strict MCP isolation on every run, even with no MCP config of the profile's own.
+      '--strict-mcp-config',
     ]);
     // §4.1: never loosen — the dangerous flag is absent for an ordinary mode.
     expect(argv).not.toContain('--dangerously-skip-permissions');
@@ -280,10 +284,10 @@ describe('ClaudeCodeAdapter observation hook is non-blocking (§4.1 invariant 2)
     const { profile, runDir } = await harness({ permission_mode: 'plan' });
     await adapter().run(profile, TASK, new AbortController().signal, { runDir });
 
-    // The adapter wrote the real hook into the profile's settings; drive it exactly as
-    // Claude Code would (payload on stdin) and prove it observes without steering.
+    // The adapter wrote the real hook into its harness-only --settings file; drive it exactly
+    // as Claude Code would (payload on stdin) and prove it observes without steering.
     const settings = JSON.parse(
-      await readFile(path.join(profile.workdir!, '.claude', 'settings.json'), 'utf8'),
+      await readFile(path.join(runDir, HOOK_SETTINGS_FILE), 'utf8'),
     ) as { hooks?: { PreToolUse?: Array<{ hooks?: Array<{ type?: string; command?: string }> }> } };
     const groups = settings.hooks?.PreToolUse ?? [];
     const commands = groups.flatMap((g) => g.hooks ?? []).filter((h) => h.type === 'command' && h.command);
@@ -302,5 +306,49 @@ describe('ClaudeCodeAdapter observation hook is non-blocking (§4.1 invariant 2)
       // Observation hook must emit no permission decision (would otherwise steer the agent).
       expect(res.stdout ?? '').not.toMatch(/"(decision|permissionDecision|hookSpecificOutput|continue)"/);
     }
+  });
+});
+
+describe('ClaudeCodeAdapter observe hook leaves project settings untouched (§4.2)', () => {
+  it('a fixture-planted .claude/settings.json hook survives the run byte-for-byte', async () => {
+    const { profile, runDir, argvPath } = await harness({ permission_mode: 'plan' });
+    const settingsPath = path.join(profile.workdir!, '.claude', 'settings.json');
+    await mkdir(path.dirname(settingsPath), { recursive: true });
+    // Deliberately unusual formatting: a rewrite (even one that preserved the hook) would show.
+    const planted =
+      '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"aab-canary-setup"}]}],' +
+      '\n  "PreToolUse": [ {"matcher":"Bash","hooks":[{"type":"command","command":"true"}]} ]}}\n';
+    await writeFile(settingsPath, planted, 'utf8');
+
+    const obs = await adapter().run(profile, TASK, new AbortController().signal, { runDir });
+
+    expect(await readFile(settingsPath, 'utf8')).toBe(planted);
+    // The harness hook went in through --settings (run dir), and still observed the call.
+    const argv = await readArgv(argvPath);
+    expect(argv[argv.indexOf('--settings') + 1]).toBe(path.join(runDir, HOOK_SETTINGS_FILE));
+    expect(obs.tool_calls[0].sources).toEqual(['stream', 'hook']);
+    // No harness file was written into the workdir besides what the fixture planted.
+    expect(await readdir(profile.workdir!)).toEqual(['.claude']);
+    expect(await readdir(path.dirname(settingsPath))).toEqual(['settings.json']);
+  });
+
+  it('records the option names actually passed as agent_flags (values omitted)', async () => {
+    const { profile, runDir } = await harness({ permission_mode: 'plan' });
+    const obs = await adapter().run(profile, TASK, new AbortController().signal, { runDir });
+    expect(obs.agent_flags).toEqual([
+      '-p',
+      '--output-format',
+      '--verbose',
+      '--model',
+      '--permission-mode',
+      '--settings',
+      '--strict-mcp-config',
+    ]);
+    // A task that looks like a flag is a value, never a recorded flag.
+    expect(flagNames(['-p', '--evil', '--model', 'm', '--strict-mcp-config'])).toEqual([
+      '-p',
+      '--model',
+      '--strict-mcp-config',
+    ]);
   });
 });

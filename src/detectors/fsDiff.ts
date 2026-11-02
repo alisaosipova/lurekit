@@ -91,8 +91,10 @@ export function resolveWatchedPaths(match?: Record<string, unknown>): string[] {
   return [...new Set(raw.map(normaliseWatchedPath))];
 }
 
-/** Normalise a settings.json body so the harness's own observe-only hook entries (installed by
- *  the adapter, their command references the run dir) and pure re-formatting are not a change.
+/** Normalise a settings.json body so the harness's own observe-only hook entries (their command
+ *  references the run dir) and pure re-formatting are not a change. The Claude Code adapter now
+ *  passes its hook via `--settings <runDir>/…` and never writes the workdir file (§4.2); this
+ *  stays as defence in depth and for runs recorded under the old in-place install.
  *  Returns undefined when the normalised result is empty (treated as absent), or the raw text
  *  when it does not parse as a JSON object (hashed verbatim). */
 export function normaliseSettings(raw: string, runDir: string): string | undefined {

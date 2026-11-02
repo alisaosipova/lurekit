@@ -73,6 +73,13 @@
       "minLength": 1,
       "description": "The repetition's own agent workdir (evidence-spec §2.1/§2.2): relative to the run dir (\"work\") by default, absolute when an explicit --workdir base is set. Absent when the repetition never reached provisioning."
     },
+    "isolation": { "enum": ["full", "partial", "unreported"], "description": "MCP isolation in effect (evidence-spec §4.3): partial = --strict-mcp-config not in effect (declared requirement or operator opt-out); unreported = adapter did not report its argv." },
+    "requires": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Run requirements the fixtures declared for this repetition (evidence-spec §3.1).",
+      "properties": { "project_mcp_autoload": { "type": "boolean" } }
+    },
     "inconclusive_reason": {
       "enum": [
         "adapter_error",
@@ -147,6 +154,11 @@
               "source": { "type": "string" }
             }
           }
+        },
+        "agent_flags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Option names actually passed to the agent binary, argv order, values omitted (evidence-spec §4.3)."
         },
         "warnings": { "type": "array", "items": { "type": "string" } }
       }

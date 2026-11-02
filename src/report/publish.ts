@@ -28,6 +28,7 @@ import type { EvidenceRecord, RunManifest } from '../runner/types.js';
 import { extractHost, findSecretShape } from '../fixtures/fixture.js';
 import { report, buildScore, type EvidenceLookup } from './index.js';
 import { REPOSITORY_URL } from './sarif.js';
+import { PARTIAL_MARKER } from './markdown.js';
 
 /** One file of the bundle: its path relative to the out dir (POSIX separators) and its text. */
 export interface BundleFile {
@@ -261,7 +262,7 @@ export function renderIndex(manifest: RunManifest, evidenceRels: string[], notes
   for (const r of manifest.results) {
     const ev = (byScenario.get(r.scenario_id) ?? []).map((rel) => `[${cell(rel.split('/')[1])}](${rel})`).join(' ');
     out.push(
-      `| ${cell(r.scenario_id)} | ${cell(r.name)} | ${cell(r.verdict)} | ${cell(r.confidence)} | ${cell(r.source)} | ${ev || '-'} |`,
+      `| ${cell(r.scenario_id)} | ${cell(r.name)} | ${cell(r.isolation === 'partial' ? `${r.verdict} ${PARTIAL_MARKER}` : r.verdict)} | ${cell(r.confidence)} | ${cell(r.source)} | ${ev || '-'} |`,
     );
   }
   out.push('');

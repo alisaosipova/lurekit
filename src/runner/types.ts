@@ -7,6 +7,7 @@ import type { AgentId, DetectorKind, Scenario } from '../scenario/types.js';
 import type {
   McpServerStatus,
   RunObservation,
+  RunRequirements,
   SetupProfile,
   ToolCall,
 } from '../adapters/adapter.js';
@@ -19,6 +20,15 @@ export type RunOutcome =
   | 'vulnerable' // forbidden effect occurred
   | 'degraded' // forbidden effect absent BUT benign task failed (defence broke the agent)
   | 'inconclusive'; // agent errored, budget hit, fixture failed, or detector unverified
+
+/** MCP isolation actually in effect for a repetition (evidence-spec §2.2, §4.3), derived by
+ *  the runner from the declared run requirements and the adapter's `agent_flags`:
+ *  - `full`       — the adapter reported its argv and `--strict-mcp-config` was passed;
+ *  - `partial`    — strict MCP isolation was NOT in effect (a declared requirement such as
+ *                   `project_mcp_autoload`, or an operator opt-out); a warning names the reason;
+ *  - `unreported` — the adapter does not report its argv (replay, other agents), so the
+ *                   harness cannot attest to the isolation. */
+export type IsolationMarker = 'full' | 'partial' | 'unreported';
 
 /** Why a run is inconclusive (recorded in evidence, never hidden). */
 export type InconclusiveReason =
@@ -89,8 +99,13 @@ export interface EvidenceRecord {
     effective_model?: string;
     effective_permission_mode?: string;
     mcp_servers?: McpServerStatus[]; // the agent's own init report (name/status/source), §4.3
+    agent_flags?: string[]; // §4.3: option names actually passed to the agent (values omitted)
     warnings?: string[];
   };
+  // §2.2/§4.3: MCP isolation in effect for this repetition, and the requirements the fixtures
+  // declared for it. Absent when the repetition never reached the adapter.
+  isolation?: IsolationMarker;
+  requires?: RunRequirements;
   timing: { started_at: number; ended_at: number; duration_ms: number }; // durations, not wall-clock
   outcome: RunOutcome;
   inconclusive_reason?: InconclusiveReason;
@@ -113,6 +128,7 @@ export interface SingleRun {
   run_dir: string;
   evidence_path: string;
   workdir?: string; // absolute per-run workdir (absent for a repetition that never ran)
+  isolation?: IsolationMarker; // §4.3 (absent for a repetition that never reached the adapter)
 }
 
 /** Aggregated per-scenario result over k runs (extends the original sketch). */
@@ -123,6 +139,7 @@ export interface ScenarioResult {
   verdict: RunOutcome; // aggregated over k per vulnerable_if (§3.2)
   confidence: string; // raw tally, e.g. "2/3 vulnerable" or "0/3 vulnerable, 1 inconclusive"
   spend_usd: number;
+  isolation?: IsolationMarker; // weakest isolation over the runs (partial > unreported > full)
 }
 
 /** Why a scenario was dropped at plan time (for logging; plan never throws). */
@@ -171,6 +188,8 @@ export interface RunManifest {
     confidence: string;
     runs: number;
     spend_usd: number;
+    // §2.3/§6.1: weakest per-run isolation; reporters mark `partial` next to the verdict.
+    isolation?: IsolationMarker;
   }>;
   totals: {
     resisted: number;

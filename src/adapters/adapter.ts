@@ -21,10 +21,11 @@ export interface SetupProfile {
   mcp?: unknown;              // MCP server config
   skills?: string[];          // skill directories
   permission_mode?: string;   // agent-specific; recorded, never overridden to be looser
-  // Benchmark isolation from the operator's own MCP servers (evidence-spec §4.3). When `mcp` is
-  // set the Claude Code adapter writes it to <runDir>/mcp.json, passes `--mcp-config`, and by
-  // default also `--strict-mcp-config` so only that config's servers load. `false` opts out.
-  // Resolved by strictMcpConfigFor() and recorded in the profile summary.
+  // Benchmark isolation from the operator's own MCP servers (evidence-spec §4.3). The Claude Code
+  // adapter passes `--strict-mcp-config` on EVERY run (with `--mcp-config <runDir>/mcp.json` when
+  // `mcp` is set), so only the run's own servers load. `false` is an operator opt-out; a fixture
+  // cannot set it (mergeProfilePatch). The only other way to drop strict is a declared run
+  // requirement (RunRequirements.project_mcp_autoload). Resolved by strictMcpConfigFor().
   strict_mcp_config?: boolean;
 }
 
@@ -37,11 +38,21 @@ export function requireWorkdir(profile: Pick<SetupProfile, 'workdir'>, who: stri
   return profile.workdir;
 }
 
-/** Whether a run under `profile` uses strict MCP isolation (evidence-spec §4.3): only when the
- *  profile carries an MCP config (strict without --mcp-config would drop every server), and
- *  then ON unless the profile explicitly sets `strict_mcp_config: false`. */
-export function strictMcpConfigFor(profile: SetupProfile): boolean {
-  if (profile.mcp === undefined || profile.mcp === null) return false;
+/** Declared requirements of one repetition (evidence-spec §3.1 "Run requirements", §4.3).
+ *  Collected by the runner from the fixtures' provision results and passed to the adapter in
+ *  RunOptions. `project_mcp_autoload`: the scenario measures whether the agent auto-loads a
+ *  project-scope `.mcp.json` from the workdir, so the run must NOT ignore project MCP config
+ *  (Claude Code: no `--strict-mcp-config`). The runner then records `isolation: "partial"`. */
+export interface RunRequirements {
+  project_mcp_autoload?: boolean;
+}
+
+/** Whether a run under `profile` uses strict MCP isolation (evidence-spec §4.3): ON for every
+ *  run, with or without an MCP config of its own (strict without `--mcp-config` loads no MCP
+ *  server at all), unless the operator's profile sets `strict_mcp_config: false` or the run
+ *  declares `requires.project_mcp_autoload`. */
+export function strictMcpConfigFor(profile: SetupProfile, requires?: RunRequirements): boolean {
+  if (requires?.project_mcp_autoload === true) return false;
   return profile.strict_mcp_config !== false;
 }
 
@@ -103,6 +114,11 @@ export interface RunObservation {
   used_bare?: boolean;                 // §4.3: whether --bare was passed (default false)
   agent_version_reported?: string;     // version string from `<bin> --version`
   warnings?: string[];                 // non-fatal issues (e.g. version mismatch)
+  // §4.3: the option names the adapter ACTUALLY passed to the agent binary for this run, in
+  // argv order, values omitted (e.g. ["-p", "--output-format", "--verbose", "--model",
+  // "--settings", "--strict-mcp-config"]). Absent when the adapter does not report argv
+  // (replay, stubs); the runner derives the evidence `isolation` marker from it.
+  agent_flags?: string[];
 }
 
 // Per-run options the runner passes alongside the profile. `runDir` is where the adapter
@@ -111,6 +127,7 @@ export interface RunObservation {
 export interface RunOptions {
   runDir?: string;
   bare?: boolean;   // §4.3: pass --bare (skip project config). Default false (NOT used).
+  requires?: RunRequirements; // §3.1/§4.3: declared by the fixtures for this repetition.
 }
 
 export interface Adapter {

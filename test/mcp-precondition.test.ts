@@ -5,7 +5,7 @@
 //     (precondition_failed) when the agent's init report lacks that server or it is not
 //     `connected`; when the server is connected the run is scored normally.
 //   - The Claude Code adapter writes profile.mcp to <runDir>/mcp.json, passes --mcp-config and,
-//     by default, --strict-mcp-config; it records init mcp_servers as name/status/source.
+//     on every run, --strict-mcp-config; it records init mcp_servers as name/status/source.
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -257,6 +257,23 @@ describe('precondition never credits resisted (§3.1 rule 0)', () => {
     expect(strictMcpConfigFor(merged)).toBe(true);
     expect(warnings.join('\n')).toContain('strict_mcp_config');
   });
+
+  it('a fixture patch cannot toggle strict_mcp_config in either direction (§4.3)', () => {
+    const optedOut = { ...makeProfile('/w'), strict_mcp_config: false };
+    for (const patch of [{ strict_mcp_config: true }, { strict_mcp_config: undefined }]) {
+      const warnings: string[] = [];
+      const merged = mergeProfilePatch(optedOut, patch, warnings);
+      expect(merged.strict_mcp_config).toBe(false);
+      expect(strictMcpConfigFor(merged)).toBe(false);
+      expect(warnings.join('\n')).toContain('strict_mcp_config');
+    }
+    // A same-value patch is a no-op without a warning; an absent base key stays absent.
+    const same: string[] = [];
+    expect(mergeProfilePatch(optedOut, { strict_mcp_config: false }, same).strict_mcp_config).toBe(false);
+    expect(same).toEqual([]);
+    const fresh = mergeProfilePatch(makeProfile('/w'), { strict_mcp_config: true }, []);
+    expect('strict_mcp_config' in fresh).toBe(false);
+  });
 });
 
 describe('ClaudeCodeAdapter MCP config (§4.3)', () => {
@@ -284,14 +301,16 @@ describe('ClaudeCodeAdapter MCP config (§4.3)', () => {
     expect(argv).not.toContain('--strict-mcp-config');
   });
 
-  it('passes neither flag and writes no mcp.json when the profile has no MCP config', async () => {
+  it('passes --strict-mcp-config (and no --mcp-config / mcp.json) when the profile has no MCP config', async () => {
     const h = await adapterHarness({});
-    await new ClaudeCodeAdapter({ bin: STUB }).run(h.profile, 'task', new AbortController().signal, {
+    const obs = await new ClaudeCodeAdapter({ bin: STUB }).run(h.profile, 'task', new AbortController().signal, {
       runDir: h.runDir,
     });
     const argv = JSON.parse(await readFile(h.argvPath, 'utf8')) as string[];
     expect(argv).not.toContain('--mcp-config');
-    expect(argv).not.toContain('--strict-mcp-config');
+    // §4.3: isolation always — the operator's user-scope servers must not load.
+    expect(argv).toContain('--strict-mcp-config');
+    expect(obs.agent_flags).toContain('--strict-mcp-config');
     await expect(readFile(path.join(h.runDir, MCP_CONFIG_FILE), 'utf8')).rejects.toThrow();
   });
 
@@ -330,10 +349,26 @@ describe('ClaudeCodeAdapter MCP config (§4.3)', () => {
     expect(normalizeMcpServers([{ name: 'b' }])).toEqual([{ name: 'b', status: 'unknown' }]);
   });
 
-  it('strictMcpConfigFor: off without an MCP config, on by default with one', () => {
+  it('strictMcpConfigFor: on by default with or without an MCP config; off only by opt-out or requirement', () => {
     const p = makeProfile('/w');
-    expect(strictMcpConfigFor(p)).toBe(false);
+    expect(strictMcpConfigFor(p)).toBe(true);
     expect(strictMcpConfigFor({ ...p, mcp: MCP })).toBe(true);
     expect(strictMcpConfigFor({ ...p, mcp: MCP, strict_mcp_config: false })).toBe(false);
+    expect(strictMcpConfigFor(p, { project_mcp_autoload: true })).toBe(false);
+    expect(strictMcpConfigFor(p, {})).toBe(true);
+  });
+
+  it('omits --strict-mcp-config when the run declares requires.project_mcp_autoload', async () => {
+    const h = await adapterHarness({});
+    await mkdir(h.workdir, { recursive: true });
+    await writeFile(path.join(h.workdir, '.mcp.json'), '{"mcpServers":{}}', 'utf8');
+    const obs = await new ClaudeCodeAdapter({ bin: STUB }).run(h.profile, 'task', new AbortController().signal, {
+      runDir: h.runDir,
+      requires: { project_mcp_autoload: true },
+    });
+    const argv = JSON.parse(await readFile(h.argvPath, 'utf8')) as string[];
+    expect(argv).not.toContain('--strict-mcp-config');
+    expect(obs.agent_flags).not.toContain('--strict-mcp-config');
+    expect((obs.warnings ?? []).join('\n')).not.toContain('.mcp.json is ignored');
   });
 });

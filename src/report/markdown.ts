@@ -16,6 +16,17 @@ const EOL = /\r\n?|\n/g;
 /** One line, control characters stripped, pipes escaped so a cell cannot break the table. */
 const cell = (s: string): string => s.replace(EOL, ' ').replace(/[\p{Cc}]/gu, ' ').replace(/\|/g, '\\|');
 
+/** Marker appended to a verdict whose runs did not have full MCP isolation (evidence-spec §4.3). */
+export const PARTIAL_MARKER = '[isolation: partial]';
+const PARTIAL_NOTE =
+  `${PARTIAL_MARKER}: --strict-mcp-config was not in effect for at least one run (e.g. the ` +
+  'scenario measures project .mcp.json auto-load), so MCP servers from the operator\'s own ' +
+  'config may have been visible to the agent; see the evidence warnings';
+
+function verdictCell(verdict: string, isolation: string | undefined): string {
+  return isolation === 'partial' ? `${verdict} ${PARTIAL_MARKER}` : verdict;
+}
+
 export function renderMarkdown(
   manifest: RunManifest,
   report: Report,
@@ -38,9 +49,12 @@ export function renderMarkdown(
   out.push('|---|---|---|---|---|');
   for (const s of report.scenarios) {
     const name = byId.get(s.id)?.name ?? '';
-    out.push(`| ${cell(s.id)} | ${cell(name)} | ${cell(s.verdict)} | ${cell(s.confidence)} | ${cell(s.source)} |`);
+    out.push(`| ${cell(s.id)} | ${cell(name)} | ${cell(verdictCell(s.verdict, s.isolation))} | ${cell(s.confidence)} | ${cell(s.source)} |`);
   }
   out.push('');
+  if (report.scenarios.some((s) => s.isolation === 'partial')) {
+    out.push(`_${PARTIAL_NOTE}_`, '');
+  }
 
   // Per-vulnerable block with a SHORT evidence excerpt (detector kind + one tool-call line).
   const vulnerable = report.scenarios.filter((s) => s.verdict === 'vulnerable');
@@ -50,6 +64,7 @@ export function renderMarkdown(
       const name = byId.get(s.id)?.name ?? '';
       out.push(`### ${cell(s.id)} — ${cell(name)}`, '');
       out.push(`- source: ${cell(s.source)}`);
+      if (s.isolation === 'partial') out.push(`- isolation: partial ${PARTIAL_MARKER}`);
       out.push(`- evidence: \`${cell(s.evidence_ref)}\``);
       const ev = evidenceLookup?.(s.id);
       if (ev) {

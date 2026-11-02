@@ -9,8 +9,10 @@
 //
 // Observation layers merged by tool_use_id (§4.2):
 //   stream  — `--output-format stream-json --verbose`; assistant.tool_use blocks + result cost.
-//   hook    — a PreToolUse/PostToolUse hook the adapter installs into the profile's
-//             .claude/settings.json; the hook appends its stdin JSON to <runDir>/claude-hooks.jsonl.
+//   hook    — a PreToolUse/PostToolUse hook the adapter passes in a SEPARATE settings file
+//             (`--settings <runDir>/claude-settings.json`); the workdir's own project settings
+//             are never read or rewritten (§4.2). The hook appends its stdin JSON to
+//             <runDir>/claude-hooks.jsonl.
 //
 // Determinism (§4.5): given the same profile, task and recorded stream, the adapter produces
 // the same RunObservation. Tests drive a stub agent binary; no live agent, network or spend.
@@ -37,6 +39,9 @@ import type { AgentId } from '../scenario/types.js';
 const STREAM_FILE = 'claude-stream.jsonl';
 const HOOKS_FILE = 'claude-hooks.jsonl';
 const HOOK_SCRIPT = 'aab-hook.cjs';
+/** Harness-only settings file carrying the observe hook, passed with `--settings` (§4.2). It
+ *  lives in the run dir, never in the workdir, so fixture-planted project settings stay intact. */
+export const HOOK_SETTINGS_FILE = 'claude-settings.json';
 /** File the profile's MCP config is written to for `--mcp-config` (evidence-spec §4.3). */
 export const MCP_CONFIG_FILE = 'mcp.json';
 
@@ -100,6 +105,8 @@ export class ClaudeCodeAdapter implements Adapter {
     const workdir = requireWorkdir(profile, 'ClaudeCodeAdapter.run');
     const usedBare = options.bare === true; // §4.3: default NOT used.
     await mkdir(runDir, { recursive: true });
+    // The spawn cwd must exist; creating the (normally runner-provisioned) dir writes nothing in it.
+    await mkdir(workdir, { recursive: true });
 
     const warnings: string[] = [];
     const bin = this.bin();
@@ -114,11 +121,15 @@ export class ClaudeCodeAdapter implements Adapter {
       warnings.push('could not read agent version from `--version`');
     }
 
-    // Install the observation hook into the profile's .claude/settings.json BEFORE launch.
+    // Observation hook (§4.2): written to a harness-only settings file in the run dir and
+    // passed with `--settings <file>` ("load additional settings from"; confirmed in
+    // `claude --help`, NOTES). The workdir's .claude/settings.json is never touched, so a
+    // fixture-planted project hook (AAB-002, AAB-032) stays byte-for-byte as planted.
     const hooksJsonlPath = path.join(runDir, HOOKS_FILE);
     const hookScriptPath = path.join(runDir, HOOK_SCRIPT);
     await writeFile(hookScriptPath, hookScriptSource(hooksJsonlPath), 'utf8');
-    await this.installHook(workdir, hookScriptPath);
+    const hookSettingsPath = path.join(runDir, HOOK_SETTINGS_FILE);
+    await writeFile(hookSettingsPath, JSON.stringify(observeHookSettings(hookScriptPath), null, 2), 'utf8');
 
     // Build headless argv (§4.2/§4.3). permission_mode passed verbatim; never loosened.
     const argv = ['-p', task, '--output-format', 'stream-json', '--verbose', '--model', profile.model];
@@ -132,27 +143,33 @@ export class ClaudeCodeAdapter implements Adapter {
       }
     }
     if (usedBare) argv.push('--bare');
+    argv.push('--settings', hookSettingsPath);
 
-    // MCP config under test (§4.3): write profile.mcp to <runDir>/mcp.json and pass it with
-    // `--mcp-config <file>`; with strict isolation (default when an MCP config is present) also
-    // pass `--strict-mcp-config` ("Only use MCP servers from --mcp-config, ignoring all other
-    // MCP configurations") so the operator's own user-scope servers do not load into the
-    // benchmark run. Both flags confirmed in `claude --help` (NOTES, 2.1.316).
+    // MCP isolation (§4.3): `--strict-mcp-config` ("Only use MCP servers from --mcp-config,
+    // ignoring all other MCP configurations") on EVERY run, so the operator's own user-scope
+    // servers never load into a benchmark run — with no profile MCP config that means no MCP
+    // server loads at all. Dropped only for an operator opt-out (strict_mcp_config:false) or a
+    // declared run requirement (requires.project_mcp_autoload: the scenario measures whether a
+    // project .mcp.json auto-loads, which strict mode would suppress). The runner records the
+    // resulting isolation marker from agent_flags.
+    const strict = strictMcpConfigFor(profile, options.requires);
+    if (strict) {
+      argv.push('--strict-mcp-config');
+      // Strict isolation also ignores a project .mcp.json; say so rather than hide it.
+      if (existsSync(path.join(workdir, '.mcp.json'))) {
+        warnings.push(
+          '--strict-mcp-config is on: the workdir .mcp.json is ignored (no run requirement declared project_mcp_autoload)',
+        );
+      }
+    }
+    // The profile's MCP config under test: <runDir>/mcp.json via `--mcp-config <file>`.
     // Appended last: `--mcp-config` is variadic, so nothing positional may follow its value.
     if (profile.mcp !== undefined && profile.mcp !== null) {
       const mcpPath = path.join(runDir, MCP_CONFIG_FILE);
       await writeFile(mcpPath, JSON.stringify(profile.mcp, null, 2), 'utf8');
       argv.push('--mcp-config', mcpPath);
-      if (strictMcpConfigFor(profile)) {
-        argv.push('--strict-mcp-config');
-        // Strict isolation also ignores a project .mcp.json; say so rather than hide it.
-        if (existsSync(path.join(workdir, '.mcp.json'))) {
-          warnings.push(
-            '--strict-mcp-config is on: the workdir .mcp.json is ignored (set strict_mcp_config:false to load it)',
-          );
-        }
-      }
     }
+    const agentFlags = flagNames(argv);
 
     const env = { ...process.env, ...(profile.env ?? {}) };
 
@@ -228,6 +245,7 @@ export class ClaudeCodeAdapter implements Adapter {
       usedBare,
       agentVersionReported,
       warnings,
+      agentFlags,
     });
   }
 
@@ -244,36 +262,6 @@ export class ClaudeCodeAdapter implements Adapter {
     } catch {
       return undefined;
     }
-  }
-
-  /** Install the observation hook into <workdir>/.claude/settings.json, preserving any
-   *  hooks the profile already carries (the profile's config is the variable under test).
-   *  The hook command only appends its stdin JSON and exits 0 (§4.1 invariant 2). */
-  private async installHook(workdir: string, hookScriptPath: string): Promise<void> {
-    const settingsDir = path.join(workdir, '.claude');
-    await mkdir(settingsDir, { recursive: true });
-    const settingsPath = path.join(settingsDir, 'settings.json');
-
-    let settings: Record<string, unknown> = {};
-    try {
-      settings = JSON.parse(await readFile(settingsPath, 'utf8')) as Record<string, unknown>;
-    } catch {
-      settings = {};
-    }
-    const hooks = (settings.hooks && typeof settings.hooks === 'object'
-      ? settings.hooks
-      : {}) as Record<string, unknown>;
-
-    // Quote both node and the script path so spaces in paths survive the shell.
-    const command = `"${process.execPath}" "${hookScriptPath}"`;
-    const observe = { matcher: '*', hooks: [{ type: 'command', command }] };
-
-    for (const event of ['PreToolUse', 'PostToolUse'] as const) {
-      const existing = Array.isArray(hooks[event]) ? (hooks[event] as unknown[]) : [];
-      hooks[event] = [...existing, observe];
-    }
-    settings.hooks = hooks;
-    await writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
   }
 }
 
@@ -368,6 +356,7 @@ export interface ObservationMeta {
   usedBare: boolean;
   agentVersionReported?: string;
   warnings?: string[];
+  agentFlags?: string[]; // §4.3: option names actually passed (live adapter only)
 }
 
 /** Build the RunObservation from parsed stream state and hook entries (merge by id). */
@@ -392,6 +381,7 @@ export function assembleObservation(
     used_bare: meta.usedBare,
     agent_version_reported: meta.agentVersionReported,
     warnings: warnings.length > 0 ? warnings : undefined,
+    ...(meta.agentFlags ? { agent_flags: [...meta.agentFlags] } : {}),
   };
 }
 
@@ -450,6 +440,31 @@ export function mergeById(streamCalls: ToolCall[], hookCalls: ToolCall[]): ToolC
   }
   return ordered;
 }
+
+/** The harness-only settings body passed with `--settings` (§4.2): one observe-only group for
+ *  PreToolUse and PostToolUse. The command quotes node and the script path so spaces survive
+ *  the shell; fs_diff recognises exactly this group shape (§1.2c). */
+export function observeHookSettings(hookScriptPath: string): { hooks: Record<string, unknown[]> } {
+  const command = `"${process.execPath}" "${hookScriptPath}"`;
+  const observe = { matcher: '*', hooks: [{ type: 'command', command }] };
+  return { hooks: { PreToolUse: [observe], PostToolUse: [observe] } };
+}
+
+/** Option names in an argv, in order, values dropped (§4.3 evidence `agent_flags`). The task
+ *  string and file paths never enter evidence through this list. */
+export function flagNames(argv: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (!/^--?[A-Za-z]/.test(a)) continue;
+    out.push(a);
+    if (VALUE_FLAGS.has(a)) i++; // skip the value (task text, model id, paths)
+  }
+  return out;
+}
+/** Options the adapter emits that take exactly one value (`--mcp-config` is variadic but the
+ *  adapter passes one file). */
+const VALUE_FLAGS = new Set(['-p', '--output-format', '--model', '--permission-mode', '--settings', '--mcp-config']);
 
 /** The hook script: reads stdin, appends the payload (plus a receive timestamp) to the run
  *  dir's hook log, and ALWAYS exits 0 — observation, never a block (§4.1 invariant 2). */

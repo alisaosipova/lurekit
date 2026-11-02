@@ -22,7 +22,8 @@ export interface Fixture {
   // profile fragment the agent needs (e.g. an .mcp.json entry pointing at a loopback server).
   provision(ctx: { runDir: string; workdir: string; canaryHost?: string }):
     Promise<{ canaries: Record<string,string>; profilePatch?: Partial<SetupProfile>;
-              expect?: { mcp_server?: string } }>; // expect: evidence-spec §3.1 preconditions
+              expect?: { mcp_server?: string };            // evidence-spec §3.1 preconditions
+              requires?: { project_mcp_autoload?: boolean } }>; // §3.1 run requirements
   teardown(): Promise<void>;
 }
 ```
@@ -41,9 +42,17 @@ the profile under test in fixture order (`mergeProfilePatch`, `src/runner/runner
 - Every other field is shallow-merged (a patched field replaces the profile's value whole).
 - Never loosened: a patch that would loosen `permission_mode` is ignored with a warning, and a
   patch that changes `agent`, `agent_version` or `model` is ignored with a warning. A patch
-  setting `strict_mcp_config: false` (disabling MCP isolation, evidence-spec §4.3) is likewise
-  ignored with a warning. A patch that changes `workdir` is ignored with a warning (the runner
+  that sets `strict_mcp_config` at all (`false`, `true`, or an explicit `undefined`; MCP isolation
+  is operator policy, evidence-spec §4.3) is ignored — the base profile's value is kept — with a
+  warning when it differs. A patch that changes `workdir` is ignored with a warning (the runner
   owns the per-run workdir, see "Per-run workdir" below).
+- Run requirements (evidence-spec §3.1 "Run requirements", §4.3). A fixture's `requires` is
+  OR-ed over the repetition's fixtures and passed to the adapter in `RunOptions.requires`.
+  `project_mcp_autoload: true` is the only way to relax MCP isolation for a run: the Claude Code
+  adapter then omits `--strict-mcp-config`, and the runner records `isolation: "partial"`, the
+  `requires` object and a warning naming the declaring fixture. `poisoned_repo` declares it
+  because it plants a project `.mcp.json`, and no longer puts that server in `profilePatch.mcp`
+  (loading it via `--mcp-config` would bypass the auto-load the scenario measures).
 
 ### Runner lifecycle
 `plan → provision → run×k → observe → score → teardown`:

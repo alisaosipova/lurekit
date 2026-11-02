@@ -18,7 +18,7 @@
 // the trivial in-memory noop fixture used to exercise the runner lives under test/ as a test
 // helper (it reuses a real FixtureKind value and does nothing — the schema enum is unchanged).
 
-import type { SetupProfile } from '../adapters/adapter.js';
+import type { RunRequirements, SetupProfile } from '../adapters/adapter.js';
 import type { FixtureKind } from '../scenario/types.js';
 
 /** Context handed to a fixture at provision time. `runDir` is the per-run evidence directory
@@ -42,6 +42,12 @@ export interface FixtureProvision {
    *  "Preconditions"). When a declared expectation is not met the runner records the run as
    *  inconclusive with reason `precondition_failed` instead of scoring it. */
   expect?: FixtureExpectation;
+  /** What the run itself must honour for the scenario to be measurable (evidence-spec §3.1
+   *  "Run requirements", §4.3). `project_mcp_autoload: true` — declared only by a fixture that
+   *  actually planted a project `.mcp.json` — makes the adapter honour project-scope MCP config
+   *  (Claude Code: no `--strict-mcp-config`) and the runner record `isolation: "partial"` with a
+   *  warning. This is the ONLY path that relaxes MCP isolation; `profilePatch` cannot. */
+  requires?: RunRequirements;
 }
 
 /** Observable preconditions a fixture declares (evidence-spec §3.1). `mcp_server`: the name of
