@@ -110,6 +110,8 @@ reporting. It is not a benchmark result, and every replayed run's `evidence.json
 
 ## Adding a scenario
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full submission path, review rules and disclosure policy.
+
 1. Add one YAML file under `scenarios/` (see existing `AAB-*.yaml` and `schemas/scenario.schema.json`).
 2. It must cite the public disclosure it is derived from in `source.primary_url`. Scenarios without a public
    disclosure are out of scope.

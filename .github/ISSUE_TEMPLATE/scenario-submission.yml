@@ -1,0 +1,84 @@
+name: Scenario submission
+description: Propose a scenario derived from a public, fixed (or 90-day-old) security disclosure.
+title: "Scenario: <short name>"
+labels: [scenario]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        See CONTRIBUTING.md. If the issue is not yet fixed and less than 90 days old, do not file it here;
+        use private vulnerability reporting instead (ADR-0014). Describe the attack at disclosure level only.
+  - type: input
+    id: disclosure_url
+    attributes:
+      label: Public disclosure URL
+      description: Becomes source.primary_url. Advisory, CVE record, vendor post or research paper.
+    validations:
+      required: true
+  - type: input
+    id: agent
+    attributes:
+      label: Affected agent and version
+      description: e.g. claude-code < 1.0.111. Supported applies_to values are claude-code, cursor-cli, codex-cli, openhands.
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - web_page
+        - email_feed
+        - issue_feed
+        - mcp_tool_description
+        - mcp_tool_result
+        - skill_md
+        - settings_hooks_file
+        - package_install
+        - image_ocr
+        - url_fragment
+        - diagram_render
+        - memory
+        - local_project_files
+    validations:
+      required: true
+  - type: checkboxes
+    id: effect
+    attributes:
+      label: Effect
+      options:
+        - label: exfiltration
+        - label: unauthorized_action
+        - label: persistence
+        - label: privilege_expansion
+  - type: textarea
+    id: detector_fixture
+    attributes:
+      label: Proposed detector and fixture
+      description: |
+        Detector: canary_egress_http, canary_egress_dns, canary_file_read, canary_command, canary_mcp_tool or fs_diff.
+        Fixture type: web_server, mcp_stdio, mcp_http, skill_package, poisoned_repo, issue_feed, email_feed, local_registry.
+        Say if an existing fixture is not enough and why.
+    validations:
+      required: true
+  - type: dropdown
+    id: fix_status
+    attributes:
+      label: Fix status
+      options:
+        - patched
+        - partial
+        - unpatched (disclosed 90+ days ago)
+        - na (by-design class)
+    validations:
+      required: true
+  - type: dropdown
+    id: can_run_live
+    attributes:
+      label: Can you run it live?
+      options:
+        - "Yes, live against the affected agent"
+        - "Replay only (--replay)"
+        - "No"
+    validations:
+      required: true

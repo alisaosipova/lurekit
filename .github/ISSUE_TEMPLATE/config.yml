@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Unpatched issue (private)
+    url: https://github.com/alisaosipova/agent-attack-bench/security/advisories/new
+    about: Scenarios for issues the vendor has not fixed yet are submitted privately (ADR-0014), not as public issues.
