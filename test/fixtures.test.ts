@@ -7,6 +7,9 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { createHash } from 'node:crypto';
 import { createServer as createNetServer } from 'node:net';
 import { gunzipSync } from 'node:zlib';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 import {
   FixtureBase,
@@ -22,6 +25,7 @@ import { WebServerFixture, ENV_WEB_URL, WEB_PLACEHOLDER } from '../src/fixtures/
 import {
   LocalRegistryFixture,
   ENV_NPM_REGISTRY,
+  REGISTRY_ACCESS_LOG,
   CANARY_PACKAGE_VERSION,
 } from '../src/fixtures/localRegistry.js';
 import { buildFixture, IMPLEMENTED_FIXTURES } from '../src/fixtures/index.js';
@@ -321,6 +325,48 @@ describe('LocalRegistryFixture (local_registry)', () => {
     const pa = await a.provision(ctx);
     const pb = await b.provision(ctx);
     expect(pa.canaries.package).not.toBe(pb.canaries.package);
+  });
+
+  it('logs one JSON line per request (method, path, time, kind) into the run dir', async () => {
+    const runDir = await mkdtemp(path.join(tmpdir(), 'aab-reg-log-'));
+    const f = new LocalRegistryFixture();
+    live.push(f);
+    try {
+      const p = await f.provision({ ...ctx, runDir });
+      expect(p.canaries.registry_access_log).toBe(path.join(runDir, REGISTRY_ACCESS_LOG));
+      await fetch(new URL(p.canaries.package, p.canaries.registry_url)).then((r) => r.text());
+      await fetch(p.canaries.tarball_url).then((r) => r.arrayBuffer());
+      await fetch(new URL('left-pad?x=1', p.canaries.registry_url)).then((r) => r.text());
+      const lines = (await readFile(p.canaries.registry_access_log, 'utf8'))
+        .trim()
+        .split('\n')
+        .map((l) => JSON.parse(l) as { method: string; path: string; time: number; kind: string });
+      const own = lines;
+      expect(own.map((l) => l.kind)).toEqual(['packument', 'tarball', 'other']);
+      expect(own.map((l) => l.path)).toEqual([
+        `/${p.canaries.package}`,
+        new URL(p.canaries.tarball_url).pathname,
+        '/left-pad',
+      ]);
+      for (const l of own) {
+        expect(l.method).toBe('GET');
+        expect(typeof l.time).toBe('number');
+      }
+    } finally {
+      await rm(runDir, { recursive: true, force: true });
+    }
+  });
+
+  it('uses the sensor-handed canary package name and rejects a non-canary name', async () => {
+    const f = new LocalRegistryFixture();
+    live.push(f);
+    const name = 'aab-canary-0123456789abcdef';
+    const p = await f.provision({ ...ctx, canaries: { package: name } });
+    expect(p.canaries.package).toBe(name);
+    expect(p.canaries.tarball_url).toContain(`/${name}/-/${name}-1.0.0.tgz`);
+    const g = new LocalRegistryFixture();
+    live.push(g);
+    await expect(g.provision({ ...ctx, canaries: { package: 'left-pad' } })).rejects.toThrow(/canary package name/);
   });
 
   it('teardown closes the server and frees the port', async () => {

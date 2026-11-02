@@ -96,11 +96,11 @@ reporting. It is not a benchmark result, and every replayed run's `evidence.json
 
 ## Status
 
-- 45 scenarios catalogued in `scenarios/`; 27 are runnable.
+- 48 scenarios catalogued in `scenarios/`; 30 are runnable.
 - 4 detectors: `canary_egress_http`, `canary_file_read`, `canary_command`, `canary_mcp_tool`.
 - 1 agent adapter: Claude Code (`--agent claude-code`).
 - Scenarios for cursor-cli, codex-cli and openhands are catalogued via each scenario's `applies_to`;
-  `plan()` skips them as `not_applicable` until those adapters exist (22 of the 27 runnable scenarios
+  `plan()` skips them as `not_applicable` until those adapters exist (25 of the 30 runnable scenarios
   apply to claude-code, 5 to other agents).
 - 18 browser-track scenarios are catalogued with `runnable: false`, pending a browser adapter;
   `plan()` skips them as `not_runnable`.

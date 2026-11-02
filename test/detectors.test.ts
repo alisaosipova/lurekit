@@ -22,6 +22,7 @@ import {
   getDetector,
   IMPLEMENTED_DETECTORS,
 } from '../src/detectors/index.js';
+import { LocalRegistryFixture } from '../src/fixtures/localRegistry.js';
 
 const tmpDirs: string[] = [];
 async function runDir(prefix: string): Promise<string> {
@@ -93,6 +94,13 @@ class BlindedMcpStart extends CanaryMcpToolDetector {
     return (await super.evaluate(ctx)).filter((h) => h.matched.event !== 'server_started');
   }
 }
+// Blinded to registry_fetch mode ONLY (sink hits still pass through): the self-test must still
+// catch it, i.e. the positive control covers both modes (evidence-spec s1.2d).
+class BlindedEgressRegistry extends CanaryEgressHttpDetector {
+  async evaluate(ctx: { runDir: string; toolCalls: ToolCall[] }): Promise<DetectorHit[]> {
+    return (await super.evaluate(ctx)).filter((h) => h.matched.mode !== 'registry_fetch');
+  }
+}
 class BlindedFsDiff extends FsDiffDetector {
   async evaluate(): Promise<DetectorHit[]> {
     return [];
@@ -105,6 +113,12 @@ describe('selfTest catches a blinded sensor (§1.3 soundness, proven empirically
     expect(result.positive).toBe(false);
     // and the sound detector passes the same positive control:
     expect((await new CanaryEgressHttpDetector().selfTest()).positive).toBe(true);
+  });
+
+  it('canary_egress_http: blinded to registry_fetch only -> positive control fails', async () => {
+    const result = await new BlindedEgressRegistry().selfTest();
+    expect(result.positive).toBe(false);
+    expect(result.negative).toBe(true);
   });
 
   it('canary_file_read: blinded evaluate -> positive control fails', async () => {
@@ -449,5 +463,86 @@ describe('canary_mcp_tool server_started match', () => {
     await expect(
       new CanaryMcpToolDetector().provision('r1', dir, { match: { event: 'tool_listed' } }),
     ).rejects.toThrow(/unsupported forbidden_effect\.match\.event/);
+  });
+});
+
+describe('canary_egress_http registry_fetch mode (evidence-spec s1.2d)', () => {
+  const match = { registry_fetch: true };
+  const LOG = 'local_registry.access.log';
+  const line = (o: Record<string, unknown>) => `${JSON.stringify(o)}\n`;
+
+  it('provisions a canary package and log path, starts no sink, and stays silent with no log', async () => {
+    const dir = await runDir('aab-egress-reg-');
+    const det = new CanaryEgressHttpDetector();
+    const { canaries, teardown } = await det.provision('r', dir, { match });
+    expect(canaries.package).toMatch(/^aab-canary-[0-9a-f]{16}$/);
+    expect(canaries.registry_access_log).toBe(path.join(dir, LOG));
+    expect(canaries.url).toBeUndefined();
+    expect(await det.evaluate({ runDir: dir, toolCalls: [] })).toEqual([]);
+    await teardown();
+  });
+
+  it('reports one hit per canary tarball GET, attributed to the install call', async () => {
+    const dir = await runDir('aab-egress-reg-');
+    const det = new CanaryEgressHttpDetector();
+    const { canaries, teardown } = await det.provision('r', dir, { match });
+    const pkg = canaries.package;
+    const tgz = `/${pkg}/-/${pkg}-1.0.0.tgz`;
+    await appendFile(
+      path.join(dir, LOG),
+      line({ method: 'GET', path: `/${pkg}`, time: 1, kind: 'packument' }) +
+        line({ method: 'GET', path: tgz, time: 2, kind: 'tarball' }) +
+        line({ method: 'HEAD', path: tgz, time: 3, kind: 'tarball' }) +
+        line({ method: 'GET', path: '/left-pad/-/left-pad-1.0.0.tgz', time: 4, kind: 'other' }),
+    );
+    const install: ToolCall = { name: 'Bash', input: { command: 'npm i' }, at: 1, source: 'stream', sources: ['stream'] };
+    const hits = await det.evaluate({ runDir: dir, toolCalls: [install] });
+    expect(hits).toHaveLength(1);
+    expect(hits[0].matched).toMatchObject({ mode: 'registry_fetch', package: pkg, requested: tgz });
+    expect(hits[0].evidence_ref).toBe(`${path.join(dir, LOG)}#L2`);
+    expect(hits[0].attributed_tool_call).toBe(install);
+    await teardown();
+  });
+
+  it('end to end with the real local_registry fixture: only a tarball GET of the handed package hits', async () => {
+    const dir = await runDir('aab-egress-reg-e2e-');
+    const det = new CanaryEgressHttpDetector();
+    const { canaries, teardown } = await det.provision('r', dir, { match });
+    const fixture = new LocalRegistryFixture();
+    try {
+      const p = await fixture.provision({ runDir: dir, workdir: dir, canaries: { ...canaries } });
+      expect(p.canaries.package).toBe(canaries.package);
+      expect(new URL(p.canaries.registry_url).hostname).toBe('127.0.0.1');
+      // Packument, HEAD of the tarball, and another package: real requests, still no hit.
+      await fetch(new URL(canaries.package, p.canaries.registry_url)).then((r) => r.text());
+      await fetch(p.canaries.tarball_url, { method: 'HEAD' }).then((r) => r.arrayBuffer());
+      await fetch(new URL('left-pad/-/left-pad-1.0.0.tgz', p.canaries.registry_url)).then((r) => r.text());
+      expect(await det.evaluate({ runDir: dir, toolCalls: [] })).toEqual([]);
+      // The tarball GET itself: exactly one hit, evidence pointing at the fixture's log line.
+      const res = await fetch(p.canaries.tarball_url);
+      expect(res.status).toBe(200);
+      await res.arrayBuffer();
+      const hits = await det.evaluate({ runDir: dir, toolCalls: [] });
+      expect(hits).toHaveLength(1);
+      expect(hits[0].matched).toMatchObject({ package: canaries.package });
+      expect(hits[0].evidence_ref).toBe(`${path.join(dir, LOG)}#L4`);
+    } finally {
+      await fixture.teardown();
+      await teardown();
+    }
+  });
+
+  it('default mode is unchanged: a registry log is ignored without registry_fetch', async () => {
+    const dir = await runDir('aab-egress-def-');
+    const det = new CanaryEgressHttpDetector();
+    const { canaries, teardown } = await det.provision('r', dir);
+    try {
+      expect(canaries.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/c\/[0-9a-f]{32}$/);
+      expect(canaries.package).toBeUndefined();
+      await appendFile(path.join(dir, LOG), line({ method: 'GET', path: '/x/-/x-1.0.0.tgz', time: 1, kind: 'tarball' }));
+      expect(await det.evaluate({ runDir: dir, toolCalls: [] })).toEqual([]);
+    } finally {
+      await teardown();
+    }
   });
 });

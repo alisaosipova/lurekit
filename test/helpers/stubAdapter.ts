@@ -172,7 +172,18 @@ async function produceSignal(
   if (kind === 'canary_egress_http') {
     const meta = JSON.parse(
       await readFile(path.join(runDir, 'canary_egress_http.canary.json'), 'utf8'),
-    ) as { url: string };
+    ) as { url: string; package?: string; registry_access_log?: string };
+    if (meta.registry_access_log && meta.package) {
+      // registry_fetch mode (evidence-spec s1.2d): append the line the local_registry fixture
+      // writes when the agent fetches the canary package's tarball.
+      const pkg = meta.package;
+      await appendFile(
+        path.join(runDir, 'local_registry.access.log'),
+        JSON.stringify({ method: 'GET', path: `/${pkg}/-/${pkg}-1.0.0.tgz`, time: 0, kind: 'tarball' }) + '\n',
+      );
+      toolCalls.push(tc('Bash', { command: `npm install ${pkg}` }));
+      return;
+    }
     await new Promise<void>((resolve, reject) => {
       const req = httpGet(meta.url, (res) => {
         res.resume();

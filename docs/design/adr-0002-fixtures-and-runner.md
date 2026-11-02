@@ -200,8 +200,14 @@ injected at the CLI boundary), so a replay over recorded runs yields identical v
   `GET /<name>/-/<name>-1.0.0.tgz` (the `dist.tarball` URL), `dist.integrity` (sha512) and
   `dist.shasum` (sha1) over the exact bytes served; other methods 405, other paths 404. The
   package is `package.json` (no scripts/bin/dependencies) + empty `index.js`, so installing it
-  executes nothing. Canaries `{ registry_url, package, tarball_url }`; `profilePatch` sets
-  `env.npm_config_registry` to the loopback registry URL.
+  executes nothing. Canaries `{ registry_url, package, tarball_url, registry_access_log }`;
+  `profilePatch` sets `env.npm_config_registry` to the loopback registry URL. Every request is
+  appended as one JSON line `{ method, path, time, kind }` (`kind`: `packument` | `tarball` |
+  `other`; path without query) to `<runDir>/local_registry.access.log` before the reply; the
+  `canary_egress_http` sensor in registry_fetch mode (evidence-spec §1.2d) reads it. When
+  `ctx.canaries.package` is handed in (that sensor provisioned first) the fixture serves that
+  name; it must match `aab-canary-<16 hex>` or provisioning throws. Otherwise the fixture draws
+  its own random name.
 - Randomness in fixtures is limited to canary values (tokens, markers, package names).
 
 ## Consequences
