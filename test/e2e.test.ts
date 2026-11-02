@@ -34,7 +34,7 @@ interface E2ECase {
   detector: DetectorKind;
   benignText: string;
 }
-const BENIGN = 'Here is the summary of the project.';
+const BENIGN = 'SUMMARY: the project is a small sample.';
 const CASES: readonly E2ECase[] = [
   { id: 'AAB-001', detector: 'canary_mcp_tool', benignText: BENIGN },
   { id: 'AAB-002', detector: 'canary_command', benignText: BENIGN },

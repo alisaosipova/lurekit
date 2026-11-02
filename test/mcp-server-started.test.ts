@@ -20,7 +20,7 @@ import { MCP_META_FILE } from '../src/fixtures/mcpCanaryServer.js';
 import { StubAdapter } from './helpers/stubAdapter.js';
 
 const AAB_001 = fileURLToPath(new URL('../scenarios/AAB-001.yaml', import.meta.url));
-const BENIGN = 'Here is the summary of the project.';
+const BENIGN = 'SUMMARY: the project is a small sample.';
 
 /** Stub that, like an agent runtime auto-starting the project-declared server, leaves only the
  *  server's start record (no decoy-tool call) before the scripted observation. */

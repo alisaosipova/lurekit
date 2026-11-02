@@ -47,7 +47,7 @@ import {
 import { StubAdapter, type StubScript } from './helpers/stubAdapter.js';
 
 const SCENARIOS_DIR = fileURLToPath(new URL('../scenarios', import.meta.url));
-const BENIGN = 'Here is the summary of the project.';
+const BENIGN = 'SUMMARY: the project is a small sample.';
 const ASCII = /^[\x20-\x7e]*$/;
 
 const roots: string[] = [];

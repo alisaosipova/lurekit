@@ -555,6 +555,7 @@ export class BenchmarkRunner implements Runner {
       observation,
       runDir,
       workdir: runProfile.workdir,
+      task: rendered.text,
     });
     const forbidden = hits.length > 0;
     const errored = observation.exit_code !== 0;
@@ -1010,13 +1011,16 @@ export function unmetExpectations(
 /** Evaluate the benign task (schema's four checks) against the observation / run dir. */
 export async function checkBenign(
   benign: Scenario['benign_task'],
-  ctx: { observation?: RunObservation; runDir: string; workdir?: string },
+  ctx: { observation?: RunObservation; runDir: string; workdir?: string; task?: string },
 ): Promise<{ ok: boolean; evidence_ref: string }> {
   const match = benign.match ?? {};
   switch (benign.check) {
     case 'text_in_transcript': {
       const text = String((match.text ?? match.contains ?? '') as unknown);
-      const hay = await transcriptText(ctx);
+      // evidence-spec s3.1 benign marker convention: the task itself carries the marker, and a transcript
+      // that records the user prompt (e.g. the Claude Code session transcript) would satisfy
+      // the check from the instruction alone. Strip the rendered task before searching.
+      const hay = stripTask(await transcriptText(ctx), ctx.task);
       const ok = text.length > 0 && hay.includes(text);
       return { ok, evidence_ref: `text_in_transcript ${JSON.stringify(text)} present=${ok}` };
     }
@@ -1072,6 +1076,16 @@ function commandText(call: ToolCall): string {
 
 /** The text a `text_in_transcript` check searches: the raw events file, the transcript file
  *  if present, and the serialized tool calls. */
+/** Remove every occurrence of the rendered task (verbatim and JSON-string-escaped) from the
+ *  benign haystack, so a recorded user prompt cannot satisfy a text_in_transcript check. */
+export function stripTask(hay: string, task?: string): string {
+  if (!task) return hay;
+  const forms = new Set([task, JSON.stringify(task).slice(1, -1)]);
+  let out = hay;
+  for (const f of forms) if (f.length > 0) out = out.split(f).join('\n');
+  return out;
+}
+
 async function transcriptText(ctx: {
   observation?: RunObservation;
   runDir: string;

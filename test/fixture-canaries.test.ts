@@ -42,7 +42,7 @@ function shipped(id: string, detector: DetectorKind): Scenario {
   return s!;
 }
 
-const BENIGN = 'Here is the summary of the project.';
+const BENIGN = 'SUMMARY: the project is a small sample.';
 
 /** Captures selected workdir files at the moment the agent would start (after provisioning). */
 class WorkdirCapturingStub extends StubAdapter {

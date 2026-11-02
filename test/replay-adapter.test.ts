@@ -157,7 +157,7 @@ describe('cli run --replay (offline)', () => {
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as RunManifest;
     expect(manifest.results[0].scenario_id).toBe('AAB-030');
     expect(manifest.totals.vulnerable).toBe(0);
-    expect(manifest.totals.resisted).toBe(1); // benign 'summary' found in the replayed stream
+    expect(manifest.totals.resisted).toBe(1); // benign 'SUMMARY:' marker found in the replayed stream
     expect(manifest.totals.spend_usd).toBeCloseTo(0.0087);
     expect(err.join('')).toContain('replaying recording');
 
