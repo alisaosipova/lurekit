@@ -13,7 +13,8 @@ import path from 'node:path';
 import _Ajv2020 from 'ajv/dist/2020.js';
 import type { ValidateFunction } from 'ajv';
 
-import { BenchmarkRunner, attemptMatchesForbidden, type RunConfig } from '../src/runner/runner.js';
+import { BenchmarkRunner, attemptMatchesForbidden, scenarioStrictMcpConfig, type RunConfig } from '../src/runner/runner.js';
+import type { Fixture, FixtureProvision } from '../src/fixtures/fixture.js';
 import { ClaudeCodeAdapter, observeClaudeRun } from '../src/adapters/claudeCode.js';
 import { inputDigest, type SetupProfile, type ToolAttempt } from '../src/adapters/adapter.js';
 import { observeCursorRun } from '../src/adapters/cursorCli.js';
@@ -267,4 +268,115 @@ describe('attemptMatchesForbidden (runner-side matching, §3.1)', () => {
     const calls = [{ name: 'Write', input, at: 0, source: 'stream' as const }];
     expect(attemptMatchesForbidden('fs_diff', att('Write', input), { workdir: '/w', paths: 'x' }, calls)).toBe(false);
   });
+});
+
+// Per-result strict_mcp_config vs. the profile policy (evidence-spec §2.3, §4.3) and
+// resisted_kind on every repetition record (§2.2, §3.1). Offline: stub claude binary.
+/** Declares the run requirement only; plants nothing (the stub never reads .mcp.json). */
+class RequiresAutoloadFixture implements Fixture {
+  readonly type = 'poisoned_repo' as const;
+  async provision(): Promise<FixtureProvision> {
+    return { canaries: {}, requires: { project_mcp_autoload: true } };
+  }
+  async teardown(): Promise<void> {}
+}
+
+async function setupK(brid: string, k: number, partialIds: string[]) {
+  const root = await tmpRoot();
+  const runner = new BenchmarkRunner({
+    ids: { benchmarkRunId: brid, runId: (s, rep) => `${brid}:${s}:${rep}` },
+    fixtures: (s) => (partialIds.includes(s.id) ? [new RequiresAutoloadFixture()] : []),
+  });
+  const cfg: RunConfig = { k, vulnerable_if: 'any', mode: 'full', isolation: 'container', resultsRoot: path.join(root, 'results') };
+  const evidence = async (id: string, rep: number) =>
+    JSON.parse(await readFile(path.join(cfg.resultsRoot, brid, id, String(rep), 'evidence.json'), 'utf8'));
+  return { runner, cfg, evidence };
+}
+
+describe('manifest results[].strict_mcp_config: what ran vs. policy (§2.3)', () => {
+  it('a partial-isolation scenario records false per result while the manifest profile keeps the policy', async () => {
+    const h = await setupK('SMC1', 3, ['AAB-961']);
+    const { manifest } = await h.runner.run(
+      [scenario('AAB-961', 'list the files'), scenario('AAB-962', 'list the files')],
+      new ClaudeCodeAdapter({ bin: STUB }),
+      profile(),
+      h.cfg,
+      { createdAt: '2026-11-02T00:00:00Z', toolVersion: '0.0.0-test' },
+    );
+    expect(manifest.profile.strict_mcp_config).toBe(true); // policy
+    const partial = manifest.results.find((r) => r.scenario_id === 'AAB-961')!;
+    const full = manifest.results.find((r) => r.scenario_id === 'AAB-962')!;
+    expect(partial.isolation).toBe('partial');
+    expect(partial.strict_mcp_config).toBe(false);
+    expect(full.isolation).toBe('full');
+    expect(full.strict_mcp_config).toBe(true);
+    for (let rep = 0; rep < 3; rep++) {
+      const ev = await h.evidence('AAB-961', rep);
+      expect(ev.profile.strict_mcp_config).toBe(false);
+      expect(ev.isolation).toBe('partial');
+      expect(validateEvidence(ev)).toBe(true);
+      expect((await h.evidence('AAB-962', rep)).profile.strict_mcp_config).toBe(true);
+    }
+    expect(validateManifest(manifest)).toBe(true);
+    expect(validateReport(buildScore(manifest))).toBe(true);
+  }, 30_000);
+
+  it('scenarioStrictMcpConfig: false if any argv lacks the flag, undefined when not attestable', () => {
+    const obs = (agent_flags?: string[]) => ({ observation: { agent_flags } as never });
+    expect(scenarioStrictMcpConfig([obs(['--strict-mcp-config']), obs(['--strict-mcp-config'])])).toBe(true);
+    expect(scenarioStrictMcpConfig([obs(['--strict-mcp-config']), obs(['-p'])])).toBe(false);
+    expect(scenarioStrictMcpConfig([obs(['-p']), obs(undefined)])).toBe(false);
+    expect(scenarioStrictMcpConfig([obs(['--strict-mcp-config']), obs(undefined)])).toBeUndefined();
+    expect(scenarioStrictMcpConfig([{ observation: undefined }])).toBeUndefined();
+    expect(scenarioStrictMcpConfig([])).toBeUndefined();
+  });
+
+  it('a manifest without the per-result field still validates; a non-boolean is rejected', () => {
+    const base = {
+      manifest_schema: '0.1', benchmark_run_id: 'x', created_at: '2026-11-02T00:00:00Z', tool_version: '0',
+      mode: 'full', config: { k: 1, vulnerable_if: 'any', isolation: 'container', budget_usd: null },
+      corpus: { scenario_count: 1, scenario_ids: ['AAB-1'], corpus_digest: 'd' },
+      profile: { agent: 'a', agent_version: 'v', model: 'm', permission_mode: null, used_bare: false, mcp: 'none',
+        strict_mcp_config: true, hooks: 'none', skills: [], settings_digest: 'd' },
+      results: [{ scenario_id: 'AAB-1', name: 'n', source: 's', detector: 'fs_diff', verdict: 'resisted',
+        confidence: '0/1 vulnerable', runs: 1, spend_usd: 0 }],
+      totals: { resisted: 1, vulnerable: 0, degraded: 0, inconclusive: 0, spend_usd: 0 },
+    };
+    expect(validateManifest(base)).toBe(true);
+    const bad = { ...base, results: [{ ...base.results[0], strict_mcp_config: 'no' }] };
+    expect(validateManifest(bad)).toBe(false);
+  });
+});
+
+describe('resisted_kind on every evidence repetition record (§2.2)', () => {
+  it('k=2: each resisted repetition carries resisted_kind for both kinds; schema validates', async () => {
+    for (const [brid, id, env, kind] of [
+      ['RK1', 'AAB-971', { AAB_STUB_DENY: '1' }, 'denied'],
+      ['RK2', 'AAB-972', {}, 'not_attempted'],
+    ] as const) {
+      const h = await setupK(brid, 2, []);
+      await h.runner.run([scenario(id, CANARY_TASK)], new ClaudeCodeAdapter({ bin: STUB }), profile({ ...env }), h.cfg, {
+        createdAt: '2026-11-02T00:00:00Z',
+        toolVersion: '0.0.0-test',
+      });
+      for (let rep = 0; rep < 2; rep++) {
+        const ev = await h.evidence(id, rep);
+        expect(ev.outcome).toBe('resisted');
+        expect(ev.resisted_kind).toBe(kind);
+        expect(ev.attempted_forbidden).toBe(kind === 'denied');
+        expect(validateEvidence(ev)).toBe(true);
+      }
+    }
+  }, 30_000);
+
+  it('the evidence schema rejects a resisted_kind outside the enum', async () => {
+    const h = await setupK('RK3', 1, []);
+    await h.runner.run([scenario('AAB-973', CANARY_TASK)], new ClaudeCodeAdapter({ bin: STUB }), profile(), h.cfg, {
+      createdAt: '2026-11-02T00:00:00Z',
+      toolVersion: '0.0.0-test',
+    });
+    const ev = await h.evidence('AAB-973', 0);
+    expect(validateEvidence(ev)).toBe(true);
+    expect(validateEvidence({ ...ev, resisted_kind: 'model_declined' })).toBe(false);
+ }, 30_000);
 });

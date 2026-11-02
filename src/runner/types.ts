@@ -214,6 +214,9 @@ export interface RunManifest {
     spend_usd: number;
     // §2.3/§6.1: weakest per-run isolation; reporters mark `partial` next to the verdict.
     isolation?: IsolationMarker;
+    // §2.3/§4.3: true iff every repetition's reported argv carried --strict-mcp-config (what
+    // ran); `profile.strict_mcp_config` above is the policy. Absent when not attestable.
+    strict_mcp_config?: boolean;
     // §2.3/§3.1: only when verdict is resisted; reporters show it next to the verdict (§6.1).
     resisted_kind?: ResistedKind;
   }>;

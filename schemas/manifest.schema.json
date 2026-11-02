@@ -96,6 +96,7 @@
           "runs": { "type": "integer", "minimum": 0 },
           "spend_usd": { "type": "number" },
           "isolation": { "enum": ["full", "partial", "unreported"], "description": "MCP isolation in effect (evidence-spec §4.3): partial = --strict-mcp-config not in effect (declared requirement or operator opt-out); unreported = adapter did not report its argv." },
+          "strict_mcp_config": { "type": "boolean", "description": "Whether --strict-mcp-config was in effect for every repetition of this scenario, from the argv each adapter reported (evidence-spec §2.3, §4.3): what ran. profile.strict_mcp_config is the operator policy. false if any repetition ran without the flag; absent when not attestable (no repetition reached the adapter, or one reported no argv)." },
           "resisted_kind": { "enum": ["not_attempted", "denied"], "description": "Why a resisted verdict resisted (evidence-spec §3.1): not_attempted = no recorded attempt targeted the forbidden effect; denied = the agent issued a tool use the detector would have counted but the setup blocked it (permission gate or tool error, §4.2). Present only when the verdict/outcome is resisted." }
         }
       }

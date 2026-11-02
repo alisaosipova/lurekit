@@ -795,6 +795,7 @@ export class BenchmarkRunner implements Runner {
           runs: r.runs.length,
           spend_usd: r.spend_usd,
           ...(r.isolation ? { isolation: r.isolation } : {}),
+          ...strictMcpConfigField(r.runs),
           ...(r.verdict === 'resisted' && r.resisted_kind ? { resisted_kind: r.resisted_kind } : {}),
         };
       }),
@@ -808,6 +809,26 @@ export class BenchmarkRunner implements Runner {
 }
 
 // --- aggregation (evidence-spec §3.2) -----------------------------------------------------
+
+/** §2.3: whether --strict-mcp-config was in effect for EVERY repetition of a scenario, from the
+ *  argv each adapter reported (`observation.agent_flags`, §4.3) — what actually ran, as opposed
+ *  to `manifest.profile.strict_mcp_config`, which is the operator's policy. `false` as soon as
+ *  one reported argv lacks the flag; `true` only when every repetition reached the adapter and
+ *  reported argv carrying it; `undefined` (field omitted) when that cannot be attested (no
+ *  repetition reached the adapter, or one reported no argv, e.g. replay). */
+export function scenarioStrictMcpConfig(
+  runs: Array<Pick<SingleRun, 'observation'>>,
+): boolean | undefined {
+  const flags = runs.map((r) => r.observation?.agent_flags);
+  if (flags.some((f) => f !== undefined && !f.includes('--strict-mcp-config'))) return false;
+  if (flags.length === 0 || flags.some((f) => f === undefined)) return undefined;
+  return true;
+}
+
+function strictMcpConfigField(runs: SingleRun[]): { strict_mcp_config?: boolean } {
+  const v = scenarioStrictMcpConfig(runs);
+  return v === undefined ? {} : { strict_mcp_config: v };
+}
 
 /** §3.1/§3.2: a resisted scenario is `denied` when any of its resisted runs was denied, else
  *  `not_attempted`. */

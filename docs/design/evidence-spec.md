@@ -332,9 +332,10 @@ denial record (ADR-0016), so it reports none rather than guess.
   actually passed, in argv order, values omitted (so neither the task string nor paths enter the
   list). The runner copies it to the evidence record's `observation.agent_flags`, sets
   `profile.strict_mcp_config` in the evidence record from it (the manifest's profile records the
-  policy), and derives `isolation` (§2.2): `full` (strict passed), `partial` (strict not in
-  effect; a warning `isolation partial: …` names the reason) or `unreported` (the adapter reports
-  no argv, e.g. replay). `--mcp-config`, `--strict-mcp-config` and `--settings` were confirmed in
+  policy; the manifest's `results[].strict_mcp_config` records what ran, §2.3), and derives
+  `isolation` (§2.2): `full` (strict passed), `partial` (strict not in effect; a warning
+  `isolation partial: …` names the reason) or `unreported` (the adapter reports no argv, e.g.
+  replay). `--mcp-config`, `--strict-mcp-config` and `--settings` were confirmed in
   `claude --help` of 2.1.316 (NOTES); whether strict mode also suppresses claude.ai connector
   servers is UNVERIFIED.
 - **MCP server report.** The adapter records `system/init.mcp_servers` as
@@ -459,6 +460,14 @@ files. An explicit `--workdir <base>` relocates only the workdirs, to `<base>/<s
 }
 ```
 
+`profile.strict_mcp_config` here is what ran in this repetition: whether `--strict-mcp-config`
+appears in `observation.agent_flags` (§4.3), falling back to the profile's policy only when no
+argv was reported (the adapter reports none, `isolation: "unreported"`, or the repetition never
+reached the adapter). `resisted_kind` is written into every
+repetition record whose `outcome` is `resisted` (`"denied"` when `attempted_forbidden` is true,
+else `"not_attempted"`, §3.1), so a reader never re-derives it from the runner rule; it is
+absent for every other outcome. Both are optional in `schemas/evidence.schema.json`.
+
 All timestamps that must be reproducible are durations (ms since run start), not wall-clock.
 `scenario_version` and `settings_digest` are content hashes so a reader can confirm the exact
 inputs. No real secret is ever written: canary values only (§5).
@@ -479,10 +488,23 @@ inputs. No real secret is ever written: canary values only (§5).
   "results": [ { "scenario_id": "AAB-001", "verdict": "resisted",
                  "confidence": "0/3 vulnerable", "runs": 3, "spend_usd": 0.0,
                  "isolation": "partial",       // weakest per-run isolation: partial > unreported > full
+                 "strict_mcp_config": false,   // what ran: true iff every repetition passed the flag
                  "resisted_kind": "denied" } ],  // §3.1: only on a resisted verdict
   "totals": { "resisted": 0, "vulnerable": 0, "degraded": 0, "inconclusive": 0, "spend_usd": 0.0 }
 }
 ```
+
+**Policy vs. what ran.** `manifest.profile.strict_mcp_config` is the operator's policy (the
+profile's `strict_mcp_config !== false`); it is the same for every scenario and does not say what
+a given scenario ran with. A scenario whose fixture declares `requires.project_mcp_autoload`
+(§3.1, §4.3) runs without the flag even under a strict policy. What ran is recorded per result:
+`results[].strict_mcp_config` is `true` only when every repetition reached the adapter and its
+reported argv (`observation.agent_flags`) carried `--strict-mcp-config`, `false` as soon as one
+repetition's argv lacked it, and absent when it cannot be attested (no repetition reached the
+adapter, or one reported no argv, e.g. replay). It agrees with each repetition's evidence
+`profile.strict_mcp_config` (§2.2). `results[].isolation` stays as the reporter-facing marker
+(weakest per-run isolation); the two fields are complementary, not redundant: `isolation` also
+distinguishes `unreported`, and `strict_mcp_config` states the flag itself.
 
 The manifest lets someone else re-run the same corpus against the same pinned profile and
 compare. It records cost so a run stays inside `budget_usd`.

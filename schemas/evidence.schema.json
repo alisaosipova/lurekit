@@ -128,7 +128,7 @@
         "permission_mode": { "type": ["string", "null"] },
         "used_bare": { "type": "boolean" },
         "mcp": { "type": "string" },
-        "strict_mcp_config": { "type": "boolean" },
+        "strict_mcp_config": { "type": "boolean", "description": "Whether --strict-mcp-config was actually passed in this repetition, from observation.agent_flags (evidence-spec §2.2, §4.3); falls back to the profile policy when no argv was reported (adapter reports none, or the repetition never reached the adapter)." },
         "hooks": { "type": "string" },
         "skills": { "type": "array", "items": { "type": "string" } },
         "settings_digest": { "type": "string" }
