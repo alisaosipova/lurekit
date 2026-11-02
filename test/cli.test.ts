@@ -1,0 +1,122 @@
+// CLI wiring tests (src/cli.ts). Fully offline: the live-agent path is exercised with an
+// injected StubAdapter via CliDeps, so no `claude` process is spawned and nothing is spent.
+// Proves the entry point wires scenarios -> adapter -> runner -> reporter and writes a manifest.
+
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync, mkdirSync, copyFileSync, readFileSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { main, type CliDeps } from '../src/cli.js';
+import type { AgentId } from '../src/scenario/types.js';
+import type { RunManifest } from '../src/runner/types.js';
+import { StubAdapter } from './helpers/stubAdapter.js';
+
+const repoRoot = fileURLToPath(new URL('..', import.meta.url));
+const realScenarios = path.join(repoRoot, 'scenarios');
+const validFixtures = path.join(repoRoot, 'test/fixtures/scenarios/valid');
+
+let tmp: string;
+let out: string[];
+let err: string[];
+
+function deps(adapterFor?: CliDeps['adapterFor']): CliDeps {
+  out = [];
+  err = [];
+  return {
+    now: () => '2026-11-02T00:00:00.000Z',
+    newRunId: () => 'aab-test-run',
+    adapterFor: adapterFor ?? (() => new StubAdapter({})),
+    cwd: () => tmp,
+    stdout: (s) => out.push(s),
+    stderr: (s) => err.push(s),
+  };
+}
+
+beforeEach(() => {
+  tmp = mkdtempSync(path.join(tmpdir(), 'aab-cli-'));
+});
+afterEach(() => {
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+describe('cli offline commands', () => {
+  it('--help returns 0 and prints usage', async () => {
+    const code = await main(['--help'], deps());
+    expect(code).toBe(0);
+    expect(out.join('')).toContain('agent-attack-bench');
+  });
+
+  it('validate returns 0 on a valid scenario dir', async () => {
+    const code = await main(['validate', validFixtures], deps());
+    expect(code).toBe(0);
+  });
+
+  it('selftest returns 0 (all detectors sound)', async () => {
+    const code = await main(['selftest'], deps());
+    expect(code).toBe(0);
+    expect(out.join('')).toContain('all detectors sound');
+  });
+
+  it('plan returns 0 and keeps the real corpus for a claude-code profile', async () => {
+    const code = await main(['plan', realScenarios, '--model', 'test-model'], deps());
+    expect(code).toBe(0);
+    expect(out.join('')).toMatch(/would run/);
+  });
+
+  it('run requires --model', async () => {
+    await expect(main(['run', realScenarios], deps())).rejects.toThrow(/--model/);
+  });
+
+  it('unknown command returns 2', async () => {
+    const code = await main(['frobnicate'], deps());
+    expect(code).toBe(2);
+  });
+});
+
+describe('cli run (stub adapter, offline)', () => {
+  it('runs one scenario end-to-end, writes a manifest, reports vulnerable 1 of 1', async () => {
+    // One-scenario temp corpus: AAB-030 uses canary_command with a text_in_transcript benign.
+    const scenDir = path.join(tmp, 'corpus');
+    mkdirSync(scenDir, { recursive: true });
+    copyFileSync(path.join(realScenarios, 'AAB-030.yaml'), path.join(scenDir, 'AAB-030.yaml'));
+    const resultsRoot = path.join(tmp, 'runs');
+
+    const stub = new StubAdapter({ trigger: 'canary_command', benignText: 'here is a summary' });
+    const d = deps(() => stub);
+    const code = await main(
+      ['run', scenDir, '--model', 'test-model', '--results', resultsRoot, '--format', 'markdown'],
+      d,
+    );
+
+    expect(code).toBe(0);
+    expect(stub.runCount).toBe(1);
+
+    const manifestPath = path.join(resultsRoot, 'aab-test-run', 'manifest.json');
+    expect(existsSync(manifestPath)).toBe(true);
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as RunManifest;
+    expect(manifest.totals.vulnerable).toBe(1);
+    expect(manifest.results[0].scenario_id).toBe('AAB-030');
+
+    expect(out.join('')).toContain('Vulnerable to 1 of 1 scenarios');
+  });
+
+  it('reports vulnerable 0 when the agent resists (no trigger, benign satisfied)', async () => {
+    const scenDir = path.join(tmp, 'corpus');
+    mkdirSync(scenDir, { recursive: true });
+    copyFileSync(path.join(realScenarios, 'AAB-030.yaml'), path.join(scenDir, 'AAB-030.yaml'));
+    const resultsRoot = path.join(tmp, 'runs');
+
+    const stub = new StubAdapter({ benignText: 'here is a summary' });
+    const code = await main(
+      ['run', scenDir, '--model', 'test-model', '--results', resultsRoot],
+      deps(() => stub),
+    );
+    expect(code).toBe(0);
+    const manifest = JSON.parse(
+      readFileSync(path.join(resultsRoot, 'aab-test-run', 'manifest.json'), 'utf8'),
+    ) as RunManifest;
+    expect(manifest.totals.vulnerable).toBe(0);
+  });
+});
