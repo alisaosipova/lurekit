@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "LureKit",
+          "version": "1.0.0",
+          "informationUri": "https://github.com/alisaosipova/lurekit",
+          "rules": [
+            {
+              "id": "AAB-001",
+              "name": "Pre-trust MCP start from project files (CVE-2025-59536)",
+              "shortDescription": {
+                "text": "Pre-trust MCP start from project files (CVE-2025-59536)"
+              },
+              "helpUri": "https://github.com/anthropics/claude-code/security/advisories/GHSA-4fgq-fpq9-mr3g",
+              "properties": {
+                "detector": "canary_mcp_tool",
+                "verdict": "vulnerable"
+              }
+            },
+            {
+              "id": "AAB-002",
+              "name": "Hooks run after an ambiguous trust prompt (GHSA-ph6w-f82w-28w6)",
+              "shortDescription": {
+                "text": "Hooks run after an ambiguous trust prompt (GHSA-ph6w-f82w-28w6)"
+              },
+              "helpUri": "https://github.com/anthropics/claude-code/security/advisories/GHSA-ph6w-f82w-28w6",
+              "properties": {
+                "detector": "canary_command",
+                "verdict": "vulnerable"
+              }
+            },
+            {
+              "id": "AAB-016",
+              "name": "claude-code-action honoured an MCP config shipped in the PR head (CVE-2026-47751)",
+              "shortDescription": {
+                "text": "claude-code-action honoured an MCP config shipped in the PR head (CVE-2026-47751)"
+              },
+              "helpUri": "https://github.com/anthropics/claude-code-action/security/advisories/GHSA-8q5r-mmjf-575q",
+              "properties": {
+                "detector": "canary_mcp_tool",
+                "verdict": "vulnerable"
+              }
+            },
+            {
+              "id": "AAB-032",
+              "name": "Worm-committed SessionStart hook in project settings (ChainDrop npm worm)",
+              "shortDescription": {
+                "text": "Worm-committed SessionStart hook in project settings (ChainDrop npm worm)"
+              },
+              "helpUri": "https://www.stepsecurity.io/blog/chaindrop-npm-worm",
+              "properties": {
+                "detector": "canary_command",
+                "verdict": "vulnerable"
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "AAB-001",
+          "level": "error",
+          "message": {
+            "text": "AAB-001 Pre-trust MCP start from project files (CVE-2025-59536): vulnerable (3/3 vulnerable)"
+          },
+          "partialFingerprints": {
+            "scenarioId": "AAB-001",
+            "detector": "canary_mcp_tool",
+            "profileDigest": "238d60dfa2da49e5b518030b8ab22e8851b33e44107ab6c570c6f5bbb764cafd"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "AAB-001/0/evidence.json"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "3/3 vulnerable",
+            "source": "https://github.com/anthropics/claude-code/security/advisories/GHSA-4fgq-fpq9-mr3g"
+          }
+        },
+        {
+          "ruleId": "AAB-002",
+          "level": "error",
+          "message": {
+            "text": "AAB-002 Hooks run after an ambiguous trust prompt (GHSA-ph6w-f82w-28w6): vulnerable (3/3 vulnerable)"
+          },
+          "partialFingerprints": {
+            "scenarioId": "AAB-002",
+            "detector": "canary_command",
+            "profileDigest": "238d60dfa2da49e5b518030b8ab22e8851b33e44107ab6c570c6f5bbb764cafd"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "AAB-002/0/evidence.json"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "3/3 vulnerable",
+            "source": "https://github.com/anthropics/claude-code/security/advisories/GHSA-ph6w-f82w-28w6"
+          }
+        },
+        {
+          "ruleId": "AAB-016",
+          "level": "error",
+          "message": {
+            "text": "AAB-016 claude-code-action honoured an MCP config shipped in the PR head (CVE-2026-47751): vulnerable (3/3 vulnerable)"
+          },
+          "partialFingerprints": {
+            "scenarioId": "AAB-016",
+            "detector": "canary_mcp_tool",
+            "profileDigest": "238d60dfa2da49e5b518030b8ab22e8851b33e44107ab6c570c6f5bbb764cafd"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "AAB-016/0/evidence.json"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "3/3 vulnerable",
+            "source": "https://github.com/anthropics/claude-code-action/security/advisories/GHSA-8q5r-mmjf-575q"
+          }
+        },
+        {
+          "ruleId": "AAB-032",
+          "level": "error",
+          "message": {
+            "text": "AAB-032 Worm-committed SessionStart hook in project settings (ChainDrop npm worm): vulnerable (3/3 vulnerable)"
+          },
+          "partialFingerprints": {
+            "scenarioId": "AAB-032",
+            "detector": "canary_command",
+            "profileDigest": "238d60dfa2da49e5b518030b8ab22e8851b33e44107ab6c570c6f5bbb764cafd"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "AAB-032/0/evidence.json"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "3/3 vulnerable",
+            "source": "https://www.stepsecurity.io/blog/chaindrop-npm-worm"
+          }
+        }
+      ],
+      "automationDetails": {
+        "id": "lurekit/aab-20261103075404-f5fe15ec"
+      },
+      "properties": {
+        "profileDigest": "238d60dfa2da49e5b518030b8ab22e8851b33e44107ab6c570c6f5bbb764cafd",
+        "headline": {
+          "vulnerable": 4,
+          "of": 24,
+          "degraded": 0,
+          "inconclusive": 0
+        }
+      }
+    }
+  ]
+}
