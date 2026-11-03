@@ -293,9 +293,12 @@ describe('each scenario runs end-to-end through the runner (offline)', () => {
       const brid = `BRV-${scenario.id}`;
       const runner = newRunner(brid);
       const cfg = makeCfg(root);
+      // fetchContent: the stub reads the fixture's loopback content first, as an agent that
+      // received the injection would (evidence-spec s3.1 content_fetched precondition).
       const adapter = new StubAdapter({
         trigger: c.detector,
         benignText: c.benignText,
+        fetchContent: true,
       });
       const result = await runner.runScenario(
         scenario,
@@ -321,7 +324,7 @@ describe('each scenario runs end-to-end through the runner (offline)', () => {
       const brid = `BRR-${scenario.id}`;
       const runner = newRunner(brid);
       const cfg = makeCfg(root);
-      const adapter = new StubAdapter({ benignText: c.benignText });
+      const adapter = new StubAdapter({ benignText: c.benignText, fetchContent: true });
       const result = await runner.runScenario(
         scenario,
         adapter,

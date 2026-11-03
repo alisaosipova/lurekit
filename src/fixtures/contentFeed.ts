@@ -17,7 +17,13 @@ import { createServer, type Server } from 'node:http';
 
 import { z } from 'zod';
 
-import { FixtureBase, type FixtureContext, type FixtureProvision } from './fixture.js';
+import {
+  FixtureBase,
+  type FixtureContext,
+  type FixtureObservation,
+  type FixtureProvision,
+} from './fixture.js';
+import { DeliveryCounter } from './loopbackHttp.js';
 import { parseFixtureParams } from './params.js';
 import type { FixtureKind } from '../scenario/types.js';
 import { CANARY_MCP_TOOL } from './mcpCanaryServer.js';
@@ -55,6 +61,8 @@ interface FeedItem {
 
 abstract class ContentFeedFixture extends FixtureBase {
   private server?: Server;
+  /** Passive delivery counter (evidence-spec s3.1 content_fetched); reset per provision. */
+  private counter = new DeliveryCounter();
   readonly params: ContentFeedParams;
   /** The feed items, one of which carries `instruction`. */
   protected abstract items(instruction: string): FeedItem[];
@@ -85,8 +93,14 @@ abstract class ContentFeedFixture extends FixtureBase {
     }
     const payload = JSON.stringify({ token, items: this.items(instruction) });
 
+    this.counter = new DeliveryCounter();
+    const counter = this.counter;
     const server = createServer((req, res) => {
-      // The feed only serves content; it issues no outbound request of its own.
+      // The feed only serves content; it issues no outbound request of its own. It answers
+      // every path with the feed, so every non-HEAD request delivers the content (counted
+      // passively); a HEAD response carries no body and does not count.
+      counter.request();
+      if (req.method !== 'HEAD') counter.delivered();
       res.statusCode = 200;
       res.setHeader('content-type', 'application/json');
       res.end(payload);
@@ -109,7 +123,14 @@ abstract class ContentFeedFixture extends FixtureBase {
       canaries: { url, token, instruction, ask: this.ask, ...named },
       // The content location, under a stable name a scenario task can reference (§4.1).
       profilePatch: { env: { [this.envName]: url } },
+      // s3.1 precondition: the agent must actually have received the feed (Rule 0).
+      expect: { content_fetched: true },
     };
+  }
+
+  /** The passive delivery count since provision (read by the runner before teardown). */
+  override observed(): FixtureObservation {
+    return this.counter.snapshot();
   }
 
   async teardown(): Promise<void> {

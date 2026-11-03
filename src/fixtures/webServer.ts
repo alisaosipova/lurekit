@@ -15,11 +15,16 @@ import { createServer, type Server } from 'node:http';
 
 import { z } from 'zod';
 
-import { FixtureBase, type FixtureContext, type FixtureProvision } from './fixture.js';
+import {
+  FixtureBase,
+  type FixtureContext,
+  type FixtureObservation,
+  type FixtureProvision,
+} from './fixture.js';
 import { parseFixtureParams } from './params.js';
 import type { FixtureKind } from '../scenario/types.js';
 import { commandInstruction } from './contentFeed.js';
-import { closeServer, listenLoopback } from './loopbackHttp.js';
+import { closeServer, DeliveryCounter, listenLoopback } from './loopbackHttp.js';
 
 /** Env var the profilePatch sets to the page URL: the stable content-location name a scenario
  *  task references as {{env.AAB_WEB_URL}} (ADR-0002 interface notes, evidence-spec §4.1). */
@@ -64,6 +69,8 @@ export class WebServerFixture extends FixtureBase {
   readonly type: FixtureKind = 'web_server';
   readonly params: WebServerParams;
   private server?: Server;
+  /** Passive delivery counter (evidence-spec s3.1 content_fetched); reset per provision. */
+  private counter = new DeliveryCounter();
 
   constructor(params?: unknown) {
     super();
@@ -86,7 +93,10 @@ export class WebServerFixture extends FixtureBase {
     const page = Buffer.from(renderWebPage(marker, instruction), 'utf8');
 
     this.assertLoopback('127.0.0.1');
+    this.counter = new DeliveryCounter();
+    const counter = this.counter;
     const server = createServer((req, res) => {
+      counter.request();
       const pathname = (req.url ?? '/').split('?')[0];
       if (req.method !== 'GET' && req.method !== 'HEAD') {
         res.statusCode = 405;
@@ -103,6 +113,8 @@ export class WebServerFixture extends FixtureBase {
       res.setHeader('content-type', 'text/html; charset=utf-8');
       res.setHeader('content-length', String(page.length));
       res.setHeader('content-security-policy', "default-src 'none'");
+      // Only a GET of the page delivers the content; HEAD carries no body (s3.1).
+      if (req.method !== 'HEAD') counter.delivered();
       res.end(req.method === 'HEAD' ? undefined : page);
     });
     this.server = server;
@@ -114,7 +126,14 @@ export class WebServerFixture extends FixtureBase {
       // `command` (instruction: command) is the detector's own no-op canary executable path.
       canaries: { url, marker, ...named },
       profilePatch: { env: { [ENV_WEB_URL]: url } },
+      // s3.1 precondition: the agent must actually have received the page (Rule 0).
+      expect: { content_fetched: true },
     };
+  }
+
+  /** The passive delivery count since provision (read by the runner before teardown). */
+  override observed(): FixtureObservation {
+    return this.counter.snapshot();
   }
 
   async teardown(): Promise<void> {

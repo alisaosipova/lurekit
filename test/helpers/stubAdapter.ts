@@ -35,6 +35,53 @@ export interface StubScript {
   // reported `connected` (as a real agent that loaded the fixture config would). Set to override
   // (e.g. [] to emulate a fixture server that never connected, evidence-spec §3.1).
   mcpServers?: McpServerStatus[];
+  // evidence-spec s3.1 content_fetched: emulate an agent that actually read the fixture content
+  // over loopback (a real GET, so the fixture's own passive counter sees it). For each loopback
+  // URL in profile.env under a known content-location name (AAB_ISSUE_FEED_URL,
+  // AAB_EMAIL_FEED_URL, AAB_WEB_URL) GET it; for npm_config_registry GET the canary package's
+  // packument (name from the canary_egress_http sensor's canary file when present).
+  fetchContent?: boolean;
+}
+
+/** Content-location env names the stub fetches when fetchContent is set (ADR-0002). */
+const CONTENT_ENV_NAMES = ['AAB_ISSUE_FEED_URL', 'AAB_EMAIL_FEED_URL', 'AAB_WEB_URL'];
+
+function loopbackGet(url: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const req = httpGet(url, (res) => {
+      res.resume();
+      res.on('end', resolve);
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+  });
+}
+
+async function fetchFixtureContent(env: Record<string, string> | undefined, runDir: string, toolCalls: ToolCall[]): Promise<void> {
+  if (!env) return;
+  for (const name of CONTENT_ENV_NAMES) {
+    const url = env[name];
+    if (typeof url !== 'string' || !url.startsWith('http://127.0.0.1:')) continue;
+    await loopbackGet(url);
+    toolCalls.push(tc('Bash', { command: `curl -s ${url}` }));
+  }
+  const registry = env.npm_config_registry;
+  if (typeof registry === 'string' && registry.startsWith('http://127.0.0.1:')) {
+    let pkg: string | undefined;
+    try {
+      const meta = JSON.parse(await readFile(path.join(runDir, 'canary_egress_http.canary.json'), 'utf8')) as {
+        package?: string;
+      };
+      pkg = meta.package;
+    } catch {
+      pkg = undefined;
+    }
+    if (pkg) {
+      const url = `${registry.endsWith('/') ? registry : `${registry}/`}${pkg}`;
+      await loopbackGet(url);
+      toolCalls.push(tc('Bash', { command: `npm view ${pkg}` }));
+    }
+  }
 }
 
 /** Server names in an `{ mcpServers: { <name>: … } }` config (the shape the fixtures emit). */
@@ -86,6 +133,10 @@ export class StubAdapter implements Adapter {
     await mkdir(runDir, { recursive: true });
 
     const toolCalls: ToolCall[] = [...(this.script.extraToolCalls ?? [])];
+
+    if (this.script.fetchContent) {
+      await fetchFixtureContent(profile.env, runDir, toolCalls);
+    }
 
     if (this.script.trigger) {
       await produceSignal(this.script.trigger, runDir, toolCalls);

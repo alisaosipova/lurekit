@@ -4,6 +4,8 @@
 
 import type { Server } from 'node:http';
 
+import type { FixtureObservation } from './fixture.js';
+
 /** Listen on an ephemeral 127.0.0.1 port; returns the bound port. Closes the server and throws
  *  if the address cannot be read back. */
 export async function listenLoopback(server: Server, kind: string): Promise<number> {
@@ -26,4 +28,29 @@ export async function closeServer(server: Server | undefined): Promise<void> {
     server.close(() => resolve());
     server.closeAllConnections();
   });
+}
+
+/** Passive delivery counter for a serve-only fixture (evidence-spec s3.1 `content_fetched`,
+ *  ADR-0002 amendment "content delivery"). The request handler calls request() once per
+ *  incoming request and delivered() when it answers with the attack-bearing content body
+ *  (never for HEAD, a 404, a 405 or another path). It only counts; it originates nothing. */
+export class DeliveryCounter {
+  private requests = 0;
+  private deliveries = 0;
+
+  request(): void {
+    this.requests += 1;
+  }
+
+  delivered(): void {
+    this.deliveries += 1;
+  }
+
+  snapshot(): FixtureObservation {
+    return {
+      content_fetched: this.deliveries > 0,
+      content_requests: this.deliveries,
+      request_count: this.requests,
+    };
+  }
 }

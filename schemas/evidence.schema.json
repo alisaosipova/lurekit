@@ -193,6 +193,22 @@
           "description": "Tool uses the agent issued that did not take effect (evidence-spec §4.2 Attempts). The input is stored as a digest only, never raw.",
           "items": { "$ref": "#/$defs/attempt" }
         },
+        "fixtures": {
+          "type": "array",
+          "description": "Content-delivery facts of each fixture that declared the content_fetched precondition (evidence-spec s3.1). source: live = the fixture's own passive request counter; recording = a replay recording's facts; not_observable = a replay without recorded facts (precondition not evaluated, counts omitted).",
+          "items": {
+            "type": "object",
+            "required": ["type", "source"],
+            "additionalProperties": false,
+            "properties": {
+              "type": { "type": "string" },
+              "source": { "enum": ["live", "recording", "not_observable"] },
+              "content_fetched": { "type": "boolean" },
+              "content_requests": { "type": "integer", "minimum": 0 },
+              "request_count": { "type": "integer", "minimum": 0 }
+            }
+          }
+        },
         "warnings": { "type": "array", "items": { "type": "string" } }
       }
     }

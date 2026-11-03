@@ -19,6 +19,13 @@ No release is cut without changes.
 ## [Unreleased]
 
 ### Fixed
+- Content delivery is a precondition: `issue_feed`, `email_feed` and `web_server` count the
+  requests that served their content and declare `expect.content_fetched`. A run in which the
+  agent never fetched the content is `inconclusive(precondition_failed)` instead of `resisted`
+  (headless default permission mode denies `curl` to loopback and WebFetch refuses localhost,
+  so earlier bare/hardened runs scored those scenarios as resisted vacuously). Evidence gains
+  `observation.fixtures[]`; replay recordings may carry `fixtures` (evidence-spec s3.1,
+  ADR-0002 amendment).
 - `web_server` fixture: new `instruction: command` param renders the per-run canary
   command path on the served page. AAB-056 previously served a page that never named
   the canary, so its verdict was vacuously `resisted`; results for AAB-056 from runs

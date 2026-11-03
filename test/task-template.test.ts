@@ -254,7 +254,7 @@ describe('shipped scenarios point the agent at their fixture content', () => {
     const s = scenarios.find((x) => x.id === 'AAB-056')!;
     const root = await tmpRoot();
     const runner = new BenchmarkRunner({ ids: ids('BR-056'), fixtures: fixturesForScenario });
-    const adapter = new StubAdapter({ benignText: 'SUMMARY: the page is a sample.' });
+    const adapter = new StubAdapter({ benignText: 'SUMMARY: the page is a sample.', fetchContent: true });
     const c = cfg(root);
     const result = await runner.runScenario(s, adapter, profile(path.join(root, 'w')), c);
 

@@ -56,15 +56,34 @@ export interface FixtureProvision {
 }
 
 /** Observable preconditions a fixture declares (evidence-spec §3.1). `mcp_server`: the name of
- *  an MCP server that must appear in the observation's `mcp_servers` with status `connected`. */
+ *  an MCP server that must appear in the observation's `mcp_servers` with status `connected`.
+ *  `content_fetched: true`: the fixture serves its attack-bearing content over loopback HTTP
+ *  and the agent must have actually received it (at least one non-HEAD request that the fixture
+ *  answered with that content, read from Fixture.observed() after the agent exits and before
+ *  teardown); otherwise the injected content never reached the agent and the run cannot count. */
 export interface FixtureExpectation {
   mcp_server?: string;
+  content_fetched?: boolean;
+}
+
+/** What a fixture itself observed during the agent run (evidence-spec s3.1 "Preconditions",
+ *  ADR-0002 amendment "content delivery"). Counting is passive: the server only serves.
+ *  `content_fetched`: at least one request was answered with the attack-bearing content
+ *  (HEAD, 404s and other paths do not count). `content_requests`: how many such requests.
+ *  `request_count`: every request the fixture received, any method or path. */
+export interface FixtureObservation {
+  content_fetched: boolean;
+  content_requests: number;
+  request_count: number;
 }
 
 export interface Fixture {
   readonly type: FixtureKind;
   provision(ctx: FixtureContext): Promise<FixtureProvision>;
   teardown(): Promise<void>;
+  /** The fixture's own observation of the run, read by the runner after the agent exits and
+   *  before teardown. Optional: a file-based fixture observes nothing and returns undefined. */
+  observed?(): FixtureObservation | undefined;
 }
 
 /** Thrown when a fixture violates an inertness invariant. The message never echoes the
@@ -208,6 +227,12 @@ export abstract class FixtureBase implements Fixture {
   protected abstract provisionInert(ctx: FixtureContext): Promise<FixtureProvision>;
 
   abstract teardown(): Promise<void>;
+
+  /** Default: the fixture observes nothing (file-based fixtures). HTTP-serving fixtures that
+   *  declare `expect.content_fetched` override this with their passive delivery counter. */
+  observed(): FixtureObservation | undefined {
+    return undefined;
+  }
 
   async provision(ctx: FixtureContext): Promise<FixtureProvision> {
     this.canaryHost = ctx.canaryHost;

@@ -5,13 +5,21 @@
 // Recording layout (a directory):
 //   claude-stream.jsonl  required  verbatim `--output-format stream-json --verbose` stdout
 //   claude-hooks.jsonl   optional  the observation hook's log from the same run
-//   recording.json       optional  { exit_code?, started_at?, ended_at?, agent_version_reported? }
+//   recording.json       optional  { exit_code?, started_at?, ended_at?, agent_version_reported?,
+//                                    fixtures? }
+// `fixtures` (optional, evidence-spec s3.1 `content_fetched`) is the fixture content-delivery
+// facts of the recorded run: [{ type, content_fetched, content_requests?, request_count? }].
+// When present the runner evaluates a fixture's content_fetched precondition against it; when
+// absent the precondition is not evaluable on a replay (no agent fetched anything) and the run
+// carries a "precondition not evaluated" note next to REPLAY_WARNING instead of a verdict change.
 
 import { copyFile, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import type {
   Adapter,
+  FixtureDeliverySource,
+  RecordedFixtureDelivery,
   ObservationSource,
   RunObservation,
   RunOptions,
@@ -35,6 +43,7 @@ interface RecordingMeta {
   started_at?: number;
   ended_at?: number;
   agent_version_reported?: string;
+  fixtures?: unknown;
 }
 
 export class ReplayAdapter implements Adapter {
@@ -85,7 +94,7 @@ export class ReplayAdapter implements Adapter {
     }
 
     const meta = await readMeta(path.join(this.recordingDir, REPLAY_META_FILE));
-    return observeClaudeRun({
+    const observation = observeClaudeRun({
       streamText,
       hooksText,
       rawEventsPath: rawPath,
@@ -99,7 +108,35 @@ export class ReplayAdapter implements Adapter {
       // run can never be mistaken for a live benchmark result.
       warnings: [REPLAY_WARNING],
     });
+    observation.fixture_delivery = fixtureDelivery(meta.fixtures);
+    return observation;
   }
+}
+
+/** The recording's fixture-delivery facts (s3.1), validated; `not_observable` when absent. A
+ *  malformed `fixtures` value is a broken recording and throws (adapter_error). */
+export function fixtureDelivery(raw: unknown): FixtureDeliverySource {
+  if (raw === undefined) return { source: 'not_observable' };
+  if (!Array.isArray(raw)) throw new Error(`ReplayAdapter: ${REPLAY_META_FILE} fixtures is not an array`);
+  const fixtures: RecordedFixtureDelivery[] = raw.map((e, i) => {
+    const o = e as Record<string, unknown> | null;
+    if (!o || typeof o !== 'object' || typeof o.type !== 'string' || typeof o.content_fetched !== 'boolean') {
+      throw new Error(
+        `ReplayAdapter: ${REPLAY_META_FILE} fixtures[${i}] needs a string type and a boolean content_fetched`,
+      );
+    }
+    const out: RecordedFixtureDelivery = { type: o.type, content_fetched: o.content_fetched };
+    for (const k of ['content_requests', 'request_count'] as const) {
+      const v = o[k];
+      if (v === undefined) continue;
+      if (typeof v !== 'number' || !Number.isInteger(v) || v < 0) {
+        throw new Error(`ReplayAdapter: ${REPLAY_META_FILE} fixtures[${i}].${k} is not a non-negative integer`);
+      }
+      out[k] = v;
+    }
+    return out;
+  });
+  return { source: 'recording', fixtures };
 }
 
 async function readMeta(file: string): Promise<RecordingMeta> {

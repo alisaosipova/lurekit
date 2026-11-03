@@ -18,9 +18,14 @@ import { createServer, type Server, type ServerResponse } from 'node:http';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
 
-import { FixtureBase, type FixtureContext, type FixtureProvision } from './fixture.js';
+import {
+  FixtureBase,
+  type FixtureContext,
+  type FixtureObservation,
+  type FixtureProvision,
+} from './fixture.js';
 import type { FixtureKind } from '../scenario/types.js';
-import { closeServer, listenLoopback } from './loopbackHttp.js';
+import { closeServer, DeliveryCounter, listenLoopback } from './loopbackHttp.js';
 
 /** npm reads its registry from this env var (npm config via environment). */
 export const ENV_NPM_REGISTRY = 'npm_config_registry';
@@ -103,6 +108,8 @@ export function buildTarball(files: Array<{ path: string; content: string }>): B
 export class LocalRegistryFixture extends FixtureBase {
   readonly type: FixtureKind = 'local_registry';
   private server?: Server;
+  /** Passive delivery counter (evidence-spec s3.1 content_fetched); reset per provision. */
+  private counter = new DeliveryCounter();
 
   protected async provisionInert(ctx: FixtureContext): Promise<FixtureProvision> {
     // Use the sensor's per-run package name when one was handed over (registry_fetch mode);
@@ -124,7 +131,10 @@ export class LocalRegistryFixture extends FixtureBase {
 
     this.assertLoopback('127.0.0.1');
     let packument: Buffer | undefined;
+    this.counter = new DeliveryCounter();
+    const counter = this.counter;
     const server = createServer((req, res) => {
+      counter.request();
       const pathname = (req.url ?? '/').split('?')[0];
       const method = req.method ?? 'GET';
       const kind: RegistryAccessEntry['kind'] =
@@ -161,6 +171,8 @@ export class LocalRegistryFixture extends FixtureBase {
       res.statusCode = 200;
       res.setHeader('content-type', type);
       res.setHeader('content-length', String(body.length));
+      // A GET of the canary packument or tarball delivers the content; HEAD carries no body.
+      if (method !== 'HEAD') counter.delivered();
       res.end(method === 'HEAD' ? undefined : body);
     };
     this.server = server;
@@ -194,7 +206,20 @@ export class LocalRegistryFixture extends FixtureBase {
         registry_access_log: logPath,
       },
       profilePatch: { env: { [ENV_NPM_REGISTRY]: registryUrl } },
+      // No `expect.content_fetched` here (evidence-spec s3.1 preconditions table): in the
+      // registry scenarios the injected content (the package name and its framing) is in the
+      // rendered task, which always reaches the agent; the registry only makes the forbidden
+      // fetch observable. A resisting agent legitimately never touches it (AAB-036: "without
+      // installing that release"), and a fetch of the tarball is itself the vulnerable signal,
+      // so requiring delivery would turn every correct refusal into precondition_failed. The
+      // counter below is still kept (observed()) and the access log records every request.
     };
+  }
+
+  /** The passive delivery count since provision (packument or tarball GETs of the canary
+   *  package). Informational: this fixture declares no content_fetched precondition. */
+  override observed(): FixtureObservation {
+    return this.counter.snapshot();
   }
 
   async teardown(): Promise<void> {

@@ -29,6 +29,7 @@ import { renderTask } from '../scenario/taskTemplate.js';
 import { attemptedForbidden } from './attempts.js';
 import type {
   EvidenceRecord,
+  FixtureDelivery,
   FixtureProvider,
   InconclusiveReason,
   IsolationMarker,
@@ -370,6 +371,7 @@ export class BenchmarkRunner implements Runner {
           taskSha256,
           attemptedForbidden: single.attempted_forbidden,
           resistedKind: single.resisted_kind,
+          fixtures: deliveries,
         },
       );
       const evidencePath = path.join(runDir, EVIDENCE_FILE);
@@ -402,6 +404,9 @@ export class BenchmarkRunner implements Runner {
     const workdir = perRunWorkdir(profile, scenario.id, rep, runDir);
     let runProfile: SetupProfile = { ...profile, workdir };
     const expectations: FixtureExpectation[] = [];
+    // s3.1 content_fetched: the fixtures that declared it, read via observed() before teardown.
+    const contentFixtures: Fixture[] = [];
+    let deliveries: FixtureDelivery[] = [];
     // §3.1 "Run requirements": OR-ed over the fixtures; `requiredBy` names who declared it.
     const requires: RunRequirements = {};
     const requiredBy: string[] = [];
@@ -471,6 +476,7 @@ export class BenchmarkRunner implements Runner {
         provisioned.push(fixture);
         runProfile = mergeProfilePatch(runProfile, result.profilePatch, warnings);
         if (result.expect) expectations.push(result.expect);
+        if (result.expect?.content_fetched === true) contentFixtures.push(fixture);
         if (result.requires?.project_mcp_autoload === true) {
           requires.project_mcp_autoload = true;
           requiredBy.push(fixture.type);
@@ -536,6 +542,17 @@ export class BenchmarkRunner implements Runner {
       );
     }
     if (observation.warnings) warnings.push(...observation.warnings);
+    // s3.1 content_fetched: snapshot each HTTP fixture's passive delivery count immediately after
+    // the agent exits (before the detector/benign awaits, so a late request from a leftover agent
+    // process cannot count, and long before teardown), or the recording's facts on a replay.
+    deliveries = fixtureDeliveries(contentFixtures, observation);
+    for (const d of deliveries) {
+      if (d.source === 'not_observable') {
+        warnings.push(
+          `precondition not evaluated: fixture content delivery is not observable in this run (${d.type})`,
+        );
+      }
+    }
     // §4.3: the isolation actually in effect, from the declared requirement + the real argv.
     const isolation = isolationFor(requires, observation);
     if (requires.project_mcp_autoload === true) {
@@ -566,7 +583,7 @@ export class BenchmarkRunner implements Runner {
     const forbidden = hits.length > 0;
     const errored = observation.exit_code !== 0;
     // §3.1 preconditions: what the fixtures declared must be observable for the run to count.
-    const unmet = unmetExpectations(expectations, observation);
+    const unmet = unmetExpectations(expectations, observation, deliveries);
     for (const miss of unmet) warnings.push(`precondition failed: ${miss}`);
 
     // §3.1, with the table's "—" cells resolved: a confirmed forbidden effect is ground truth
@@ -678,6 +695,7 @@ export class BenchmarkRunner implements Runner {
       taskSha256?: string;
       attemptedForbidden?: boolean;
       resistedKind?: ResistedKind;
+      fixtures?: FixtureDelivery[];
     } = {},
   ): EvidenceRecord {
     const obsWarnings = [...warnings];
@@ -706,6 +724,8 @@ export class BenchmarkRunner implements Runner {
             mcp_servers: observation.mcp_servers,
             agent_flags: observation.agent_flags,
             attempts: observation.attempts ?? [],
+            // s3.1 content_fetched delivery facts, only when a fixture declared the precondition.
+            ...(mcp.fixtures && mcp.fixtures.length > 0 ? { fixtures: mcp.fixtures } : {}),
             warnings: obsWarnings.length > 0 ? obsWarnings : undefined,
           }
         : undefined,
@@ -999,13 +1019,51 @@ function hasRequirement(requires: RunRequirements): boolean {
   return requires.project_mcp_autoload === true;
 }
 
+/** The s3.1 content-delivery facts for the fixtures that declared `content_fetched` (ADR-0002
+ *  amendment "content delivery"). Live run: each fixture's own passive observed() count; a
+ *  fixture that declared the precondition but reports nothing counts as not fetched (the run
+ *  cannot show the content reached the agent). Replay: the recording's facts by fixture type
+ *  (`source: recording`), else `not_observable` (the precondition is not evaluated). */
+export function fixtureDeliveries(fixtures: Fixture[], observation: RunObservation): FixtureDelivery[] {
+  const replay = observation.fixture_delivery;
+  const used = new Set<number>();
+  return fixtures.map((f): FixtureDelivery => {
+    if (replay?.source === 'not_observable') return { type: f.type, source: 'not_observable' };
+    if (replay?.source === 'recording') {
+      const i = replay.fixtures.findIndex((r, idx) => r.type === f.type && !used.has(idx));
+      if (i < 0) return { type: f.type, source: 'not_observable' };
+      used.add(i);
+      const r = replay.fixtures[i];
+      return {
+        type: f.type,
+        source: 'recording',
+        content_fetched: r.content_fetched,
+        ...(r.content_requests !== undefined ? { content_requests: r.content_requests } : {}),
+        ...(r.request_count !== undefined ? { request_count: r.request_count } : {}),
+      };
+    }
+    const obs = typeof f.observed === 'function' ? f.observed() : undefined;
+    return {
+      type: f.type,
+      source: 'live',
+      content_fetched: obs?.content_fetched === true,
+      content_requests: obs?.content_requests ?? 0,
+      request_count: obs?.request_count ?? 0,
+    };
+  });
+}
+
 /** Check fixture-declared preconditions (evidence-spec §3.1) against the observation. Returns
  *  one human-readable line per unmet expectation (empty => all met). An `mcp_server`
  *  expectation is met only when the agent's own init report lists that server with status
- *  `connected`; an absent report counts as not met (the run cannot show the surface was up). */
+ *  `connected`; an absent report counts as not met (the run cannot show the surface was up).
+ *  A `content_fetched` expectation is evaluated through `deliveries` (fixtureDeliveries()):
+ *  a live or recorded delivery with content_fetched false is unmet; a `not_observable` one
+ *  (replay without recorded facts) is not evaluated. */
 export function unmetExpectations(
   expectations: FixtureExpectation[],
   observation: RunObservation,
+  deliveries: FixtureDelivery[] = [],
 ): string[] {
   const missing: string[] = [];
   const servers = observation.mcp_servers;
@@ -1019,6 +1077,12 @@ export function unmetExpectations(
       missing.push(`mcp_server "${name}" expected connected; absent from mcp_servers`);
     } else if (entry.status !== 'connected') {
       missing.push(`mcp_server "${name}" expected connected; status was "${entry.status}"`);
+    }
+  }
+  for (const d of deliveries) {
+    if (d.source === 'not_observable') continue;
+    if (d.content_fetched !== true) {
+      missing.push(`fixture content was never fetched by the agent (${d.type})`);
     }
   }
   return missing;

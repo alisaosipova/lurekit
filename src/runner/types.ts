@@ -91,6 +91,18 @@ export interface ProfileSummary {
   setting_sources?: string[];
 }
 
+/** Content-delivery facts of one fixture that declared `expect.content_fetched` (evidence-spec
+ *  s3.1 "Preconditions", ADR-0002 amendment "content delivery"). `source`: live = the fixture's
+ *  own passive counter; recording = a replay recording's facts; not_observable = a replay with
+ *  no recorded facts (the precondition was not evaluated, counts omitted). */
+export interface FixtureDelivery {
+  type: string;
+  source: 'live' | 'recording' | 'not_observable';
+  content_fetched?: boolean;
+  content_requests?: number;
+  request_count?: number;
+}
+
 /** The per-run evidence record written as evidence.json (evidence-spec §2.2). */
 export interface EvidenceRecord {
   evidence_schema: string;
@@ -112,6 +124,7 @@ export interface EvidenceRecord {
     mcp_servers?: McpServerStatus[]; // the agent's own init report (name/status/source), §4.3
     agent_flags?: string[]; // §4.3: option names actually passed to the agent (values omitted)
     attempts?: ToolAttempt[]; // §4.2: denied/failed tool uses (input digest only)
+    fixtures?: FixtureDelivery[]; // s3.1 content_fetched delivery facts (HTTP fixtures only)
     warnings?: string[];
   };
   // §3.1: some attempt matched what the detector would have counted. Present whenever the

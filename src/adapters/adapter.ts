@@ -202,7 +202,26 @@ export interface RunObservation {
   // ADR-0020: what the Claude Code adapter forwarded from profile.settings / profile.hooks into
   // its single `--settings` file. Absent when the profile carried neither (observe-only file).
   forwarded_settings?: ForwardedSettings;
+  // evidence-spec s3.1 `content_fetched`: where fixture content-delivery facts come from when
+  // the live fixtures cannot observe them. Absent for every live adapter (the runner reads the
+  // provisioned fixtures' observed()). The replay adapter sets it: `recording` with the facts
+  // the recording carries, or `not_observable` when the recording has none (no agent fetched
+  // anything during a replay, so the live fixtures' counters say nothing about the recording).
+  fixture_delivery?: FixtureDeliverySource;
 }
+
+/** One recorded fixture-delivery fact (replay recording.json `fixtures[]`, evidence-spec s3.1). */
+export interface RecordedFixtureDelivery {
+  type: string;
+  content_fetched: boolean;
+  content_requests?: number;
+  request_count?: number;
+}
+
+/** Source of the fixture-delivery facts for a run that did not observe them live. */
+export type FixtureDeliverySource =
+  | { source: 'recording'; fixtures: RecordedFixtureDelivery[] }
+  | { source: 'not_observable' };
 
 /** ADR-0020 record of the profile portion of the harness settings file. */
 export interface ForwardedSettings {
