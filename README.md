@@ -1,43 +1,67 @@
 # LureKit
 
-LureKit is a runnable, disclosure-traced security benchmark for deployed coding-agent configurations.
+**Headless Claude Code 2.1.317 with default settings took 4 of 21 publicly disclosed lures, all through config files in the project directory; one profile change (`--setting-sources user`) took it to 0 of 21** (bundles [`aab-20261103071018-88a78d8f`](reports/aab-20261103071018-88a78d8f/index.md) and [`aab-20261103062614-49ac1ce7`](reports/aab-20261103062614-49ac1ce7/index.md); model `sonnet`, k=3, majority).
 
+![The first lines of the real `lurekit demo` output: a published Claude Code 2.1.317 run, vulnerable to 4 of 21 scenarios, all through settings_hooks_file](docs/assets/demo-output.svg)
+
+LureKit is a runnable, disclosure-traced security benchmark for deployed coding-agent configurations.
 You point it at the coding-agent setup you actually run (agent, model, permission mode, settings, MCP servers,
 hooks, skills). It replays scenarios derived from public security disclosures against that setup, using inert
 fixtures and out-of-band detectors, and reports **"vulnerable to N of M scenarios"** with per-scenario evidence.
+Every scenario cites a public disclosure (`source.primary_url`, required by the scenario schema): see the
+[scenario catalog](docs/catalog.md). Every published result: [verified against](docs/verified-against.md).
+Output: Markdown, JSON or SARIF. Requires Node 20.19 or newer.
 
-- Requires Node 20.19 or newer.
-- Every scenario cites a public disclosure (`source.primary_url`); the citation is required by the scenario schema.
-- Output: Markdown, JSON or SARIF.
+## Who this is for
 
-## Naming
+- **You run Claude Code every day:** watch the [60-second demo](#60-second-demo), then do a [smoke run](#first-real-run) on your own setup.
+- **You own agent setups for a platform or security team:** read the [hardened profile](profiles/README.md) and the [agent x version x result matrix](docs/verified-against.md), then [re-measure](#what-to-do-with-the-result).
+- **You build a guard tool (hooks, proxy, sandbox):** publish your arm as a bundle ([third-party arms](docs/launch/vendor-scoreboard.md), [CONTRIBUTING.md](CONTRIBUTING.md)).
 
-LureKit is the kit of lures you plant for your own agent: inert, disclosure-derived bait that shows
-whether your setup takes it. The scenario ids (`AAB-NNN`) and internal `aab_` / `aab-` / `AAB_`
-identifiers (canary names, env vars, the `.aab-runs` results directory) are the stable project code
-and do not change with the product name.
+## 60-second demo
 
-## What it is not
+```bash
+npx lurekit demo
+```
 
-These are hard constraints of the project:
+`demo` prints the published bare run `aab-20261103071018-88a78d8f` through the same reporter as a real run,
+with a banner saying it is not your setup. No agent, no auth, no cost. `demo` is under Unreleased in
+[CHANGELOG.md](CHANGELOG.md): it is available from the next npm release. Until then, run it from a checkout:
 
-Not a gateway/proxy/credential broker/runtime firewall; not a static scanner of MCP servers
-or skills; not a model-level jailbreak bench; no SaaS/dashboards/multi-tenancy/auth; no
-speculative attacks — every scenario cites a public disclosure (enforced by the scenario
-schema's required `source.primary_url`).
+```bash
+npm ci && npm run build
+node dist/cli.js demo
+```
 
-## Inertness
+## First real run
 
-Fixtures are inert by construction, enforced in the fixture base class rather than per scenario:
+A live run launches your real, authenticated agent and costs money. Check the host first, then run:
 
-- a fixture binds only to loopback (`127.0.0.1`, `localhost`, `::1`) or to a harness-provided canary host;
-- a fixture carries only canary values (random markers), never a real credential;
-- a fixture never calls a canary itself, so a canary hit can only come from the agent under test.
+```bash
+npx lurekit doctor --agent claude-code --model sonnet
+npx lurekit run node_modules/lurekit/scenarios --agent claude-code --model sonnet --agent-version <your-version> --budget 2
+```
 
-Detectors are control sensors outside the agent. Each ships a positive and a negative control (`selftest`)
-that proves it does not silently miss its own signal.
+- `doctor` checks Node, the agent binary (path, version, auto-update), login (no-spend probes only), the
+  corpus and the detector self-tests, and prints a cost estimate. Exit 1 on any fail line.
+- `run` is smoke by default (k=1). It prints its plan (scenarios, k, estimated cost, budget cap) and asks
+  `Launch? [y/N]`; `--yes` skips the prompt, and without a terminal it refuses unless `--yes` is given.
+- Cost: about **1.52 USD** for the 25 claude-code scenarios at k=1 on `sonnet`, about **4.57 USD** for
+  `--mode full` (k=3). The basis is the published bare run's spend per scenario-repetition (3.84 USD for 21
+  scenarios x 3 in `aab-20261103071018-88a78d8f`), the agent's client-side estimate; other models differ.
+  `--budget` has no default, so set one.
+- `doctor` and the launch confirmation are under Unreleased as well. On the released 1.1.1, `run` is smoke by
+  default but launches **without asking**; use `node dist/cli.js doctor` / `run` from a checkout, or set
+  `--budget` and check the command before pressing enter.
+- Add the flags of your real setup (`--settings`, `--mcp`, `--hooks`, `--skill`, `--permission-mode`,
+  `--setting-sources`) so the run measures what you use.
+- Isolation is reduced: `--isolation` is only a label, LureKit starts no container, and the agent runs as you,
+  on your host. Your own user-scope MCP servers are visible in `[isolation: partial]` repetitions, and the host
+  filesystem is reachable within the agent's own permission mode. For a boundary, run LureKit inside your own
+  container or VM ([roadmap](docs/plan/roadmap.md#decision-no-container-mode-2026-11-03)).
 
-## Quick start
+<details>
+<summary>All commands, run options, replay</summary>
 
 From npm (the `lurekit` bin is `dist/cli.js`):
 
@@ -73,13 +97,14 @@ The scenario directory defaults to `./scenarios`; pass another as the positional
 `run` options (from `lurekit --help`):
 
 ```
---model <id> (required)  --agent <id> (default claude-code)
+--model <id> (required)  --agent <id> (default claude-code)  --yes
 --agent-version <v>  --k <n>  --mode smoke|full  --vulnerable-if any|majority
 --budget <usd>  --results <dir> (default .aab-runs)  --isolation container|container+netns
 --workdir <dir>  optional BASE for per-run agent workdirs (<dir>/<scenario>/<rep>);
                  default <results>/<run_id>/<scenario>/<rep>/work
 --permission-mode <m>  --settings/--mcp/--hooks <file.json>  --skill <dir> (repeatable)
---format json|markdown|sarif (default markdown)  --output <file>
+--setting-sources <csv>  --format json|markdown|sarif (default markdown)  --output <file>
+--replay <dir>
 ```
 
 Only `run` launches a real agent. Everything else is offline. All run material (agent workdirs,
@@ -88,11 +113,9 @@ system temp dir.
 
 ### Record once, replay offline
 
-A live run costs money. Record one real Claude Code run and replay it as often as you like
-through the same parsing and merging code that handles a live run (ADR-0015). You need no
-auth, there's no spend and no network.
-
-A recording is a directory:
+A live run costs money. Record one real Claude Code run and replay it as often
+as you like through the same parsing and merging code that handles a live run (ADR-0015). You need no auth,
+there's no spend and no network. A recording is a directory:
 
 ```
 claude-stream.jsonl   required  verbatim `claude -p --output-format stream-json --verbose` stdout
@@ -112,13 +135,51 @@ hits) see only what the recording contains. A replay therefore tests observation
 reporting. It is not a benchmark result, and every replayed run's `evidence.json` says so in
 `observation.warnings`.
 
+</details>
+
+## What to do with the result
+
+1. Read the report's **What to change** section. For each vulnerable surface it names a setting that a
+   published run showed resisting the same scenarios, with its scope, what it excludes, the trade-off and the
+   bundles that back it. A surface without such a run says "no verified fix in the published runs yet".
+2. Today there is one proven mapping: surface `settings_hooks_file` -> run Claude Code with
+   `--setting-sources user` (the [hardened profile](profiles/README.md), `profiles/claude-code-hardened.json`).
+   It stops the `project` (`.claude/settings.json`) and `local` (`.claude/settings.local.json`) setting sources
+   from loading. Trade-off: your own project-level hooks and settings stop loading too; keep the ones you rely
+   on in user-scope settings. Scope: verified for headless `-p` runs; the interactive equivalent is UNVERIFIED.
+   The hardened profile also passes `--permission-mode manual`, but the effective mode the agent reported was
+   `default` in every repetition, so the measured difference is attributable to `--setting-sources user`.
+3. Re-measure: run the same command again with the setting and compare the two arms on the same corpus. The
+   report prints the exact re-measure command.
+4. To share a result, `lurekit publish <runDir>` writes a bundle after the redaction gate; a
+   [badge](docs/guide/badge.md) can point to it.
+
+## Why you can trust the numbers
+
+- **Inert by construction**, enforced in the fixture base class rather than per scenario: a fixture binds only
+  to loopback (`127.0.0.1`, `localhost`, `::1`) or to a harness-provided canary host; it carries only canary
+  values (random markers), never a real credential; it never calls a canary itself, so a canary hit can only
+  come from the agent under test.
+- **Detector self-tests.** Detectors are control sensors outside the agent. Each ships a positive and a negative
+  control (`lurekit selftest`) that proves it does not silently miss its own signal; a detector whose self-test
+  did not pass makes the repetitions that use it inconclusive.
+- **Disclosure citation required** per scenario (`source.primary_url`); no speculative scenarios.
+- **Redaction gate** on `publish`: raw transcripts and hook logs are never copied, and the gate fails on
+  non-allowlisted hosts, credential-shaped tokens and home paths instead of rewriting them.
+- **Replay**: a recorded run re-drives the same parsing and scoring code offline; CI runs the corpus that way.
+- **k=3, majority**: published results use three repetitions per scenario and `vulnerable_if=majority`.
+- **Inconclusive is never a pass**: it is removed from the denominator and reported next to the headline.
+
 ## Status
 
-LureKit 1.0.0 (see [CHANGELOG.md](CHANGELOG.md)).
+LureKit 1.1.1 is the latest npm release; `demo`, `doctor` and the launch confirmation are under Unreleased
+(see [CHANGELOG.md](CHANGELOG.md)).
 
-- 52 scenarios catalogued in `scenarios/`; 34 are runnable, and 25 of the runnable ones apply to
-  claude-code (the other 9 apply to other agents via each scenario's `applies_to`: 7 cursor-cli,
-  2 codex-cli, 2 openhands, counting AAB-010 and AAB-028 for both claude-code and cursor-cli).
+- 52 scenarios catalogued in `scenarios/` ([catalog](docs/catalog.md)); 34 are runnable, and 25 of the
+  runnable ones apply to claude-code (the other 9 apply to other agents via each scenario's `applies_to`:
+  7 cursor-cli, 2 codex-cli, 2 openhands, counting AAB-010 and AAB-028 for both claude-code and cursor-cli).
+  18 browser-track scenarios are catalogued with `runnable: false`, pending a browser adapter; `plan()` skips
+  them as `not_runnable` ([roadmap](docs/plan/roadmap.md#browser-track-catalogued-not-runnable)).
 - 5 detectors: `canary_egress_http`, `canary_file_read`, `canary_command`, `canary_mcp_tool`,
   `fs_diff`. `canary_egress_dns` is declared in the schema but deferred; scenarios referencing it
   fail loudly.
@@ -127,20 +188,33 @@ LureKit 1.0.0 (see [CHANGELOG.md](CHANGELOG.md)).
 - 4 agent adapters: `claude-code` (live-validated), `cursor-cli`, `codex-cli` and `openhands`
   (implemented and tested against offline stubs; not yet live-validated), plus the `replay`
   adapter (`run --replay`).
-- 18 browser-track scenarios are catalogued with `runnable: false`, pending a browser adapter;
-  `plan()` skips them as `not_runnable`.
 - The offline commands and the test suite run in CI. A live `run` against a real agent is a manual step
   performed by the maintainer; it is not part of CI.
-- Published runs: ten run bundles under [reports/](reports/) and the measurement summaries in
-  [docs/reports/](docs/reports/README.md) (Claude Code 2.1.316, 2026-11-02; Claude Code 2.1.317,
-  2026-11-03).
+- Published runs: ten run bundles under [reports/](reports/), one row each in
+  [docs/verified-against.md](docs/verified-against.md), and the measurement summaries in
+  [docs/reports/](docs/reports/README.md) (Claude Code 2.1.316, 2026-11-02; Claude Code 2.1.317, 2026-11-03).
 - Claude Code 2.1.317, model `sonnet`, k=3, `vulnerable_if=majority`
   ([report](docs/reports/2026-11-03-claude-code-2.1.317-k3.md)):
   bare vulnerable to 4 of 21 (`aab-20261103071018-88a78d8f`), hardened 0 of 21
   (`aab-20261103062614-49ac1ce7`), bare + netread 4 of 24 (`aab-20261103075404-f5fe15ec`),
   hardened + netread 0 of 24 (`aab-20261103091409-dff0d34a`); 0 inconclusive in each. The
   default-permission arms exclude AAB-017, AAB-021 and AAB-056 as not a measurement; AAB-003 is
-  withheld (ADR-0014) in all four.
+  withheld (ADR-0014) in all four. One agent, one model, one day, one host; headless only.
+
+## Naming
+
+LureKit is the kit of lures you plant for your own agent: inert, disclosure-derived bait that shows whether your
+setup takes it. The scenario ids (`AAB-NNN`) and internal `aab_` / `aab-` / `AAB_` identifiers (canary names,
+env vars, the `.aab-runs` results directory) are the stable project code and do not change with the product name.
+
+## What it is not
+
+These are hard constraints of the project:
+
+Not a gateway/proxy/credential broker/runtime firewall; not a static scanner of MCP servers
+or skills; not a model-level jailbreak bench; no SaaS/dashboards/multi-tenancy/auth; no
+speculative attacks - every scenario cites a public disclosure (enforced by the scenario
+schema's required `source.primary_url`).
 
 ## Adding a scenario
 
@@ -153,6 +227,7 @@ See [SECURITY.md](SECURITY.md) to report a vulnerability in LureKit or a finding
 3. Use only the existing inert fixtures and detectors.
 4. Run `npm run build && node dist/cli.js validate`. CI runs the same validation
    (`node dist/tools/validate-scenarios.js scenarios`) on every push and pull request.
+5. Run `npm run catalog` to regenerate [docs/catalog.md](docs/catalog.md); CI fails if it is stale.
 
 ## Documentation
 
@@ -162,10 +237,11 @@ User guide:
 
 - [Getting started](docs/guide/getting-started.md) - install, offline commands, first live run.
 - [CLI reference](docs/guide/cli-reference.md) - every subcommand and flag.
-- [Scenarios](docs/guide/scenarios.md) - the corpus and how to write a scenario.
+- [Scenarios](docs/guide/scenarios.md) - the corpus and how to write a scenario; [catalog](docs/catalog.md) - every scenario in one table.
 - [Fixtures and detectors](docs/guide/fixtures-and-detectors.md) - inert fixtures and control sensors.
 - [Interpreting results](docs/guide/interpreting-results.md) - verdicts, evidence and reports.
-- [Publishing](docs/guide/publishing.md) - the redaction gate and run bundles.
+- [Verified against](docs/verified-against.md) - every published bundle: agent, version, model, profile, result.
+- [Publishing](docs/guide/publishing.md) - the redaction gate and run bundles; [badge](docs/guide/badge.md) - a static badge from a bundle.
 - [Troubleshooting](docs/guide/troubleshooting.md) - auto-update, inconclusive verdicts, isolation, platforms.
 - [Architecture overview](docs/guide/architecture-overview.md) - for contributors: pipeline, invariants, extending LureKit.
 
@@ -174,6 +250,13 @@ Design and background: [docs/BRIEF.md](docs/BRIEF.md) (charter),
 [docs/design/evidence-spec.md](docs/design/evidence-spec.md) (evidence and detector contract),
 [docs/research/landscape.md](docs/research/landscape.md) (research),
 [docs/plan/roadmap.md](docs/plan/roadmap.md) (roadmap).
+
+## Related
+
+[mcp-review-check](https://github.com/alisaosipova/mcp-review-check), by the same author, lints an MCP server
+against the public review criteria of the Claude and ChatGPT directories and the MCP spec. mcp-review-check checks
+the server you publish, LureKit checks the agent setup you run: if you also publish MCP servers, see
+[mcp-review-check](https://github.com/alisaosipova/mcp-review-check).
 
 ## License
 

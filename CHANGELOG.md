@@ -58,9 +58,28 @@ No release is cut without changes.
     `.cursor/cli.json` half cannot be planted by an existing variant. AAB-057 and AAB-060 are
     `headless_fidelity: reduced` (headless untrusted workspaces need `--trust`).
 
+- Generated docs (ADR-0023): `docs/catalog.md` from `scenarios/*.yaml` (`npm run catalog`,
+  `scripts/catalog.mjs`), `docs/verified-against.md`, the agent x version x result matrix over
+  every published bundle with profile, withheld/excluded counts and the 2026-11-02 validity note
+  (`npm run matrix`, `scripts/matrix.mjs`), and `docs/assets/demo-output.svg`, the README image
+  rendered from the real `lurekit demo` output (`npm run assets:demo`,
+  `scripts/render-demo-svg.mjs`, adapted from mcp-review-check). `npm run docs:check`,
+  `test/generated-docs.test.ts` and a CI `docs` job fail when any of them is stale.
+- `docs/guide/badge.md`: a static shields.io badge from a published bundle's
+  `score.headline`, the README snippet, and what the badge must not claim.
+
 ### Changed
 - `test/e2e.test.ts` corpus tables list the four new ids (52 loaded, 34 runnable, 9 not
   applicable to claude-code).
+- README restructured around the finding: headline and demo image first, then who it is for,
+  the 60-second demo, the first real run with its cost, what to do with the result and why the
+  numbers can be trusted; Status trimmed (the browser-track list moved to the roadmap), Naming,
+  What it is not, Adding a scenario, Documentation, and a Related section mirroring
+  mcp-review-check. No fact dropped; the Status version line now names 1.1.1.
+- `docs/plan/roadmap.md`: the no-container decision (`--isolation` is a label; demo and smoke
+  already run without a container; what the docs must say about reduced isolation; a real
+  netns/container wrapper is future work), the distribution kill criterion keyed to the article,
+  and the browser-track list. Getting-started and troubleshooting state the reduced isolation.
 
 ### Fixed (Cursor/Codex adapters checked against the installed binaries, 2026-11-03)
 - Cursor CLI and Codex CLI adapters checked against `agent` 2026.10.22-27dcf5f and

@@ -53,6 +53,31 @@ jobs:
           node dist/cli.js --version
           node dist/cli.js selftest
 
+  docs:
+    # ADR-0023: generated docs never drift. docs/catalog.md (scenarios/*.yaml), docs/verified-against.md
+    # (reports/*/) and docs/assets/demo-output.svg (the real `lurekit demo` output) are regenerated and must
+    # equal the committed files. test/generated-docs.test.ts checks the same thing inside `npm test`.
+    name: Generated docs are current
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - name: docs/catalog.md, docs/verified-against.md and docs/assets/demo-output.svg are current
+        run: |
+          npm run catalog
+          npm run matrix
+          npm run assets:demo
+          git ls-files --error-unmatch docs/catalog.md docs/verified-against.md docs/assets/demo-output.svg > /dev/null
+          git diff --exit-code -- docs/catalog.md docs/verified-against.md docs/assets/demo-output.svg || { echo "::error::generated docs are stale: run 'npm run build && npm run catalog && npm run matrix && npm run assets:demo' and commit the result"; exit 1; }
+
   replay:
     # Drives the whole corpus through the replay adapter (ADR-0015) and the publish gate (ADR-0012). No live agent,
     # no network, no cost: the CLI re-drives test/fixtures/recordings/claude-sample, then (second pass)

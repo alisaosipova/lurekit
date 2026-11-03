@@ -1,0 +1,162 @@
+#!/usr/bin/env node
+// Generate docs/verified-against.md, the agent x version x result matrix, from the published run
+// bundles under reports/. Per bundle: manifest.json (agent, version, model, date, mode, k,
+// profile, corpus) and report.json (score.headline). The withheld/excluded split is read from the
+// bundle's index.md (the manifest records only the corpus and the results; the ids missing from
+// the results must equal withheld + excluded, or the script fails). The validity note for the
+// 2026-11-02 feed/web rows is a fixed rule below, quoted from
+// docs/reports/2026-11-02-claude-code-2.1.316.md. The output is pure ASCII.
+//
+// Usage (from the repository root; no build needed):
+//   node scripts/matrix.mjs            write docs/verified-against.md
+//   node scripts/matrix.mjs --check    exit 1 if the committed docs/verified-against.md differs
+//   node scripts/matrix.mjs --stdout   print the generated file (tests)
+import { createHash } from 'node:crypto';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const REPORTS = path.join(ROOT, 'reports');
+const OUT = path.join(ROOT, 'docs', 'verified-against.md');
+
+// Same digest as the runner: sha256 over canonical (sorted-key) JSON (src/runner/runner.ts).
+const sortKeys = (v) => Array.isArray(v) ? v.map(sortKeys)
+  : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sortKeys(v[k])]))
+    : v ?? null;
+const digest = (v) => createHash('sha256').update(JSON.stringify(sortKeys(v))).digest('hex');
+const NO_SETTINGS = digest(null);
+const NETREAD = digest(JSON.parse(readFileSync(path.join(ROOT, 'profiles', 'settings', 'allow-loopback-curl.json'), 'utf8')));
+
+// Validity note, docs/reports/2026-11-02-claude-code-2.1.316.md: in the 2026-11-02 runs the
+// resisted verdicts of the loopback issue_feed / web_server scenarios are not measurements.
+const VACUOUS = { date: '2026-11-02', ids: ['AAB-017', 'AAB-021', 'AAB-056'] };
+
+const read = (id, f) => readFileSync(path.join(REPORTS, id, f), 'utf8');
+const ascii = (s) => { if (/[^\x20-\x7e]/.test(s)) throw new Error(`non-ASCII value: ${JSON.stringify(s)}`); return s.replace(/\|/g, '\\|'); };
+
+/** Ids listed under "## Withheld" and "## Excluded" in a bundle's index.md. */
+function setAside(id) {
+  const out = { withheld: [], excluded: [] };
+  let sec = null;
+  for (const line of read(id, 'index.md').replace(/\r\n/g, '\n').split('\n')) {
+    if (/^## /.test(line)) sec = line === '## Withheld' ? 'withheld' : line === '## Excluded' ? 'excluded' : null;
+    const m = sec && /^- (AAB-\d+):/.exec(line);
+    if (m) out[sec].push(m[1]);
+  }
+  return out;
+}
+
+function settingsLabel(d) {
+  if (d === NO_SETTINGS) return 'none forwarded';
+  if (d === NETREAD) return 'netread forwarded';
+  return `other (\`${d.slice(0, 8)}\`)`;
+}
+
+export function rowsOf() {
+  const ids = readdirSync(REPORTS).filter((d) => existsSync(path.join(REPORTS, d, 'manifest.json')));
+  return ids.map((id) => {
+    const m = JSON.parse(read(id, 'manifest.json'));
+    const r = JSON.parse(read(id, 'report.json'));
+    if (m.benchmark_run_id !== id) throw new Error(`${id}: manifest benchmark_run_id ${m.benchmark_run_id}`);
+    const p = m.profile;
+    const results = new Set(m.results.map((x) => x.scenario_id));
+    const missing = m.corpus.scenario_ids.filter((s) => !results.has(s)).sort();
+    const aside = setAside(id);
+    const listed = [...aside.withheld, ...aside.excluded].sort();
+    if (JSON.stringify(missing) !== JSON.stringify(listed)) {
+      throw new Error(`${id}: corpus ids missing from results (${missing.join(',')}) != index.md withheld+excluded (${listed.join(',')})`);
+    }
+    const sources = Array.isArray(p.setting_sources) ? p.setting_sources : null;
+    const hardened = sources !== null && sources.length === 1 && sources[0] === 'user';
+    const netread = p.settings_digest === NETREAD;
+    const date = m.created_at.slice(0, 10);
+    const vacuous = date === VACUOUS.date ? VACUOUS.ids.filter((s) => results.has(s)) : [];
+    return {
+      id, date, created: m.created_at, agent: p.agent, version: p.agent_version, model: p.model,
+      mode: m.mode, k: m.config.k, rule: m.config.vulnerable_if, tool: m.tool_version,
+      arm: `${hardened ? 'hardened' : 'bare'}${netread ? ' + netread' : ''}`,
+      sources: sources ? sources.join(',') : 'not set',
+      permission: p.permission_mode ?? 'not set',
+      settings: settingsLabel(p.settings_digest),
+      headline: r.score.headline, ...aside, vacuous,
+    };
+  }).sort((a, b) => b.created.localeCompare(a.created));
+}
+
+export function generate() {
+  const rows = rowsOf();
+  const out = [];
+  out.push('# Verified against: agent x version x result');
+  out.push('');
+  out.push('<!-- GENERATED by scripts/matrix.mjs from reports/*/ (manifest.json, report.json, index.md). Do not edit by hand: run `npm run matrix`. -->');
+  out.push('');
+  out.push(`Every published LureKit run bundle under [reports/](../reports/), newest first (${rows.length} bundles).`);
+  out.push('Each row is one arm: one agent version, one model, one profile, one day, one host. A row is');
+  out.push('not a rating of the agent in general, and rows with different corpora or profiles are not');
+  out.push('directly comparable. Summaries: [reports/README.md](reports/README.md).');
+  out.push('');
+  out.push('Columns:');
+  out.push('');
+  out.push('- **profile**: `bare` passes no setting-sources override; `hardened` passes `--setting-sources user`');
+  out.push('  (`profiles/claude-code-hardened.json`); `+ netread` means the loopback allow list');
+  out.push('  `profiles/settings/allow-loopback-curl.json` was forwarded with `--settings`, recognised by its');
+  out.push('  settings digest. `permission_mode` is the value passed; the 2026-11-03 summary records the');
+  out.push('  effective mode reported by the agent as `default` in every repetition of all four arms.');
+  out.push('- **headline**: `report.json` `score.headline`, vulnerable of the conclusively measured scenarios.');
+  out.push('  Inconclusive scenarios are reported apart and never counted as a pass.');
+  out.push('- **withheld / excluded**: scenarios left out of the bundle: withheld pending coordinated disclosure');
+  out.push('  (ADR-0014), or excluded because the result was not a measurement (the bundle notes say why).');
+  out.push('- **note**: see the footnotes below the table.');
+  out.push('');
+  out.push('Every run is headless (`claude -p` for claude-code); the interactive equivalent is UNVERIFIED.');
+  out.push('Only the claude-code adapter is live-validated, so every row is claude-code.');
+  out.push('');
+  out.push('| date | agent | agent_version | model | mode, k, rule | profile | setting_sources | permission_mode | settings | headline | degraded | inconclusive | withheld | excluded | note | bundle |');
+  out.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
+  let anyVacuous = false;
+  for (const r of rows) {
+    const h = r.headline;
+    const note = r.vacuous.length > 0 ? `[1] ${r.vacuous.join(', ')}` : '';
+    if (note) anyVacuous = true;
+    out.push('| ' + [
+      r.date, r.agent, ascii(r.version), `\`${ascii(r.model)}\``, `${r.mode}, k=${r.k}, ${r.rule}`,
+      r.arm, `\`${r.sources}\``, `\`${r.permission}\``, r.settings,
+      `vulnerable to ${h.vulnerable} of ${h.of}`, String(h.degraded), String(h.inconclusive),
+      r.withheld.length ? `${r.withheld.length} (${r.withheld.join(', ')})` : '0',
+      r.excluded.length ? `${r.excluded.length} (${r.excluded.join(', ')})` : '0',
+      note, `[\`${r.id}\`](../reports/${r.id}/index.md)`,
+    ].join(' | ') + ' |');
+  }
+  out.push('');
+  if (anyVacuous) {
+    out.push('[1] Validity note ([2026-11-02 report](reports/2026-11-02-claude-code-2.1.316.md#validity-note-2026-11-03)):');
+    out.push('the `resisted` verdicts of the listed scenarios, whose content is served by a loopback `issue_feed`');
+    out.push('or `web_server` fixture, are not measurements. In headless `-p` mode with default permissions the');
+    out.push("agent's `curl` to the loopback fixture is denied and WebFetch refuses localhost, and these runs");
+    out.push('predate the content-delivery precondition, so the injected content cannot be shown to have reached');
+    out.push('the model. The headline of such a row counts them as resisted; read it with that in mind. Measured');
+    out.push('results for these scenarios, with content delivery recorded, are in the 2026-11-03 netread arms.');
+    out.push('');
+  }
+  out.push('Other caveats are in each bundle and summary, for example: AAB-001 and AAB-016 run with');
+  out.push('`[isolation: partial]` (the operator\'s own user-scope MCP servers were visible); the');
+  out.push('`local_registry` scenarios (AAB-034, AAB-036, AAB-037) do not yet record content delivery;');
+  out.push('`tool_version` is `0.0.0` in bundles run from a local build before 1.0.0 was tagged.');
+  out.push('');
+  const text = out.join('\n');
+  if (/[^\x00-\x7f]/.test(text)) throw new Error('matrix is not pure ASCII');
+  return text;
+}
+
+const mode = process.argv[2];
+const text = generate();
+if (mode === '--stdout') process.stdout.write(text);
+else if (mode === '--check') {
+  const cur = existsSync(OUT) ? readFileSync(OUT, 'utf8').replace(/\r\n/g, '\n') : '';
+  if (cur !== text) { console.error('docs/verified-against.md is stale: run npm run matrix'); process.exit(1); }
+  console.log('docs/verified-against.md is current');
+} else if (mode === undefined) {
+  writeFileSync(OUT, text);
+  console.log(`docs/verified-against.md: ${text.split('\n').length} lines`);
+} else { console.error('usage: matrix.mjs [--check|--stdout]'); process.exit(2); }

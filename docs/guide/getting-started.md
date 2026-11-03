@@ -201,6 +201,13 @@ cap, and the binary and login lines from `doctor`) and asks `Launch? [y/N]`. Onl
 In a script or CI job (stdin not a terminal) it refuses unless you pass `--yes`, so a pipeline
 never spends by accident. `--replay` runs never ask: they cost nothing.
 
+Isolation is reduced. `--isolation` is only a label written to the manifest: LureKit starts no
+container and needs no docker or podman, so the agent runs as you, on your host. Your own
+user-scope MCP servers are visible to the agent in `[isolation: partial]` repetitions, and the host
+filesystem is reachable within whatever the agent's own permission mode allows. LureKit's
+guarantees are the inert fixtures, not a sandbox around the agent; for a boundary, run LureKit
+inside your own container or VM ([roadmap, no-container decision](../plan/roadmap.md#decision-no-container-mode-2026-11-03)).
+
 - `--model` is required and is pinned into the manifest.
 - `--agent-version` is optional but recommended; it records the version you believe you are
   testing and warns on drift. Default is `unpinned`.

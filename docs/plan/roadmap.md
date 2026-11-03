@@ -179,6 +179,53 @@ the benchmark against their own setup and reported a result, or (b) submitted a 
 project goes to **maintenance mode**: security fixes and disclosure-status updates only, no new
 scenario classes or agents, until external demand reappears. State this publicly so the bar is honest.
 
+**Kill criterion (distribution).** If four months after the LureKit article
+([draft](../launch/article-lurekit-2026-11.md)) nobody but the maintainer runs it or submits a
+scenario, LureKit drops to maintenance mode and distribution time stops. "Runs it" means a
+published bundle, an issue or a discussion showing a run against the person's own setup;
+"submits a scenario" means a scenario PR or a private submission from someone other than the
+maintainer. The date is fixed when the article is published and stated in the README.
+Maintenance mode means security fixes and disclosure-status updates only, no new scenario
+classes or agents, until external demand reappears. (Source:
+[cadence-and-measurement.md](../launch/cadence-and-measurement.md), section 6. This paragraph
+follows the criterion above rather than replacing it; the earlier one is keyed to the 0.1 report.)
+
+## Decision: no-container mode (2026-11-03)
+
+Question: should LureKit add a mode that runs without a container, for users with no
+docker/podman?
+
+Decision: no new mode. It already exists. `--isolation container|container+netns` is only an
+evidence label copied into `manifest.config.isolation`; LureKit starts no container and needs no
+docker or podman (`lurekit doctor`, isolation check, `src/doctor.ts`). Every published run,
+`lurekit demo` and the default smoke `run` therefore already run without one, on the operator's
+host, as the operator's user.
+
+What the docs must say wherever a live run is introduced (README "First real run",
+getting-started, troubleshooting):
+
+- Isolation is reduced. The agent runs as you, on your host. LureKit's own guarantees are the
+  inert fixtures (loopback only, canary values only, the fixture never calls a canary), not a
+  sandbox around the agent.
+- Your own user-scope MCP servers are visible to the agent in `[isolation: partial]`
+  repetitions (scenarios that measure project `.mcp.json` auto-load, e.g. AAB-001, AAB-016), and
+  in any run whose profile sets `strict_mcp_config: false`.
+- The host filesystem is reachable by the agent within whatever its own permission mode allows;
+  the per-run workdir under `--results` is where the agent starts, not a boundary.
+- For a boundary, run LureKit inside your own container or VM; the `--isolation` label then
+  describes what you set up, and LureKit does not verify it.
+
+Future work: a real network-namespace or container wrapper started by LureKit itself (so that the
+label is enforced, not declared). It needs its own ADR under ADR-0007 before any code.
+
+## Browser track (catalogued, not runnable)
+
+18 browser-track scenarios are catalogued with `runnable: false`, pending a browser adapter;
+`plan()` skips them as `not_runnable`: AAB-038, AAB-039, AAB-040, AAB-041, AAB-042, AAB-043,
+AAB-044, AAB-045, AAB-046, AAB-047, AAB-048, AAB-049, AAB-050, AAB-051, AAB-052, AAB-053,
+AAB-054, AAB-055. Per-scenario disclosure, surface and fix status: [docs/catalog.md](../catalog.md).
+Making them runnable is Phase 2 below.
+
 ## Risks — trigger → response
 
 | Risk | Trigger (how we notice) | Response |

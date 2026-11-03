@@ -13,6 +13,13 @@ authority when the two disagree.
 - [guide/publishing.md](guide/publishing.md) - publishing a run through the redaction gate.
 - [guide/troubleshooting.md](guide/troubleshooting.md) - common problems: agent auto-update, inconclusive verdicts, isolation, platforms, the redaction gate.
 - [guide/architecture-overview.md](guide/architecture-overview.md) - contributor map: pipeline, invariants, ADR locations, how to add an adapter, detector or fixture, testing strategy.
+- [guide/badge.md](guide/badge.md) - a static shields.io badge from a published bundle, and what it must not claim.
+
+## Generated (`docs/`, do not edit by hand)
+
+- [catalog.md](catalog.md) - every scenario in one table: surface, effect, linked disclosure, applies_to, runnable, fix status, tier (`npm run catalog`, from `scenarios/*.yaml`).
+- [verified-against.md](verified-against.md) - agent x version x result matrix over every published bundle, with profile, withheld/excluded counts and validity notes (`npm run matrix`, from `reports/*/`).
+- [assets/demo-output.svg](assets/demo-output.svg) - the README image: the first lines of the real `lurekit demo` output (`npm run assets:demo`).
 
 ## Project (`docs/`)
 
@@ -37,10 +44,13 @@ authority when the two disagree.
 - [design/adr-0018-codex-cli-adapter.md](design/adr-0018-codex-cli-adapter.md) - ADR-0018: Codex CLI adapter.
 - [design/adr-0019-openhands-adapter.md](design/adr-0019-openhands-adapter.md) - ADR-0019: OpenHands adapter.
 - [design/adr-0020-profile-settings-forwarding.md](design/adr-0020-profile-settings-forwarding.md) - ADR-0020: forwarding profile settings and hooks to Claude Code.
+- [design/adr-0021-demo-and-prescriptive-report.md](design/adr-0021-demo-and-prescriptive-report.md) - ADR-0021: `lurekit demo` and the plain-language / "What to change" report layers.
+- [design/adr-0022-doctor-smoke-default-and-error-paths.md](design/adr-0022-doctor-smoke-default-and-error-paths.md) - ADR-0022: `lurekit doctor`, smoke default and launch confirmation, newcomer error paths.
+- [design/adr-0023-generated-docs.md](design/adr-0023-generated-docs.md) - ADR-0023: generated catalog, verified-against matrix and demo image, diffed in CI.
 
 ## Plan (`plan/`)
 
-- [plan/roadmap.md](plan/roadmap.md) - roadmap and phases.
+- [plan/roadmap.md](plan/roadmap.md) - roadmap and phases, kill criteria, the no-container decision, the browser-track list.
 
 ## Reports (`reports/`)
 

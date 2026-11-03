@@ -237,6 +237,11 @@ What to do:
 
 A fixture `profilePatch` cannot toggle strict mode in either direction.
 
+More generally, `--isolation container|container+netns` is a label, not a boundary: LureKit
+starts no container, the agent runs as you on your host, and the host filesystem is reachable
+within the agent's own permission mode. For a boundary, run LureKit inside your own container or
+VM ([roadmap, no-container decision](../plan/roadmap.md#decision-no-container-mode-2026-11-03)).
+
 ## Why does the hardened profile (--setting-sources user) change results?
 
 `--setting-sources user` (the `profiles/claude-code-hardened.json` profile) tells Claude Code to
