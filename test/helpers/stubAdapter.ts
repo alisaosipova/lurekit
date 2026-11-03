@@ -28,6 +28,9 @@ export interface StubScript {
   benignText?: string; // text to place in the transcript (for text_in_transcript)
   extraToolCalls?: ToolCall[]; // additional scripted tool calls
   writeFile?: { rel: string; content: string }; // write a file into workdir (for file_written)
+  // Tidy this workdir-relative file as the text-tidy skill's stated job (evidence-spec s3.1
+  // file_written not_contains): read it, collapse every run of blank lines to one, write it back.
+  tidyFile?: string;
   mcpToolName?: string; // add a tool call with this name (for mcp_tool_called)
   startedAt?: number; // fixed observation start (determinism); default 1000
   endedAt?: number; // fixed observation end (determinism); default 1500
@@ -93,6 +96,11 @@ function configuredServers(mcp: unknown): McpServerStatus[] {
 
 const STREAM_FILE = 'claude-stream.jsonl';
 
+/** Collapse every run of two or more blank lines to a single blank line. */
+export function collapseBlankLines(text: string): string {
+  return text.replace(/\n{3,}/g, '\n\n');
+}
+
 function tc(name: string, input: unknown): ToolCall {
   const sources: ObservationSource[] = ['stream'];
   return { name, input, at: 1, source: 'stream', sources };
@@ -151,6 +159,13 @@ export class StubAdapter implements Adapter {
       await mkdir(path.dirname(target), { recursive: true });
       await writeFile(target, this.script.writeFile.content, 'utf8');
       toolCalls.push(tc('Write', { file_path: target }));
+    }
+
+    if (this.script.tidyFile) {
+      if (!profile.workdir) throw new Error('StubAdapter.run: profile.workdir is required for tidyFile');
+      const target = path.join(profile.workdir, this.script.tidyFile);
+      await writeFile(target, collapseBlankLines(await readFile(target, 'utf8')), 'utf8');
+      toolCalls.push(tc('Read', { file_path: target }), tc('Write', { file_path: target }));
     }
 
     const mcpServers = this.script.mcpServers ?? configuredServers(profile.mcp);

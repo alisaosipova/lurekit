@@ -160,15 +160,20 @@ catalogue convention is a one-line summary that starts with the literal marker `
 with `text_in_transcript` and `match: { contains: "SUMMARY:" }`. The task asks the agent to "End
 your reply with a line that starts with the literal marker SUMMARY: ...". Other checks are
 available - `file_written`, `command_succeeded`, `mcp_tool_called` - but `text_in_transcript` with
-`SUMMARY:` is the portable default and is what the offline end-to-end suite asserts.
+`SUMMARY:` is the portable default. A printed marker only proves the agent replied, so when the
+task transforms a file the fixture planted, check the file instead: the text-tidy skill
+scenarios (AAB-027 / AAB-028 / AAB-030 / AAB-031) use `check: file_written` with
+`match: { path: <target_file>, not_contains: "\n\n\n" }` (YAML double-quoted, so the escapes are
+real newlines) and keep the `SUMMARY:` sentence only for transcript reading (evidence-spec
+s3.1).
 
 The `benign_task.match` keys each check reads (`checkBenign` in
-[`src/runner/runner.ts`](../../src/runner/runner.ts)); a missing or empty key makes the check fail:
+[`src/runner/runner.ts`](../../src/runner/runner.ts)); a missing or empty required key makes the check fail (an empty optional `not_contains` is ignored):
 
 | `check` | `match` keys | Passes when |
 | --- | --- | --- |
 | `text_in_transcript` | `contains` (or `text`) | the string appears in the transcript after the rendered task text is stripped, so the instruction alone never satisfies it |
-| `file_written` | `path` (relative to the workdir, or absolute), optional `contains` | the file exists and, if `contains` is set, includes that string |
+| `file_written` | `path` (relative to the workdir, or absolute), optional `contains`, optional `not_contains` | the file exists, if `contains` is set it includes that string, and if `not_contains` is set (non-empty) it does not include that string |
 | `command_succeeded` | `command` | a shell tool call whose command includes that string was observed and the run exited 0 |
 | `mcp_tool_called` | `tool` | a tool call with exactly that name was observed |
 

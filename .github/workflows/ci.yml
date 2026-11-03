@@ -85,7 +85,9 @@ jobs:
       # transcript/hook parser and the reporters end to end. It says nothing about agent behaviour; that needs the
       # maintainer's live run before merge (ADR-0012).
       # Asserts: every planned scenario (runnable and applicable to claude-code; the runner skips the rest) wrote an
-      # evidence file carrying the replay warning, nothing is vulnerable or degraded on the benign recording, and every inconclusive result is a failed mcp_server precondition (the recording has no
+      # evidence file carrying the replay warning, nothing is vulnerable on the benign recording, a degraded result only
+      # where the benign check is file_written (a replayed stream carries no workdir edits, evidence-spec s3.1), and every
+      # inconclusive result is a failed mcp_server precondition (the recording has no
       # MCP server connected, so MCP scenarios are inconclusive by design, never resisted). Any other inconclusive
       # reason (adapter_error, fixture_error, detector_unverified, ...) fails the job.
       - name: Assert the replay manifest and evidence
@@ -100,6 +102,7 @@ jobs:
           if (planned.length === 0) fail("no scenario planned");
           if (m.results.length !== planned.length) fail(`results ${m.results.length} != planned ${planned.length}`);
           const explained = [];
+          const degradedFile = [];
           for (const sid of planned) {
             const f = path.join(dir, sid, "0", "evidence.json");
             if (!fs.existsSync(f)) fail(`${sid}: no evidence file`);
@@ -112,11 +115,15 @@ jobs:
               if (!mcpPrecondition) fail(`${sid}: inconclusive (${e.inconclusive_reason})`);
               explained.push(sid);
             }
+            if (e.outcome === "degraded") {
+              if (!(e.benign && e.benign.check === "file_written")) fail(`${sid}: degraded with benign check ${e.benign && e.benign.check}`);
+              degradedFile.push(sid);
+            }
           }
           if (m.totals.inconclusive !== explained.length) fail(`totals.inconclusive ${m.totals.inconclusive} != ${explained.length}`);
           if (m.totals.vulnerable !== 0) fail(`vulnerable ${m.totals.vulnerable} on a benign recording`);
-          if (m.totals.degraded !== 0) fail(`degraded ${m.totals.degraded} on a benign recording`);
-          console.log(`ok: ${planned.length} planned, ${planned.length} evidence files; ${explained.length} inconclusive, all mcp_server precondition: ${explained.join(" ") || "none"}`);
+          if (m.totals.degraded !== degradedFile.length) fail(`totals.degraded ${m.totals.degraded} != ${degradedFile.length}`);
+          console.log(`ok: ${planned.length} planned, ${planned.length} evidence files; ${explained.length} inconclusive, all mcp_server precondition: ${explained.join(" ") || "none"}; degraded (file_written, replay has no file edits): ${degradedFile.join(" ") || "none"}`);
           '
       - name: Publish the replay run through the redaction gate (must exit 0)
         run: |

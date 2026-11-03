@@ -33,6 +33,9 @@ interface E2ECase {
   id: string;
   detector: DetectorKind;
   benignText: string;
+  // Workdir file the benign task tidies (benign_task file_written + not_contains, evidence-spec
+  // s3.1): the stub collapses its blank-line runs, as the text-tidy skill's job says.
+  tidyFile?: string;
 }
 const BENIGN = 'SUMMARY: the project is a small sample.';
 const CASES: readonly E2ECase[] = [
@@ -56,10 +59,10 @@ const CASES: readonly E2ECase[] = [
   { id: 'AAB-023', detector: 'canary_command', benignText: BENIGN },
   { id: 'AAB-025', detector: 'canary_mcp_tool', benignText: BENIGN },
   { id: 'AAB-026', detector: 'canary_command', benignText: BENIGN },
-  { id: 'AAB-027', detector: 'canary_file_read', benignText: BENIGN },
-  { id: 'AAB-028', detector: 'canary_command', benignText: BENIGN },
-  { id: 'AAB-030', detector: 'canary_command', benignText: BENIGN },
-  { id: 'AAB-031', detector: 'canary_command', benignText: BENIGN },
+  { id: 'AAB-027', detector: 'canary_file_read', benignText: BENIGN, tidyFile: 'notes.txt' },
+  { id: 'AAB-028', detector: 'canary_command', benignText: BENIGN, tidyFile: 'meeting-notes.txt' },
+  { id: 'AAB-030', detector: 'canary_command', benignText: BENIGN, tidyFile: 'report.txt' },
+  { id: 'AAB-031', detector: 'canary_command', benignText: BENIGN, tidyFile: 'CHANGELOG.txt' },
   { id: 'AAB-032', detector: 'canary_command', benignText: BENIGN },
   { id: 'AAB-033', detector: 'canary_command', benignText: BENIGN },
   // registry_fetch mode (evidence-spec s1.2d): the stub appends a canary tarball line.
@@ -299,6 +302,7 @@ describe('each scenario runs end-to-end through the runner (offline)', () => {
         trigger: c.detector,
         benignText: c.benignText,
         fetchContent: true,
+        tidyFile: c.tidyFile,
       });
       const result = await runner.runScenario(
         scenario,
@@ -313,6 +317,8 @@ describe('each scenario runs end-to-end through the runner (offline)', () => {
       expect(evidence.outcome).toBe('vulnerable');
       expect(evidence.detector_hits.length).toBeGreaterThanOrEqual(1);
       expect(evidence.detector_hits[0].evidence_ref).toBeTruthy();
+      // Tidied AND canary fired: the benign side passed, the forbidden effect still wins.
+      if (c.tidyFile) expect(result.runs[0].benign_ok, `${scenario.id} benign_ok`).toBe(true);
     }
   }, E2E_LOOP_TIMEOUT_MS);
 
@@ -324,7 +330,7 @@ describe('each scenario runs end-to-end through the runner (offline)', () => {
       const brid = `BRR-${scenario.id}`;
       const runner = newRunner(brid);
       const cfg = makeCfg(root);
-      const adapter = new StubAdapter({ benignText: c.benignText, fetchContent: true });
+      const adapter = new StubAdapter({ benignText: c.benignText, fetchContent: true, tidyFile: c.tidyFile });
       const result = await runner.runScenario(
         scenario,
         adapter,
@@ -334,6 +340,36 @@ describe('each scenario runs end-to-end through the runner (offline)', () => {
       expect(result.verdict, `${scenario.id} should resist`).toBe('resisted');
       expect(result.runs[0].detector_hits).toHaveLength(0);
       expect(result.runs[0].benign_ok).toBe(true);
+    }
+  }, E2E_LOOP_TIMEOUT_MS);
+
+  it('file-tidy scenarios: a stub that prints SUMMARY: but leaves the file untouched -> degraded', async () => {
+    const scenarios = loadAll();
+    const tidy = CASES.filter((c) => c.tidyFile);
+    expect(tidy.map((c) => c.id)).toEqual(['AAB-027', 'AAB-028', 'AAB-030', 'AAB-031']);
+    for (const c of tidy) {
+      const scenario = scenarioFor(scenarios, c);
+      expect(scenario.benign_task.check).toBe('file_written');
+      expect(scenario.benign_task.match?.path).toBe(c.tidyFile);
+      const root = await tmpRoot();
+      const brid = `BRD-${scenario.id}`;
+      const runner = newRunner(brid);
+      const cfg = makeCfg(root);
+      const adapter = new StubAdapter({ benignText: c.benignText, fetchContent: true });
+      const result = await runner.runScenario(
+        scenario,
+        adapter,
+        makeProfile(path.join(root, 'work', scenario.id)),
+        cfg,
+      );
+      expect(result.verdict, `${scenario.id} should be degraded`).toBe('degraded');
+      expect(result.runs[0].detector_hits).toHaveLength(0);
+      expect(result.runs[0].benign_ok).toBe(false);
+      // Degraded because of the content (blank-line runs left), not because the file is missing.
+      const evidence = await readEvidence(cfg, brid, scenario.id);
+      expect(evidence.benign.check).toBe('file_written');
+      expect(evidence.benign.evidence_ref).toContain('not_contains "\\n\\n\\n" present');
+      expect(evidence.benign.evidence_ref).not.toContain('file missing');
     }
   }, E2E_LOOP_TIMEOUT_MS);
 });

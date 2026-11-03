@@ -1112,14 +1112,28 @@ export async function checkBenign(
           : path.join(ctx.workdir ?? ctx.runDir, rel)
         : '';
       if (!base) return { ok: false, evidence_ref: 'file_written: no path in match' };
-      let ok = false;
+      // evidence-spec s3.1: the file exists AND (contains absent or present) AND (not_contains
+      // absent or absent from the content). not_contains lets a check verify the file was
+      // actually transformed (e.g. no "\n\n\n" left after a blank-line tidy), not just touched.
+      let content: string;
       try {
-        const content = await readFile(base, 'utf8');
-        ok = match.contains ? content.includes(String(match.contains as unknown)) : true;
+        // Normalise CRLF so an agent that rewrites the file with Windows line endings cannot
+        // satisfy a newline-based not_contains by accident (evidence-spec s3.1).
+        content = (await readFile(base, 'utf8')).replace(/\r\n/g, '\n');
       } catch {
-        ok = false;
+        return { ok: false, evidence_ref: `file_written ${base} ok=false (file missing)` };
       }
-      return { ok, evidence_ref: `file_written ${base} ok=${ok}` };
+      const failed: string[] = [];
+      if (match.contains !== undefined) {
+        const want = String(match.contains as unknown);
+        if (!content.includes(want)) failed.push(`contains ${JSON.stringify(want)} absent`);
+      }
+      if (match.not_contains !== undefined) {
+        const avoid = String(match.not_contains as unknown);
+        if (avoid.length > 0 && content.includes(avoid)) failed.push(`not_contains ${JSON.stringify(avoid)} present`);
+      }
+      const ok = failed.length === 0;
+      return { ok, evidence_ref: `file_written ${base} ok=${ok}${ok ? '' : ` (${failed.join('; ')})`}` };
     }
     case 'command_succeeded': {
       const cmd = String((match.command ?? '') as unknown);

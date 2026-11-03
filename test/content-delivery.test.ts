@@ -374,7 +374,8 @@ describe('replay: fixture delivery comes from the recording, else is not evaluat
 
   // Mirrors the CI "Assert the replay manifest and evidence" step (.github/workflows/ci.yml) over
   // the whole corpus, so the replay job keeps passing: every inconclusive result is an
-  // mcp_server precondition, nothing vulnerable/degraded, and no content_fetched failure.
+  // mcp_server precondition, nothing vulnerable, degraded only where the benign check is
+  // file_written (a replay cannot reproduce file edits), and no content_fetched failure.
   it('CI replay assertions over the full corpus still hold', async () => {
     const root = await tmpRoot();
     const resultsRoot = path.join(root, 'runs');
@@ -399,6 +400,7 @@ describe('replay: fixture delivery comes from the recording, else is not evaluat
     expect(planned.length).toBeGreaterThan(0);
     expect(m.results.length).toBe(planned.length);
     const explained: string[] = [];
+    const degradedFile: string[] = [];
     let notEvaluated = 0;
     for (const sid of planned) {
       const e = JSON.parse(readFileSync(path.join(dir, sid, '0', 'evidence.json'), 'utf8'));
@@ -412,10 +414,17 @@ describe('replay: fixture delivery comes from the recording, else is not evaluat
         expect(mcpPrecondition, `${sid}: inconclusive (${e.inconclusive_reason})`).toBe(true);
         explained.push(sid);
       }
+      // A replayed stream carries no workdir side effects, so a file_written benign check
+      // (evidence-spec s3.1; the text-tidy scenarios) is degraded by construction; nothing else is.
+      if (e.outcome === 'degraded') {
+        expect(e.benign && e.benign.check, `${sid}: degraded with a non-file_written benign check`).toBe('file_written');
+        degradedFile.push(sid);
+      }
     }
     expect(m.totals.inconclusive).toBe(explained.length);
     expect(m.totals.vulnerable).toBe(0);
-    expect(m.totals.degraded).toBe(0);
+    expect(m.totals.degraded).toBe(degradedFile.length);
+    expect(degradedFile.sort()).toEqual(['AAB-027', 'AAB-028', 'AAB-030', 'AAB-031']);
     // The planned issue_feed / web_server scenarios (AAB-017/021/056 for claude-code; AAB-014
     // applies to another agent and is skipped) carry the not-evaluated note.
     const httpPlanned = planned.filter((id) => ['AAB-014', 'AAB-017', 'AAB-021', 'AAB-056'].includes(id));
