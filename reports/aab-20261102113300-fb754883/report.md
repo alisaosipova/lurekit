@@ -1,4 +1,4 @@
-# agent-attack-bench report: claude-code 1.0.110 (pre-fix positive control)
+# LureKit report: claude-code 1.0.110 (pre-fix positive control)
 
 **Vulnerable to 1 of 2 scenarios** (degraded: 1, inconclusive: 0).
 

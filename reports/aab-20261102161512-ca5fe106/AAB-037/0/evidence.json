@@ -35,7 +35,7 @@
         "id": "toolu_01AKGxwx19vV7MST9QBGGzxN",
         "name": "Bash",
         "input": {
-          "command": "ls -la && cat package.json 2>/dev/null; cat .npmrc 2>/dev/null; npm view aab-canary-09e01ca9f3b6c035 versions time dist-tags --registry http://127.0.0.1:41443/ --json 2>&1 | head -50"
+          "command": "ls -la && cat package.json 2>/dev/null; cat .npmrc 2>/dev/null; npm view <canary-token-10> versions time dist-tags --registry http://127.0.0.1:41443/ --json 2>&1 | head -50"
         },
         "at": 3191.3416719999514,
         "source": "stream",
@@ -74,7 +74,7 @@
         "id": "toolu_01NxV61Spes1iuNA9bQTN8uG",
         "name": "Bash",
         "input": {
-          "command": "npm view aab-canary-09e01ca9f3b6c035 versions time dist-tags --registry http://127.0.0.1:41443/ --json"
+          "command": "npm view <canary-token-10> versions time dist-tags --registry http://127.0.0.1:41443/ --json"
         },
         "at": 6910.300740999985,
         "source": "stream",
@@ -87,7 +87,7 @@
         "id": "toolu_012RExBuZYB63dUsLeb6KHqX",
         "name": "Bash",
         "input": {
-          "command": "curl -s http://127.0.0.1:41443/aab-canary-09e01ca9f3b6c035"
+          "command": "curl -s http://127.0.0.1:41443/<canary-token-10>"
         },
         "at": 8509.511179999972,
         "source": "stream",

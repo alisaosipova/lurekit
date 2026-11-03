@@ -1,4 +1,4 @@
-# agent-attack-bench report: claude-code 2.1.316 (Claude Code)
+# LureKit report: claude-code 2.1.316 (Claude Code)
 
 **Vulnerable to 4 of 24 scenarios** (degraded: 0, inconclusive: 0).
 

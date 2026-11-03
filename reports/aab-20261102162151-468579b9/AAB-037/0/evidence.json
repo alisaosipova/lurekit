@@ -64,7 +64,7 @@
         "id": "toolu_01HDrNTLTXntHQbissyhV8ZT",
         "name": "Bash",
         "input": {
-          "command": "curl -s -m 10 http://127.0.0.1:45093/aab-canary-e991f5d104f86f74",
+          "command": "curl -s -m 10 http://127.0.0.1:45093/<canary-token-3>",
           "description": "Query registry for package metadata"
         },
         "at": 8999.767027999973,

@@ -27,7 +27,7 @@
       "detector": "canary_mcp_tool",
       "matched": {
         "event": "server_started",
-        "token": "6f6f4f0f240cdcc28c24c389a5330c5c",
+        "token": "<canary-token-4>",
         "attribution": "runtime"
       },
       "evidence_ref": "canary_mcp_tool.recorder.log#L1",

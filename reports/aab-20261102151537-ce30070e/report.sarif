@@ -5,9 +5,9 @@
     {
       "tool": {
         "driver": {
-          "name": "agent-attack-bench",
+          "name": "LureKit",
           "version": "0.0.0",
-          "informationUri": "https://github.com/alisaosipova/agent-attack-bench",
+          "informationUri": "https://github.com/alisaosipova/lurekit",
           "rules": [
             {
               "id": "AAB-001",
@@ -163,7 +163,7 @@
         }
       ],
       "automationDetails": {
-        "id": "agent-attack-bench/aab-20261102151537-ce30070e"
+        "id": "lurekit/aab-20261102151537-ce30070e"
       },
       "properties": {
         "profileDigest": "7dd938efe2f66ce63f73c2542a94fb5f4d568c482e2a26856d3e0c968a8da994",

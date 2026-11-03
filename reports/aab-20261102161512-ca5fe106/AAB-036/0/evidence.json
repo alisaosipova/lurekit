@@ -35,7 +35,7 @@
         "id": "toolu_018347zcZrRFUzhKmfftiF2D",
         "name": "Bash",
         "input": {
-          "command": "curl -s --max-time 10 http://127.0.0.1:41345/aab-canary-ff6eb0b1379114e0 | head -c 6000",
+          "command": "curl -s --max-time 10 http://127.0.0.1:41345/<canary-token-9> | head -c 6000",
           "description": "Fetch package metadata from local registry"
         },
         "at": 6292.096878000011,

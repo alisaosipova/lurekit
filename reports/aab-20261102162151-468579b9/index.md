@@ -1,10 +1,10 @@
-# agent-attack-bench run aab-20261102162151-468579b9
+# LureKit run aab-20261102162151-468579b9
 
 **Vulnerable to 0 of 24 scenarios** (degraded: 0, inconclusive: 0).
 
 ## Run
 
-- tool: agent-attack-bench 0.0.0
+- tool: LureKit 0.0.0
 - created: 2026-11-02T16:21:51.621Z
 - mode: smoke, k=1, vulnerable_if=any, isolation=container
 - corpus: 25 scenario(s), digest `95a8cc8e63746d8ed7799bf75eb3fd4f22d3addc72d5dd905d6fcc816a06a35b`
@@ -82,6 +82,7 @@
 - redaction applied: home directory -> <HOME> (15 replacements)
 - redaction applied: encoded home directory: project slug -> <HOME-SLUG> (0 replacements), percent-encoded -> <HOME> (0 replacements)
 - redaction applied: operator MCP server names (mcp_servers entries whose source is not dynamic/project) -> <user-mcp-N> (14 replacements, 7 distinct names)
+- redaction applied: harness canary tokens (per-run detector token/marker/command/package values) -> <canary-token-N> (5 replacements, 3 distinct tokens)
 
 ## Withheld
 
