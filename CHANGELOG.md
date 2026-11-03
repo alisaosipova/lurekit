@@ -18,6 +18,12 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-03
+
+Minor release: verdict semantics for undelivered content changed (resisted -> inconclusive),
+new publish flag, new fixture param, new evidence field and a new reference profile. Test suite:
+585 tests in 26 files.
+
 ### Fixed
 - Content delivery is a precondition: `issue_feed`, `email_feed` and `web_server` count the
   requests that served their content and declare `expect.content_fetched`. A run in which the
@@ -105,5 +111,6 @@ First public release.
 - Published runs were made by one operator on one host; the k=3 stability run does not measure
   variance across hosts or over time.
 
-[Unreleased]: https://github.com/alisaosipova/lurekit/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/alisaosipova/lurekit/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/alisaosipova/lurekit/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/alisaosipova/lurekit/releases/tag/v1.0.0
