@@ -336,8 +336,10 @@ describe('run: pre-spend validation happens before the prompt and before any lau
     const stub = new StubAdapter({ benignText: 'SUMMARY: ok' });
     const code = await main(['run', corpus('AAB-003'), '--model', 'sonnet', '--yes', '--results', 'runs'], deps({ adapter: () => stub }));
     expect(code, errText()).toBe(0);
-    expect(errText()).toContain('Next: lurekit report runs/aab-test-newcomer --format markdown|json|sarif\n');
-    expect(errText()).toContain('      lurekit publish runs/aab-test-newcomer --redact-home\n');
+    // The run directory is printed with the host separator (runs\\aab-test-newcomer on Windows).
+    const run = path.join('runs', 'aab-test-newcomer');
+    expect(errText()).toContain(`Next: lurekit report ${run} --format markdown|json|sarif\n`);
+    expect(errText()).toContain(`      lurekit publish ${run} --redact-home\n`);
   });
 });
 
@@ -356,12 +358,15 @@ describe('report/publish without a manifest list the run directories found under
     expect(await main(['report', 'nope'], deps())).toBe(1);
     const e = errText();
     expect(e).toContain('no manifest.json in nope (not a completed run directory)');
-    expect(e).toContain('run directories under .aab-runs (newest first):\n  .aab-runs/aab-new\n  .aab-runs/aab-old\n');
+    // Listed with the host separator (.aab-runs\\aab-new on Windows), unquoted.
+    const newer = path.join('.aab-runs', 'aab-new');
+    const older = path.join('.aab-runs', 'aab-old');
+    expect(e).toContain(`run directories under .aab-runs (newest first):\n  ${newer}\n  ${older}\n`);
     expect(e).not.toContain('not-a-run');
-    expect(e).toContain('next: lurekit report .aab-runs/aab-new --format markdown');
+    expect(e).toContain(`next: lurekit report ${newer} --format markdown`);
     expect(await main(['publish'], deps())).toBe(1);
     expect(errText()).toContain('publish: a benchmark run directory is required');
-    expect(errText()).toContain('next: lurekit publish .aab-runs/aab-new --redact-home');
+    expect(errText()).toContain(`next: lurekit publish ${newer} --redact-home`);
   });
 
   it('no runs at all: says so and names lurekit run and --results', async () => {

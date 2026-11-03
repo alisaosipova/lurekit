@@ -375,9 +375,14 @@ function scenarioDirProblem(dir: string, deps: CliDeps): string | undefined {
 /** The shipped corpus path as the user should type it (relative to their cwd when that is a
  *  plain path, quoted absolute otherwise). Shared with the demo banner (ADR-0021). */
 function shippedScenariosArg(deps: CliDeps): string {
-  const shipped = path.join(packageRoot(), 'scenarios');
-  const rel = path.relative(deps.cwd(), shipped);
-  return rel === '' ? '.' : /^[A-Za-z0-9._/-]+$/.test(rel) ? rel : `'${shipped.replace(/'/g, "'\\''")}'`;
+  return scenariosArg(path.join(packageRoot(), 'scenarios'), deps.cwd());
+}
+
+/** The shipped corpus as typed from `cwd`: relative when plain, else the (quoted if needed)
+ *  absolute path. `flavour` lets tests check path.win32 / path.posix on any host. */
+export function scenariosArg(shipped: string, cwd: string, flavour: PathFlavour = path): string {
+  const rel = flavour.relative(cwd, shipped);
+  return rel === '' ? '.' : isPlainPath(rel, flavour) && !flavour.isAbsolute(rel) ? rel : typedPath(shipped, flavour);
 }
 
 /** Where a resolved scenario directory came from (ADR-0022 amendment, corpus resolution order). */
@@ -413,16 +418,30 @@ function corpusLine(c: ResolvedCorpus): string {
   return `corpus: ${c.shown} (${why})\n`;
 }
 
-/** A path as a shell user types it: unchanged when plain, single-quoted otherwise. */
-function typedPath(p: string): string {
-  return /^[A-Za-z0-9._/:@+-]+$/.test(p) ? p : `'${p.replace(/'/g, "'\\''")}'`;
+/** The path flavour the CLI prints for: the host's by default; tests pass path.win32 or
+ *  path.posix to check the other OS. */
+type PathFlavour = Pick<typeof path, 'sep' | 'resolve' | 'relative' | 'isAbsolute'>;
+
+/** True when `p` needs no shell quoting. Plain characters are letters, digits and ._/:@+-; on a
+ *  backslash-separator OS (Windows) the backslash is the separator and is plain too (a drive
+ *  path like D:\a\scenarios is typed as is). On POSIX a backslash is a shell escape, so it is not. */
+function isPlainPath(p: string, flavour: PathFlavour = path): boolean {
+  return (flavour.sep === '\\' ? /^[A-Za-z0-9._/\\:@+-]+$/ : /^[A-Za-z0-9._/:@+-]+$/).test(p);
 }
 
-/** A path for a printed next command: relative to the cwd when it lies below it, else absolute. */
-function shownPath(p: string, deps: CliDeps): string {
-  const abs = path.resolve(deps.cwd(), p);
-  const rel = path.relative(deps.cwd(), abs);
-  return typedPath(rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : abs);
+/** A path as a shell user types it: unchanged when plain, single-quoted otherwise. */
+export function typedPath(p: string, flavour: PathFlavour = path): string {
+  return isPlainPath(p, flavour) ? p : `'${p.replace(/'/g, "'\\''")}'`;
+}
+
+/** A path for a printed next command: relative to the cwd when it lies below it, else absolute.
+ *  Uses the host separator (a Windows user gets runs\aab-x, a POSIX user runs/aab-x). */
+export function shownPath(p: string, deps: Pick<CliDeps, 'cwd'>, flavour: PathFlavour = path): string {
+  const cwd = deps.cwd();
+  const abs = flavour.resolve(cwd, p);
+  const rel = flavour.relative(cwd, abs);
+  const below = rel !== '' && rel !== '..' && !rel.startsWith(`..${flavour.sep}`) && !flavour.isAbsolute(rel);
+  return typedPath(below ? rel : abs, flavour);
 }
 
 /** Run directories (holding a manifest.json) under a results root, newest manifest first. */
