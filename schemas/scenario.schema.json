@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/alisaosipova/agent-attack-bench/schemas/scenario.schema.json",
-  "title": "agent-attack-bench scenario",
+  "$id": "https://github.com/alisaosipova/lurekit/schemas/scenario.schema.json",
+  "title": "LureKit scenario",
   "type": "object",
   "required": ["id", "schema_version", "name", "source", "class", "surface", "effect", "track", "fixtures", "task", "forbidden_effect", "benign_task"],
   "additionalProperties": false,

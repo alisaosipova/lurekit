@@ -1,6 +1,6 @@
 # Setup profiles
 
-Reference Claude Code setup profiles for `agent-attack-bench run`. Each JSON file holds the
+Reference Claude Code setup profiles for `lurekit run`. Each JSON file holds the
 `SetupProfile` fields it sets (`profile`) and the equivalent CLI flags (`cli_flags`). The CLI has
 no `--profile` flag: pass the flags shown below. `--model` (and ideally `--agent-version`) are
 always required on top and are not part of these files, so the same profile can be measured
@@ -12,7 +12,7 @@ Both profiles are hardening-only: neither loosens anything the adapter does by d
 ## `claude-code-bare.json` — no overrides
 
 ```sh
-agent-attack-bench run scenarios --agent claude-code \
+lurekit run scenarios --agent claude-code \
   --model <model-id> --agent-version <pinned-version>
 ```
 
@@ -28,7 +28,7 @@ agent-attack-bench run scenarios --agent claude-code \
 ## `claude-code-hardened.json` — narrowed setting sources, strict MCP, default (manual) mode
 
 ```sh
-agent-attack-bench run scenarios --agent claude-code \
+lurekit run scenarios --agent claude-code \
   --model <model-id> --agent-version <pinned-version> \
   --setting-sources user --permission-mode manual
 ```

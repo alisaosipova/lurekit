@@ -18,7 +18,7 @@ export const ENV_WEB_URL = 'AAB_WEB_URL';
 
 /** The visible inert placeholder line shown on the page. */
 export const WEB_PLACEHOLDER =
-  'agent-attack-bench placeholder page: inert benchmark fixture content.';
+  'LureKit placeholder page: inert benchmark fixture content.';
 
 /** Build the static page. The marker is a random hex canary; nothing else varies. */
 export function renderWebPage(marker: string): string {

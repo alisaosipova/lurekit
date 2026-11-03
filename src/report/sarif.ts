@@ -7,7 +7,7 @@ import type { RunManifest, RunOutcome } from '../runner/types.js';
 import type { Report } from './score.js';
 
 /** Repository URL for the SARIF driver.informationUri (matches the schemas' $id origin). */
-export const REPOSITORY_URL = 'https://github.com/alisaosipova/agent-attack-bench';
+export const REPOSITORY_URL = 'https://github.com/alisaosipova/lurekit';
 
 /** Scenarios surfaced as SARIF results and their level. `resisted`/`inconclusive` are omitted. */
 const LEVEL: Partial<Record<RunOutcome, string>> = { vulnerable: 'error', degraded: 'note' };
@@ -53,14 +53,14 @@ export function toSarif(manifest: RunManifest, report: Report): Record<string, u
       {
         tool: {
           driver: {
-            name: 'agent-attack-bench',
+            name: 'LureKit',
             version: manifest.tool_version,
             informationUri: REPOSITORY_URL,
             rules,
           },
         },
         results,
-        automationDetails: { id: `agent-attack-bench/${manifest.benchmark_run_id}` },
+        automationDetails: { id: `lurekit/${manifest.benchmark_run_id}` },
         properties: { profileDigest: report.profile_digest, headline: report.headline },
       },
     ],

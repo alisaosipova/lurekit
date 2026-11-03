@@ -1,6 +1,6 @@
-# agent-attack-bench
+# LureKit
 
-A runnable, disclosure-traced security benchmark for deployed coding-agent configurations.
+LureKit is a runnable, disclosure-traced security benchmark for deployed coding-agent configurations.
 
 You point it at the coding-agent setup you actually run (agent, model, permission mode, settings, MCP servers,
 hooks, skills). It replays scenarios derived from public security disclosures against that setup, using inert
@@ -9,6 +9,13 @@ fixtures and out-of-band detectors, and reports **"vulnerable to N of M scenario
 - Requires Node 20.19 or newer.
 - Every scenario cites a public disclosure (`source.primary_url`); the citation is required by the scenario schema.
 - Output: Markdown, JSON or SARIF.
+
+## Naming
+
+LureKit is the kit of lures you plant for your own agent: inert, disclosure-derived bait that shows
+whether your setup takes it. The scenario ids (`AAB-NNN`) and internal `aab_` / `aab-` / `AAB_`
+identifiers (canary names, env vars, the `.aab-runs` results directory) are the stable project code
+and do not change with the product name.
 
 ## What it is not
 
@@ -32,6 +39,17 @@ that proves it does not silently miss its own signal.
 
 ## Quick start
 
+From npm (the `lurekit` bin is `dist/cli.js`):
+
+```bash
+npm install --save-dev lurekit
+npx lurekit --help
+npx lurekit validate node_modules/lurekit/scenarios     # offline: schema-validate the bundled scenarios
+npx lurekit run node_modules/lurekit/scenarios --model <model-id> --format markdown --output report.md   # live
+```
+
+From a checkout:
+
 ```bash
 npm ci
 npm run build
@@ -52,7 +70,7 @@ node dist/cli.js report <runDir> --format sarif --output report.sarif
 
 The scenario directory defaults to `./scenarios`; pass another as the positional `[dir]`.
 
-`run` options (from `agent-attack-bench --help`):
+`run` options (from `lurekit --help`):
 
 ```
 --model <id> (required)  --agent <id> (default claude-code)

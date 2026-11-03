@@ -184,8 +184,8 @@ jobs:
           npm pack --pack-destination "$RUNNER_TEMP"
           mkdir "$RUNNER_TEMP/smoke" && cd "$RUNNER_TEMP/smoke"
           npm init -y > /dev/null
-          npm install --ignore-scripts "$RUNNER_TEMP"/agent-attack-bench-*.tgz
-          bin="$RUNNER_TEMP/smoke/node_modules/.bin/agent-attack-bench"
+          npm install --ignore-scripts "$RUNNER_TEMP"/lurekit-*.tgz
+          bin="$RUNNER_TEMP/smoke/node_modules/.bin/lurekit"
           test "$("$bin" --version)" = "$(node -p "require('$GITHUB_WORKSPACE/package.json').version")"
-          "$bin" validate node_modules/agent-attack-bench/scenarios
+          "$bin" validate node_modules/lurekit/scenarios
           "$bin" selftest

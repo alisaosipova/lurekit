@@ -1,3 +1,5 @@
+Project renamed to LureKit on 2026-11-03; AAB remains the scenario-id prefix.
+
 # Brief: agent-attack-bench — research, architecture, and development plan
 
 Author: Alisa (sole developer). Session deliverables, in order; no production code until the first two are approved:

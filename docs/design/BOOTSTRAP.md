@@ -1,4 +1,4 @@
-# How to start building agent-attack-bench 0.1
+# How to start building LureKit 0.1
 
 Grounded in `docs/research/landscape.md`. Language: TypeScript / Node >=20.19 (ADR-0001).
 The order below follows the research: the corpus is the novelty, so fixtures and detectors

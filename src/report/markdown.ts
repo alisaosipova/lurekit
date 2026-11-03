@@ -46,7 +46,7 @@ export function renderMarkdown(
   const byId = new Map(manifest.results.map((r) => [r.scenario_id, r]));
   const out: string[] = [];
 
-  out.push(`# agent-attack-bench report: ${cell(manifest.profile.agent)} ${cell(manifest.profile.agent_version)}`, '');
+  out.push(`# LureKit report: ${cell(manifest.profile.agent)} ${cell(manifest.profile.agent_version)}`, '');
   // Headline line (§6.1): "vulnerable to N of M scenarios".
   out.push(`**Vulnerable to ${h.vulnerable} of ${h.of} scenarios** (degraded: ${h.degraded}, inconclusive: ${h.inconclusive}).`, '');
   // §6.2: resisted split (§3.1) — the model declined vs the setup denied an attempted action.

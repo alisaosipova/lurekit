@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// agent-attack-bench CLI — the program's entry point (package.json "bin").
+// LureKit CLI — the program's entry point (package.json "bin").
 //
 // This is the front door that turns the library into a runnable tool: it wires scenarios
 // (src/scenario) -> a per-agent adapter (src/adapters) -> the benchmark runner (src/runner)
@@ -375,9 +375,9 @@ export function cmdPublish(flags: Flags, deps: CliDeps): number {
   return 0;
 }
 
-const USAGE = `agent-attack-bench — a disclosure-traced security benchmark for deployed coding-agent setups
+const USAGE = `LureKit — a disclosure-traced security benchmark for deployed coding-agent setups
 
-Usage: agent-attack-bench <command> [options]
+Usage: lurekit <command> [options]
 
 Commands:
   run [dir]        Run the benchmark against a live agent and print a report.
@@ -450,7 +450,7 @@ function realPathOrResolved(p: string): string {
 /**
  * True when `argv1` (process.argv[1]) names the same real file as `moduleUrl`
  * (import.meta.url). Both sides go through realpath, so an npm bin symlink
- * (node_modules/.bin/agent-attack-bench -> .../dist/cli.js) still counts as main.
+ * (node_modules/.bin/lurekit -> .../dist/cli.js) still counts as main.
  */
 export function isMainModule(argv1: string | undefined, moduleUrl: string): boolean {
   if (!argv1) return false;

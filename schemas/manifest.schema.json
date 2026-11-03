@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/alisaosipova/agent-attack-bench/schemas/manifest.schema.json",
-  "title": "agent-attack-bench run manifest",
+  "$id": "https://github.com/alisaosipova/lurekit/schemas/manifest.schema.json",
+  "title": "LureKit run manifest",
   "description": "Per-benchmark-run manifest (evidence-spec §2.3). One per benchmark run, written as manifest.json.",
   "type": "object",
   "required": [

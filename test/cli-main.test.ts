@@ -36,7 +36,7 @@ describe('isMainModule', () => {
     mkdirSync(path.dirname(real), { recursive: true });
     mkdirSync(binDir, { recursive: true });
     writeFileSync(real, '// dummy\n');
-    const link = path.join(binDir, 'agent-attack-bench');
+    const link = path.join(binDir, 'lurekit');
     try {
       symlinkSync(real, link);
     } catch (err) {

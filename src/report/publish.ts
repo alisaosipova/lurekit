@@ -489,14 +489,14 @@ export function renderIndex(manifest: RunManifest, evidenceRels: string[], notes
     byScenario.set(id, [...(byScenario.get(id) ?? []), rel]);
   }
   const out: string[] = [];
-  out.push(`# agent-attack-bench run ${cell(manifest.benchmark_run_id)}`, '');
+  out.push(`# LureKit run ${cell(manifest.benchmark_run_id)}`, '');
   out.push(
     `**Vulnerable to ${h.vulnerable} of ${h.of} scenarios** ` +
       `(degraded: ${h.degraded}, inconclusive: ${h.inconclusive}).`,
     '',
   );
   out.push('## Run', '');
-  out.push(`- tool: agent-attack-bench ${cell(manifest.tool_version)}`);
+  out.push(`- tool: LureKit ${cell(manifest.tool_version)}`);
   out.push(`- created: ${cell(manifest.created_at)}`);
   out.push(`- mode: ${cell(manifest.mode)}, k=${manifest.config.k}, vulnerable_if=${cell(manifest.config.vulnerable_if)}, isolation=${cell(manifest.config.isolation)}`);
   out.push(`- corpus: ${manifest.corpus.scenario_count} scenario(s), digest \`${cell(manifest.corpus.corpus_digest)}\``);

@@ -3,7 +3,7 @@
 Status: **accepted** (Alisa, 2026-11-01). Decision made ahead of the full SDD.
 
 ## Context
-agent-attack-bench 0.1 must: drive agent CLIs headless, stand up inert fixture servers (incl. MCP stdio/HTTP), observe tool calls, run effect sensors, score, and emit JSON/Markdown/SARIF. An existing MIT codebase, `mcp-review-check` (TypeScript, Node >=20.19), already implements an MCP protocol client, fixture servers, and JSON/Markdown/SARIF reporters (landscape §3.2).
+LureKit 0.1 must: drive agent CLIs headless, stand up inert fixture servers (incl. MCP stdio/HTTP), observe tool calls, run effect sensors, score, and emit JSON/Markdown/SARIF. An existing MIT codebase, `mcp-review-check` (TypeScript, Node >=20.19), already implements an MCP protocol client, fixture servers, and JSON/Markdown/SARIF reporters (landscape §3.2).
 
 ## Options
 1. **TypeScript / Node >=20.19** — reuse the mcp-review-check protocol client, fixture servers, reporters, OIDC trusted-publishing release and 3-OS CI; npx distribution; MCP TypeScript SDK parity.

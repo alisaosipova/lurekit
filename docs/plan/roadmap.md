@@ -1,4 +1,4 @@
-# agent-attack-bench: development plan (Phase C)
+# LureKit: development plan (Phase C)
 
 Six weeks to **release 0.1 with a public report**, then a Phase 2 outline. Grounded in
 `docs/research/landscape.md` (Phase A) and `docs/design/architecture.md` + `evidence-spec.md`
@@ -160,7 +160,7 @@ Code volume is explicitly **not** the bottleneck. Curation throughput and live-r
 
 ## Definition of done for 0.1
 
-1. A reader can run `npx agent-attack-bench` against their own Claude Code setup and get
+1. A reader can run `npx lurekit` against their own Claude Code setup and get
    "vulnerable N of M" where every verdict links to a reproducible evidence record.
 2. ≥40 scenarios, each citing a primary public disclosure (schema-enforced), each live-verified
    on at least one agent.
@@ -207,7 +207,7 @@ scenario classes or agents, until external demand reappears. State this publicly
    *Recommend 2–3 focused venues* (one practitioner mailing list / forum, one conference CFP,
    one blog) over a broad social push; the audience is narrow and technical.
 5. **npm package name + scope.**
-   *Recommend publishing under a scope you control* (e.g. `@<you>/agent-attack-bench`) to avoid
+   *Recommend publishing under a scope you control* (e.g. `@<you>/lurekit`) to avoid
    name-squatting ambiguity and to make OIDC trusted publishing straightforward.
 6. **Should browser-track scenarios ship in 0.1 at all?**
    *Recommend keeping them `runnable:false` in 0.1* (documented but not executed), as the current

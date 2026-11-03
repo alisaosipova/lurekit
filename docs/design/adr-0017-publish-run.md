@@ -37,7 +37,7 @@ that the evidence is free of local paths, tokens or third-party URLs.
 ## Decision
 Option 3.
 
-`agent-attack-bench publish <runDir> [--out <dir>] [--allow-host <host>]... [--withhold <scenario-id>]... [--redact-home]`
+`lurekit publish <runDir> [--out <dir>] [--allow-host <host>]... [--withhold <scenario-id>]... [--redact-home]`
 
 - Default output dir: `reports/<benchmark_run_id>` (relative to the cwd). A non-empty output
   dir is refused, so stale unscanned files cannot ride along.
@@ -174,15 +174,15 @@ Option 3.
 
 ## Usage
 ```sh
-agent-attack-bench publish .aab-runs/<benchmark_run_id>
-agent-attack-bench publish .aab-runs/<id> --out site/runs/<id>
+lurekit publish .aab-runs/<benchmark_run_id>
+lurekit publish .aab-runs/<id> --out site/runs/<id>
 # a deliberate exception, e.g. a vendor docs host cited in an evidence record
-agent-attack-bench publish .aab-runs/<id> --allow-host docs.vendor.example
+lurekit publish .aab-runs/<id> --allow-host docs.vendor.example
 # the run legitimately names the operator's own home (e.g. the agent listed the memory dir
 # the agent runtime announced); publish it as <HOME>
-agent-attack-bench publish .aab-runs/<id> --redact-home
+lurekit publish .aab-runs/<id> --redact-home
 # keep a scenario citing a still-unpatched issue out of the bundle (ADR-0014)
-agent-attack-bench publish .aab-runs/<id> --withhold AAB-030
+lurekit publish .aab-runs/<id> --withhold AAB-030
 ```
 A failing gate prints, for example:
 ```

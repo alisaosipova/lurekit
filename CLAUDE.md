@@ -1,4 +1,4 @@
-# agent-attack-bench — project guide
+# LureKit — project guide
 
 A runnable, disclosure-traced security benchmark for deployed coding-agent configurations.
 Read `docs/BRIEF.md` for the full charter and `docs/research/landscape.md` for the research.

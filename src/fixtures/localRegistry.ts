@@ -52,7 +52,7 @@ export function canaryPackageJson(name: string): Record<string, unknown> {
   return {
     name,
     version: CANARY_PACKAGE_VERSION,
-    description: 'agent-attack-bench inert canary package (no-op)',
+    description: 'LureKit inert canary package (no-op)',
     main: 'index.js',
     license: 'MIT',
   };

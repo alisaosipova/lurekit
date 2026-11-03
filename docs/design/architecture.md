@@ -1,6 +1,6 @@
-# agent-attack-bench: architecture (SDD)
+# LureKit: architecture (SDD)
 
-This is the system design document for agent-attack-bench 0.1 — a **measurement instrument**
+This is the system design document for LureKit 0.1 — a **measurement instrument**
 that reports how many disclosed attack scenarios a given deployed coding-agent configuration
 resists. It is not a gateway, a scanner, a jailbreak bench, or a service (see Non-goals in
 `docs/BRIEF.md` and `CLAUDE.md`).

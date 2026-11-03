@@ -38,7 +38,7 @@ jobs:
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: package
-          path: agent-attack-bench-*.tgz
+          path: lurekit-*.tgz
           if-no-files-found: error
           retention-days: 7
 
@@ -66,7 +66,7 @@ jobs:
       # Trusted publishing (OIDC): no token in the environment, so npm cannot fall back to a long-lived one.
       - name: Publish to npm (trusted publishing)
         if: env.HAS_NPM_TOKEN != 'true'
-        run: npm publish ./agent-attack-bench-*.tgz $([[ "$GITHUB_REF_NAME" == *-* ]] && echo "--tag next")
+        run: npm publish ./lurekit-*.tgz $([[ "$GITHUB_REF_NAME" == *-* ]] && echo "--tag next")
       # Only for the very first publish (a trusted publisher can be configured only once the package exists):
       # a short-lived granular token in the NPM_TOKEN secret. Delete the secret right afterwards, so later
       # releases take the step above.
@@ -74,7 +74,7 @@ jobs:
         if: env.HAS_NPM_TOKEN == 'true'
         run: |
           echo "::warning::Publishing with the NPM_TOKEN secret. Configure the trusted publisher on npmjs.com and delete the secret."
-          npm publish ./agent-attack-bench-*.tgz $([[ "$GITHUB_REF_NAME" == *-* ]] && echo "--tag next")
+          npm publish ./lurekit-*.tgz $([[ "$GITHUB_REF_NAME" == *-* ]] && echo "--tag next")
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       # Whichever step published, the registry must show a provenance attestation for this version; a publish
@@ -84,16 +84,16 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           for attempt in 1 2 3 4 5 6 7; do
-            if npm view "agent-attack-bench@$version" --json > view.json 2> view.err &&
+            if npm view "lurekit@$version" --json > view.json 2> view.err &&
                node -e "const d=require('./view.json'); const v=Array.isArray(d)?d[d.length-1]:d; process.exit(v?.dist?.attestations ? 0 : 1)"; then
-              echo "agent-attack-bench@$version has provenance: $(node -p "JSON.stringify((d=>Array.isArray(d)?d[d.length-1]:d)(require('./view.json')).dist.attestations)")"
+              echo "lurekit@$version has provenance: $(node -p "JSON.stringify((d=>Array.isArray(d)?d[d.length-1]:d)(require('./view.json')).dist.attestations)")"
               exit 0
             fi
-            echo "attempt $attempt: no dist.attestations for agent-attack-bench@$version yet"
+            echo "attempt $attempt: no dist.attestations for lurekit@$version yet"
             sleep 10
           done
           cat view.err
-          echo "::error::agent-attack-bench@$version has no dist.attestations on the registry: it was published without provenance"
+          echo "::error::lurekit@$version has no dist.attestations on the registry: it was published without provenance"
           exit 1
 
   gh-release:

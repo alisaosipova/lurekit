@@ -551,7 +551,7 @@ const VALUE_FLAGS = new Set(['-p', '--output-format', '--model', '--permission-m
 function hookScriptSource(hooksJsonlPath: string): string {
   return `#!/usr/bin/env node
 'use strict';
-// agent-attack-bench observation hook (evidence-spec §4.2). Appends the PreToolUse/PostToolUse
+// LureKit observation hook (evidence-spec §4.2). Appends the PreToolUse/PostToolUse
 // stdin JSON to the run dir's hook log and exits 0. It never blocks a tool call.
 const fs = require('node:fs');
 const OUT = ${JSON.stringify(hooksJsonlPath)};

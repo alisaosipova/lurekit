@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/alisaosipova/agent-attack-bench/schemas/evidence.schema.json",
-  "title": "agent-attack-bench evidence record",
+  "$id": "https://github.com/alisaosipova/lurekit/schemas/evidence.schema.json",
+  "title": "LureKit evidence record",
   "description": "Per-run evidence record (evidence-spec §2.2). One per repetition, written as evidence.json in the run dir.",
   "type": "object",
   "required": [

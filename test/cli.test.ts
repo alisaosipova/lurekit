@@ -45,7 +45,8 @@ describe('cli offline commands', () => {
   it('--help returns 0 and prints usage', async () => {
     const code = await main(['--help'], deps());
     expect(code).toBe(0);
-    expect(out.join('')).toContain('agent-attack-bench');
+    expect(out.join('')).toContain('LureKit');
+    expect(out.join('')).toContain('Usage: lurekit <command>');
   });
 
   it('validate returns 0 on a valid scenario dir', async () => {

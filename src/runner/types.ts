@@ -235,6 +235,6 @@ export interface RunManifest {
 /** Metadata the caller injects for a whole benchmark run (never generated in the runner). */
 export interface RunMeta {
   createdAt: string; // ISO timestamp for the manifest
-  toolVersion: string; // agent-attack-bench version for the manifest
+  toolVersion: string; // LureKit version for the manifest
   signal?: AbortSignal; // optional cancellation, forwarded to the adapter
 }

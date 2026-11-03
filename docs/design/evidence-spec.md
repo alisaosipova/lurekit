@@ -1,4 +1,4 @@
-# agent-attack-bench: evidence specification
+# LureKit: evidence specification
 
 Status: Phase B deliverable, written incrementally (one section per step, per CLAUDE.md).
 This is the contract that makes every verdict auditable. Sections are added as the
@@ -512,7 +512,7 @@ inputs. No real secret is ever written: canary values only (§5).
   "manifest_schema": "0.1",
   "benchmark_run_id": "…",
   "created_at": "<ISO, injected by the CLI, not generated inside pure code>",
-  "tool_version": "agent-attack-bench version",
+  "tool_version": "LureKit version",
   "mode": "smoke | full",
   "config": { "k": 3, "vulnerable_if": "any", "isolation": "container", "budget_usd": 5 },
   "corpus": { "scenario_count": 10, "scenario_ids": ["AAB-001", "…"],

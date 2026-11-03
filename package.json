@@ -1,14 +1,14 @@
 {
-  "name": "agent-attack-bench",
+  "name": "lurekit",
   "version": "0.0.0",
-  "description": "A runnable, disclosure-traced security benchmark for deployed coding-agent configurations.",
-  "homepage": "https://github.com/alisaosipova/agent-attack-bench#readme",
+  "description": "LureKit: a runnable, disclosure-traced security benchmark for deployed coding-agent configurations.",
+  "homepage": "https://github.com/alisaosipova/lurekit#readme",
   "bugs": {
-    "url": "https://github.com/alisaosipova/agent-attack-bench/issues"
+    "url": "https://github.com/alisaosipova/lurekit/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/alisaosipova/agent-attack-bench.git"
+    "url": "git+https://github.com/alisaosipova/lurekit.git"
   },
   "type": "module",
   "license": "MIT",
@@ -23,7 +23,7 @@
     "node": ">=20.19"
   },
   "bin": {
-    "agent-attack-bench": "dist/cli.js"
+    "lurekit": "dist/cli.js"
   },
   "publishConfig": {
     "access": "public",

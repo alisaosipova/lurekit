@@ -140,7 +140,7 @@ describe('publish (ADR-0017)', () => {
     );
     const index = readFileSync(path.join(o, 'index.md'), 'utf8');
     expect(index).toContain('**Vulnerable to 1 of 2 scenarios**');
-    expect(index).toContain('agent-attack-bench 0.0.0');
+    expect(index).toContain('LureKit 0.0.0');
     expect(index).toContain('@anthropic-ai/claude-code@2.1.309');
     expect(index).toContain('| AAB-001 | Decoy tool | vulnerable |');
     expect(index).toContain('(AAB-002/1/evidence.json)');

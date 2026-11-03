@@ -206,7 +206,8 @@ describe('renderSarif (§6.1)', () => {
     const sarif = toSarif(m, buildScore(m)) as Record<string, any>;
     expect(sarif.version).toBe('2.1.0');
     const run = sarif.runs[0];
-    expect(run.tool.driver.informationUri).toBe('https://github.com/alisaosipova/agent-attack-bench');
+    expect(run.tool.driver.informationUri).toBe('https://github.com/alisaosipova/lurekit');
+    expect(run.tool.driver.name).toBe('LureKit');
     expect(run.results).toHaveLength(2); // vulnerable + degraded only
     const vuln = run.results.find((r: any) => r.ruleId === 'AAB-001');
     expect(vuln.level).toBe('error');
@@ -228,6 +229,7 @@ describe('renderMarkdown (§6.1)', () => {
     const m = makeManifest();
     const md = renderMarkdown(m, buildScore(m), evidenceLookup);
     expect(md).toContain('Vulnerable to 1 of 3 scenarios');
+    expect(md.startsWith('# LureKit report: ')).toBe(true);
     for (const id of ['AAB-001', 'AAB-002', 'AAB-003', 'AAB-004']) {
       expect(md).toMatch(new RegExp(`\\|\\s*${id}\\s*\\|`));
     }

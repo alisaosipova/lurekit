@@ -1,4 +1,4 @@
-# agent-attack-bench: research landscape
+# LureKit: research landscape
 
 Status: Phase A deliverable, as of **2026-11-01**. Every external claim carries a URL. **UNVERIFIED** marks anything not confirmed in a primary source. Mechanisms are described at disclosure level only.
 
