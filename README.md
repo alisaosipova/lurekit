@@ -147,11 +147,24 @@ See [SECURITY.md](SECURITY.md) to report a vulnerability in LureKit or a finding
 
 ## Documentation
 
-- [docs/BRIEF.md](docs/BRIEF.md) — project charter and non-goals.
-- [docs/research/landscape.md](docs/research/landscape.md) — research and prior work.
-- [docs/design/](docs/design/) — the design: [architecture.md](docs/design/architecture.md) (ADRs),
-  [evidence-spec.md](docs/design/evidence-spec.md) (evidence and detector contract), standalone ADRs.
-- [docs/plan/roadmap.md](docs/plan/roadmap.md) — roadmap.
+The full index of every document is [docs/README.md](docs/README.md).
+
+User guide:
+
+- [Getting started](docs/guide/getting-started.md) - install, offline commands, first live run.
+- [CLI reference](docs/guide/cli-reference.md) - every subcommand and flag.
+- [Scenarios](docs/guide/scenarios.md) - the corpus and how to write a scenario.
+- [Fixtures and detectors](docs/guide/fixtures-and-detectors.md) - inert fixtures and control sensors.
+- [Interpreting results](docs/guide/interpreting-results.md) - verdicts, evidence and reports.
+- [Publishing](docs/guide/publishing.md) - the redaction gate and run bundles.
+- [Troubleshooting](docs/guide/troubleshooting.md) - auto-update, inconclusive verdicts, isolation, platforms.
+- [Architecture overview](docs/guide/architecture-overview.md) - for contributors: pipeline, invariants, extending LureKit.
+
+Design and background: [docs/BRIEF.md](docs/BRIEF.md) (charter),
+[docs/design/architecture.md](docs/design/architecture.md) (SDD and ADRs),
+[docs/design/evidence-spec.md](docs/design/evidence-spec.md) (evidence and detector contract),
+[docs/research/landscape.md](docs/research/landscape.md) (research),
+[docs/plan/roadmap.md](docs/plan/roadmap.md) (roadmap).
 
 ## License
 
