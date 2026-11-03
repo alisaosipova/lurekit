@@ -45,7 +45,8 @@ authority when the two disagree.
 ## Reports (`reports/`)
 
 - [reports/README.md](reports/README.md) - index of published measurement summaries and their run bundles.
-- [reports/2026-11-02-claude-code-2.1.316.md](reports/2026-11-02-claude-code-2.1.316.md) - Claude Code 2.1.316: first published runs, k=3 stability, bare vs hardened.
+- [reports/2026-11-02-claude-code-2.1.316.md](reports/2026-11-02-claude-code-2.1.316.md) - Claude Code 2.1.316: first published runs, k=3 stability, bare vs hardened (with a 2026-11-03 validity note).
+- [reports/2026-11-03-claude-code-2.1.317-k3.md](reports/2026-11-03-claude-code-2.1.317-k3.md) - Claude Code 2.1.317: four k=3 arms (bare, hardened, each with and without netread), exclusions and the content-delivery lesson.
 
 ## Elsewhere in the repository
 

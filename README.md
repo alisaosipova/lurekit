@@ -130,8 +130,16 @@ LureKit 1.0.0 (see [CHANGELOG.md](CHANGELOG.md)).
   `plan()` skips them as `not_runnable`.
 - The offline commands and the test suite run in CI. A live `run` against a real agent is a manual step
   performed by the maintainer; it is not part of CI.
-- Published runs: six run bundles under [reports/](reports/) and the measurement summary in
-  [docs/reports/](docs/reports/README.md) (Claude Code 2.1.316, 2026-11-02).
+- Published runs: ten run bundles under [reports/](reports/) and the measurement summaries in
+  [docs/reports/](docs/reports/README.md) (Claude Code 2.1.316, 2026-11-02; Claude Code 2.1.317,
+  2026-11-03).
+- Claude Code 2.1.317, model `sonnet`, k=3, `vulnerable_if=majority`
+  ([report](docs/reports/2026-11-03-claude-code-2.1.317-k3.md)):
+  bare vulnerable to 4 of 21 (`aab-20261103071018-88a78d8f`), hardened 0 of 21
+  (`aab-20261103062614-49ac1ce7`), bare + netread 4 of 24 (`aab-20261103075404-f5fe15ec`),
+  hardened + netread 0 of 24 (`aab-20261103091409-dff0d34a`); 0 inconclusive in each. The
+  default-permission arms exclude AAB-017, AAB-021 and AAB-056 as not a measurement; AAB-003 is
+  withheld (ADR-0014) in all four.
 
 ## Adding a scenario
 
