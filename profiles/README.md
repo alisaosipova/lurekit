@@ -56,4 +56,18 @@ Accepted `--setting-sources` values, from `claude --help` (2.1.316): `user`, `pr
 comma-separated. The benchmark rejects anything else, an empty list and duplicates before any
 agent process is spawned. The flag is claude-code only; the CLI rejects it for other agents.
 
+## Settings-based setups (`--settings` / `--hooks`)
+
+Settings-based setups are now honoured for `claude-code` (ADR-0020,
+`docs/design/adr-0020-profile-settings-forwarding.md`). The body passed with
+`--settings <file.json>` (a raw Claude Code settings object, not one of the `SetupProfile`-shaped
+files in this directory) and the body passed with `--hooks <file.json>` (a bare event map or a
+`{ "hooks": {...} }` body) are merged into the adapter's single `--settings` file, with the
+harness observe hooks appended last on `PreToolUse` / `PostToolUse`. Profile hook groups on
+those events run beside the observe hooks, not instead of them. The forwarded body loads at
+command-line precedence, which is not identical to a project- or local-scope install. Earlier
+versions digested these bodies into evidence without passing them to the agent; records from
+those runs do not reflect the claimed settings. The CLI rejects `--settings` / `--hooks` for
+`cursor-cli`, `codex-cli` and `openhands`, whose adapters do not forward them.
+
 Measured comparison of the two profiles (claude-code 2.1.316, k=1): [Configuration comparison: bare vs hardened](../docs/reports/2026-11-02-claude-code-2.1.316.md#configuration-comparison-bare-vs-hardened).

@@ -3,7 +3,7 @@
 // Proves the entry point wires scenarios -> adapter -> runner -> reporter and writes a manifest.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, copyFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, copyFileSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -169,6 +169,37 @@ describe('cli --setting-sources (§4.3 hardening knob)', () => {
     await expect(
       main(['plan', realScenarios, '--model', 'm', '--agent', 'codex-cli', '--setting-sources', 'user'], deps()),
     ).rejects.toThrow(/claude-code flag/);
+  });
+});
+
+describe('cli --settings/--hooks forwarding guard (ADR-0020)', () => {
+  it.each([
+    ['cursor-cli', 'settings'],
+    ['codex-cli', 'settings'],
+    ['openhands', 'settings'],
+    ['cursor-cli', 'hooks'],
+    ['codex-cli', 'hooks'],
+    ['openhands', 'hooks'],
+  ])('rejects for agent %s: --%s is never forwarded', async (agent, flag) => {
+    const file = path.join(tmp, `${flag}.json`);
+    writeFileSync(file, '{}', 'utf8');
+    const stub = new StubAdapter({});
+    await expect(
+      main(['run', realScenarios, '--model', 'm', '--agent', agent, '--results', path.join(tmp, 'runs'), `--${flag}`, file], deps(() => stub)),
+    ).rejects.toThrow(new RegExp(`--${flag} is only forwarded by the claude-code adapter.*"${agent}"`));
+    expect(stub.runCount).toBe(0);
+  });
+
+  it('accepts --settings and --hooks for claude-code (plan exits 0)', async () => {
+    const settingsFile = path.join(tmp, 'settings.json');
+    const hooksFile = path.join(tmp, 'hooks.json');
+    writeFileSync(settingsFile, JSON.stringify({ env: { A: '1' } }), 'utf8');
+    writeFileSync(hooksFile, JSON.stringify({ PreToolUse: [] }), 'utf8');
+    const code = await main(
+      ['plan', realScenarios, '--model', 'm', '--settings', settingsFile, '--hooks', hooksFile],
+      deps(),
+    );
+    expect(code).toBe(0);
   });
 });
 

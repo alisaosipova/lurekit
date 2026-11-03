@@ -31,6 +31,7 @@ import type {
   RunObservation,
   RunOptions,
   SetupProfile,
+  ForwardedSettings,
   ToolAttempt,
   ToolCall,
   McpServerStatus,
@@ -138,11 +139,16 @@ export class ClaudeCodeAdapter implements Adapter {
     const settingSources =
       profile.setting_sources !== undefined ? validateSettingSources(profile.setting_sources) : undefined;
     const usedBare = options.bare === true; // §4.3: default NOT used.
+    // ADR-0020: build the single harness settings body (profile settings + profile hooks, observe
+    // groups last). Built before anything is written or spawned, so an invalid body rejects early.
+    const hooksJsonlPath = path.join(runDir, HOOKS_FILE);
+    const hookScriptPath = path.join(runDir, HOOK_SCRIPT);
+    const harness = harnessSettings(profile, hookScriptPath);
     await mkdir(runDir, { recursive: true });
     // The spawn cwd must exist; creating the (normally runner-provisioned) dir writes nothing in it.
     await mkdir(workdir, { recursive: true });
 
-    const warnings: string[] = [];
+    const warnings: string[] = [...harness.warnings];
     const retry = { delaysMs: this.retryDelaysMs, sleep: this.sleep, signal, warnings };
 
     // Binary resolution + version probe (§4.3/§4.4), retried with backoff: an agent that
@@ -178,12 +184,11 @@ export class ClaudeCodeAdapter implements Adapter {
     // Observation hook (§4.2): written to a harness-only settings file in the run dir and
     // passed with `--settings <file>` ("load additional settings from"; confirmed in
     // `claude --help`, NOTES). The workdir's .claude/settings.json is never touched, so a
-    // fixture-planted project hook (AAB-002, AAB-032) stays byte-for-byte as planted.
-    const hooksJsonlPath = path.join(runDir, HOOKS_FILE);
-    const hookScriptPath = path.join(runDir, HOOK_SCRIPT);
+    // fixture-planted project hook (AAB-002, AAB-032) stays byte-for-byte as planted. Profile
+    // settings/hooks are forwarded in the SAME file (ADR-0020); `--settings` is passed once.
     await writeFile(hookScriptPath, hookScriptSource(hooksJsonlPath), 'utf8');
     const hookSettingsPath = path.join(runDir, HOOK_SETTINGS_FILE);
-    await writeFile(hookSettingsPath, JSON.stringify(observeHookSettings(hookScriptPath), null, 2), 'utf8');
+    await writeFile(hookSettingsPath, JSON.stringify(harness.body, null, 2), 'utf8');
 
     // Build headless argv (§4.2/§4.3). permission_mode passed verbatim; never loosened.
     const argv = ['-p', task, '--output-format', 'stream-json', '--verbose', '--model', profile.model];
@@ -297,7 +302,7 @@ export class ClaudeCodeAdapter implements Adapter {
 
     // Read the hook log and merge stream + hook by tool_use_id (shared with replay, ADR-0015).
     const hookEntries = await readJsonl<HookEntry>(hooksJsonlPath);
-    return assembleObservation(state, hookEntries, {
+    const observation = assembleObservation(state, hookEntries, {
       rawEventsPath: rawPath,
       exitCode,
       startedAt,
@@ -308,6 +313,7 @@ export class ClaudeCodeAdapter implements Adapter {
       warnings,
       agentFlags,
     });
+    return harness.forwarded ? { ...observation, forwarded_settings: harness.forwarded } : observation;
   }
 }
 
@@ -568,6 +574,110 @@ export function observeHookSettings(hookScriptPath: string): { hooks: Record<str
   const command = `"${process.execPath}" "${hookScriptPath}"`;
   const observe = { matcher: '*', hooks: [{ type: 'command', command }] };
   return { hooks: { PreToolUse: [observe], PostToolUse: [observe] } };
+}
+
+/** The events the observe group is appended to (§4.2). */
+const OBSERVE_EVENTS = ['PreToolUse', 'PostToolUse'] as const;
+/** Settings keys that would switch off non-managed hooks, i.e. the observe group (ADR-0020). */
+const HOOK_DISABLING_KEYS = ['disableAllHooks', 'allowManagedHooksOnly'] as const;
+
+export interface HarnessSettings {
+  body: Record<string, unknown>;
+  forwarded?: ForwardedSettings; // absent when the profile carried no settings/hooks
+  warnings: string[];
+}
+
+/** ADR-0020: the single settings body passed with `--settings`. `profile.settings` (an object)
+ *  deep-merged with `profile.hooks` as its `hooks` section (bare event map or `{ hooks: {...} }`),
+ *  then the observe groups appended LAST to PreToolUse/PostToolUse; profile groups on those
+ *  events are kept. With neither profile body set the result equals observeHookSettings(), so
+ *  the file is byte-identical to the observe-only one. The profile bodies are never mutated.
+ *  Throws on a non-object settings/hooks body, a non-array hook event value, a body that sets
+ *  disableAllHooks / allowManagedHooksOnly (would drop the observe hook) or
+ *  permissions.defaultMode (the permission mode is argv-driven, never loosened by a body). */
+export function harnessSettings(
+  profile: Pick<SetupProfile, 'settings' | 'hooks'>,
+  hookScriptPath: string,
+): HarnessSettings {
+  const observe = observeHookSettings(hookScriptPath);
+  const hasSettings = profile.settings !== undefined && profile.settings !== null;
+  const hasHooks = profile.hooks !== undefined && profile.hooks !== null;
+  if (!hasSettings && !hasHooks) return { body: observe, warnings: [] };
+
+  let body: Record<string, unknown> = {};
+  if (hasSettings) {
+    if (!isPlainObject(profile.settings)) throw new Error('profile.settings must be a JSON object (ADR-0020)');
+    body = deepMerge(body, profile.settings);
+  }
+  const profileEvents = new Set<string>();
+  if (body.hooks !== undefined) {
+    for (const ev of Object.keys(checkHookMap(body.hooks, 'profile.settings.hooks'))) profileEvents.add(ev);
+  }
+  if (hasHooks) {
+    if (!isPlainObject(profile.hooks)) throw new Error('profile.hooks must be a JSON object (ADR-0020)');
+    const keys = Object.keys(profile.hooks);
+    const map = keys.length === 1 && keys[0] === 'hooks' ? profile.hooks.hooks : profile.hooks;
+    const hookMap = checkHookMap(map, 'profile.hooks');
+    body = deepMerge(body, { hooks: hookMap });
+    for (const ev of Object.keys(hookMap)) profileEvents.add(ev);
+  }
+  // The profile may not switch off the observe layer (§4.2) nor change the permission mode,
+  // which stays argv-driven from profile.permission_mode (§4.1 invariant 1, never loosened).
+  for (const k of HOOK_DISABLING_KEYS) {
+    if (body[k] !== undefined && body[k] !== false) {
+      throw new Error(`profile settings may not set ${k}: it would disable the harness observe hook (ADR-0020)`);
+    }
+  }
+  if (isPlainObject(body.permissions) && body.permissions.defaultMode !== undefined) {
+    throw new Error('profile settings may not set permissions.defaultMode: the permission mode is argv-driven (--permission-mode, ADR-0020)');
+  }
+  const keys = Object.keys(body).sort();
+
+  const hooks: Record<string, unknown> = isPlainObject(body.hooks) ? { ...body.hooks } : {};
+  for (const ev of OBSERVE_EVENTS) {
+    const existing = Array.isArray(hooks[ev]) ? (hooks[ev] as unknown[]) : [];
+    hooks[ev] = [...existing, ...observe.hooks[ev]];
+  }
+  body = { ...body, hooks };
+
+  const warnings: string[] = [];
+  return {
+    body,
+    forwarded: { keys, hook_events: [...profileEvents].sort(), harness_hook_events: [...OBSERVE_EVENTS] },
+    warnings,
+  };
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+function checkHookMap(v: unknown, where: string): Record<string, unknown[]> {
+  if (!isPlainObject(v)) throw new Error(`${where} must be an object of hook event -> array of groups (ADR-0020)`);
+  for (const [ev, groups] of Object.entries(v)) {
+    if (!Array.isArray(groups)) throw new Error(`${where}.${ev} must be an array of hook groups (ADR-0020)`);
+  }
+  return v as Record<string, unknown[]>;
+}
+
+/** Deep merge into a fresh object: plain objects merge key by key, arrays concatenate (base
+ *  first), any other value replaces. Inputs are not mutated (values are cloned via JSON). */
+function deepMerge(base: Record<string, unknown>, over: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...base };
+  for (const [k, v] of Object.entries(over)) {
+    const prev = Object.prototype.hasOwnProperty.call(out, k) ? out[k] : undefined;
+    let next: unknown;
+    if (Array.isArray(prev) && Array.isArray(v)) next = [...prev, ...clone(v)];
+    else if (isPlainObject(prev) && isPlainObject(v)) next = deepMerge(prev, v);
+    else next = clone(v);
+    // defineProperty, not assignment: a JSON "__proto__" key stays an own data key (forwarded
+    // verbatim) instead of silently re-prototyping the body.
+    Object.defineProperty(out, k, { value: next, enumerable: true, writable: true, configurable: true });
+  }
+  return out;
+}
+function clone<T>(v: T): T {
+  return v === undefined ? v : (JSON.parse(JSON.stringify(v)) as T);
 }
 
 /** Option names in an argv, in order, values dropped (§4.3 evidence `agent_flags`). The task

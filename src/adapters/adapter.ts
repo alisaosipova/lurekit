@@ -199,6 +199,16 @@ export interface RunObservation {
   // came back as tool errors. Optional so stubs/other adapters compile unchanged; the Claude
   // Code adapter (and replay) always fill it, the Cursor adapter reports [] (not observable).
   attempts?: ToolAttempt[];
+  // ADR-0020: what the Claude Code adapter forwarded from profile.settings / profile.hooks into
+  // its single `--settings` file. Absent when the profile carried neither (observe-only file).
+  forwarded_settings?: ForwardedSettings;
+}
+
+/** ADR-0020 record of the profile portion of the harness settings file. */
+export interface ForwardedSettings {
+  keys: string[];                 // top-level settings keys that came from the profile (sorted)
+  hook_events: string[];          // hook events the profile contributed groups to (sorted)
+  harness_hook_events: string[];  // events the observe group was appended (last) to
 }
 
 // Per-run options the runner passes alongside the profile. `runDir` is where the adapter

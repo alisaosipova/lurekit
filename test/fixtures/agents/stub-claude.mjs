@@ -41,6 +41,18 @@ function flagVal(name) {
   return i >= 0 && i + 1 < argv.length ? argv[i + 1] : undefined;
 }
 
+// 2b. ADR-0020: echo the parsed `--settings` body the stub received (AAB_STUB_SETTINGS_OUT), so
+//     a test can prove forwarded profile settings actually reached the agent process.
+const settingsOut = process.env.AAB_STUB_SETTINGS_OUT;
+if (settingsOut) {
+  try {
+    const received = JSON.parse(fs.readFileSync(flagVal('--settings'), 'utf8'));
+    fs.writeFileSync(settingsOut, JSON.stringify(received), 'utf8');
+  } catch {
+    /* no --settings or unparsable — nothing to echo */
+  }
+}
+
 const model = flagVal('--model') ?? 'claude-opus-4-8';
 const permissionMode = flagVal('--permission-mode') ?? 'default';
 const cwd = process.cwd();

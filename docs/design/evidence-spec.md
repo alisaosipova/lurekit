@@ -361,6 +361,25 @@ denial record (ADR-0016), so it reports none rather than guess.
   that would clear it — and records the warning `fixture profilePatch tried to set or change
   setting_sources; ignored` when the patch differs. A patch with the identical list is a no-op
   without a warning.
+- **Profile settings forwarding (ADR-0020).** `profile.settings` (CLI `--settings <file>`) and
+  `profile.hooks` (CLI `--hooks <file>`) are forwarded to `claude` in the adapter's single
+  harness settings file `<runDir>/claude-settings.json`, passed once with `--settings` (whether
+  the flag may repeat is UNVERIFIED, so it is not repeated). Body order: `profile.settings`
+  (a JSON object), deep-merged with `profile.hooks` as its `hooks` section (a bare event map or a
+  `{ "hooks": {...} }` body; per-event arrays concatenate, settings groups first), then the §4.2
+  observe groups appended **last** to `PreToolUse` and `PostToolUse` — never dropped or
+  reordered; profile groups on those events are kept beside them. Invalid bodies (non-object,
+  non-array event value) throw before spawn. With neither body set the file is byte-identical to
+  the observe-only body. The profile bodies are not mutated, so the evidence `settings_digest`
+  and `hooks` digests (§2.2) are digests of exactly the profile portion of the forwarded file.
+  **Recorded:** `observation.forwarded_settings: { keys, hook_events, harness_hook_events }` on
+  the adapter's `RunObservation` (top-level keys from the profile, events the profile added
+  groups to, events the observe group was appended to); absent when nothing was forwarded. A merged
+  body that sets `disableAllHooks` or `allowManagedHooksOnly` (other than `false`), or
+  `permissions.defaultMode`, throws before spawn: a body cannot switch off the observe hook, and
+  the permission mode, `--strict-mcp-config`, `--setting-sources` and `--bare` stay argv-driven
+  (never loosened by a body). The CLI rejects `--settings` / `--hooks`
+  for every agent other than `claude-code` (no other adapter forwards them).
 - **MCP server report.** The adapter records `system/init.mcp_servers` as
   `observation.mcp_servers: [{ name, status, source? }]` (normalised by `normalizeMcpServers()`;
   entries without a name are dropped; a later init without a list does not erase an earlier
