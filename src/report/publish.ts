@@ -62,6 +62,7 @@ import path from 'node:path';
 import type { EvidenceRecord, RunManifest } from '../runner/types.js';
 import { extractHost, findSecretShape } from '../fixtures/fixture.js';
 import { report, buildScore, type EvidenceLookup } from './index.js';
+import type { SurfaceLookup } from './guidance.js';
 import { REPOSITORY_URL } from './sarif.js';
 import { PARTIAL_MARKER } from './markdown.js';
 
@@ -96,6 +97,8 @@ export interface PublishPolicy {
   /** --exclude: scenario ids left out because their result is not a measurement (operator
    *  declaration, never a disclosure hold). Same rules as `withhold`; an id in both fails. */
   exclude?: string[];
+  /** ADR-0021: scenario id -> attack surface for report.md's plain-language layers. */
+  surfaceOf?: SurfaceLookup;
 }
 
 /** The fixed index.md text for a withheld scenario. */
@@ -795,7 +798,7 @@ export function planPublish(contents: RunDirContents, policy: PublishPolicy = {}
   let files: BundleFile[] = [
     { rel: 'manifest.json', text: manifestText },
     ...evidenceFiles,
-    { rel: 'report.md', text: report(manifest, { format: 'markdown', evidenceLookup: lookup }) },
+    { rel: 'report.md', text: report(manifest, { format: 'markdown', evidenceLookup: lookup, surfaceOf: policy.surfaceOf }) },
     { rel: 'report.json', text: report(manifest, { format: 'json' }) },
     { rel: 'report.sarif', text: report(manifest, { format: 'sarif' }) },
   ];

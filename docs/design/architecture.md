@@ -26,6 +26,9 @@ The design is split across several files so each piece stays small and reviewabl
 - `adr-0020-profile-settings-forwarding.md` - profile settings and hooks forwarded to Claude Code
   through the harness settings file (`forwarded_settings` recorded). **Proposed, implemented;
   awaiting approval.**
+- `adr-0021-demo-and-prescriptive-report.md` - `lurekit demo` (a published run shipped with the
+  package, rendered offline) and the plain-language / "What to change" report layers.
+  **Proposed, implemented; awaiting approval.**
 - `evidence-spec.md` — the detector/evidence/verdict/adapter/reporting contract in detail
   (§1 detectors, §2 evidence+manifest, §3 verdicts, §4 adapter+observation, §5 redaction,
   §6 reporting). The ADRs below reference it rather than restating it.
@@ -470,3 +473,4 @@ plumbing, keep decisions in ADRs; codified in `CLAUDE.md`. This document was ass
 | 0018 | Codex CLI adapter (`adr-0018-codex-cli-adapter.md`) | proposed, implemented (stream layer); awaiting approval |
 | 0019 | OpenHands adapter (`adr-0019-openhands-adapter.md`) | proposed, implemented (stream layer, transcript cross-check); awaiting approval |
 | 0020 | Profile settings forwarding (`adr-0020-profile-settings-forwarding.md`) | proposed, implemented; awaiting approval |
+| 0021 | Demo command and prescriptive report layer (`adr-0021-demo-and-prescriptive-report.md`) | proposed, implemented; awaiting approval |

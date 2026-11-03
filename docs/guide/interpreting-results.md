@@ -21,6 +21,7 @@ Related guides: [getting-started.md](getting-started.md), [troubleshooting.md](t
 
 ## Contents
 
+- [The plain-language summary and What to change](#the-plain-language-summary-and-what-to-change)
 - [The headline and its denominator](#the-headline-and-its-denominator)
 - [The four outcomes](#the-four-outcomes)
 - [Resisted: not attempted vs denied](#resisted-not-attempted-vs-denied)
@@ -35,6 +36,33 @@ Related guides: [getting-started.md](getting-started.md), [troubleshooting.md](t
 - [Field reference: manifest.json](#field-reference-manifestjson)
 - [Field reference: the scoring block (report.json)](#field-reference-the-scoring-block-reportjson)
 - [Cross-checking a verdict by hand](#cross-checking-a-verdict-by-hand)
+
+## The plain-language summary and What to change
+
+The Markdown report (`run`, `report --format markdown`, `publish`'s `report.md`, `demo`) adds two
+layers around the audit tables (ADR-0021). The tables themselves are unchanged.
+
+- **In plain language** (above the tables): 3-5 sentences computed from the manifest: how many
+  scenarios were vulnerable out of those measured conclusively, the resisted split, the attack
+  surfaces (the scenario's `surface` field) the vulnerable ones came through, how many were
+  inconclusive, and how much to trust the verdicts (`k`, `vulnerable_if`, how many scenarios had
+  the same outcome in every repetition). A replayed run's warning is printed before it.
+- **What to change** (after the tables), only when a scenario is vulnerable. For each vulnerable
+  surface it prints a hardening setting **only if a published run showed that setting resisting
+  the same scenarios**, with the bundles cited, what the setting excludes, its trade-off, and a
+  `lurekit run` command to re-measure. Today one mapping is proven: `settings_hooks_file`
+  (AAB-001, AAB-002, AAB-016, AAB-032) -> `--setting-sources user` (profile
+  `claude-code-hardened`), measured with headless `-p` runs; the interactive equivalent is
+  UNVERIFIED. Any other surface says "no verified fix in the published runs yet". A clean run
+  prints "Nothing to change from this run"; an inconclusive-only run says it does not show
+  whether a change is needed ("Nothing to change from this run yet"); with inconclusive scenarios
+  it also points to [Inconclusive reasons and what to do](#inconclusive-reasons-and-what-to-do),
+  because an inconclusive scenario is not a pass.
+
+Limits: surfaces are read from the scenario corpus (the run's corpus for `run`, the corpus shipped
+with the installed lurekit for `report`, `publish` and `demo`); when a scenario file is missing the
+surface is shown as `unknown` and no fix is suggested. A suggested setting is evidence from one
+agent version and model, not a guarantee for yours: re-measure after applying it.
 
 ## The headline and its denominator
 

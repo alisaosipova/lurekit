@@ -19,6 +19,15 @@ No release is cut without changes.
 ## [Unreleased]
 
 ### Added
+- `lurekit demo` (ADR-0021): prints the published bare k=3 run `aab-20261103071018-88a78d8f`
+  of Claude Code 2.1.317 (shipped as `demo/<id>/manifest.json` and `report.json`, byte-identical
+  to `reports/<id>/`) through the same reporter as `report`, with a banner saying it is not your
+  setup and how to measure your own. Offline, no auth, no cost; `--format`, `--output`.
+- Markdown report: a plain-language summary above the audit tables and a "What to change" section
+  after them (ADR-0021). Every count comes from the rendered run; the one proven mapping is
+  surface `settings_hooks_file` -> `--setting-sources user` (headless `-p` verified, interactive
+  equivalent UNVERIFIED); other vulnerable surfaces say "no verified fix in the published runs
+  yet". Audit tables unchanged.
 - Four disclosure-traced scenarios for the non-Claude adapters, built only from existing fixtures
   and detectors (corpus 48 -> 52; runnable 30 -> 34; per-agent plan: claude-code 25, cursor-cli
   5 -> 7, codex-cli 1 -> 2, openhands 1 -> 2):

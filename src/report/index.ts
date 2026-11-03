@@ -7,6 +7,7 @@
 import type { RunManifest } from '../runner/types.js';
 import { renderJson } from './json.js';
 import { renderMarkdown, type EvidenceLookup } from './markdown.js';
+import type { SurfaceLookup } from './guidance.js';
 import { renderSarif } from './sarif.js';
 import { buildScore, type Report } from './score.js';
 
@@ -14,7 +15,11 @@ export { buildScore, REPORT_SCHEMA_VERSION, profileDigest } from './score.js';
 export type { Report, ReportScenario } from './score.js';
 export { renderJson } from './json.js';
 export { renderMarkdown } from './markdown.js';
-export type { EvidenceLookup } from './markdown.js';
+export type { EvidenceLookup, MarkdownOptions } from './markdown.js';
+export {
+  HARDENING_KNOBS, NO_VERIFIED_FIX, UNKNOWN_SURFACE, plainLanguageSummary, whatToChange, vulnerableBySurface,
+} from './guidance.js';
+export type { SurfaceLookup, HardeningKnob, KnobEvidence } from './guidance.js';
 export { renderSarif, toSarif, REPOSITORY_URL } from './sarif.js';
 
 export type ReportFormat = 'json' | 'markdown' | 'sarif';
@@ -23,6 +28,8 @@ export interface ReportOptions {
   format: ReportFormat;
   /** Supplied by the CLI for Markdown's per-vulnerable evidence excerpt; unused by json/sarif. */
   evidenceLookup?: EvidenceLookup;
+  /** Markdown only (ADR-0021): scenario id -> attack surface, for the plain-language layers. */
+  surfaceOf?: SurfaceLookup;
 }
 
 /** Build the scoring block from the manifest and render it in the chosen format. */
@@ -32,7 +39,7 @@ export function report(manifest: RunManifest, opts: ReportOptions): string {
     case 'json':
       return renderJson(manifest, score);
     case 'markdown':
-      return renderMarkdown(manifest, score, opts.evidenceLookup);
+      return renderMarkdown(manifest, score, opts.evidenceLookup, { surfaceOf: opts.surfaceOf });
     case 'sarif':
       return renderSarif(manifest, score);
     default: {

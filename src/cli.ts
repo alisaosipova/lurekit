@@ -14,6 +14,7 @@
 //   selftest  run every implemented detector's positive/negative self-test (offline)
 //   report    render a report (json|markdown|sarif) from a completed run directory
 //   publish   gate (evidence-spec §5) and write a shareable bundle of a run (ADR-0017)
+//   demo      render the published run bundled with the package (ADR-0021): offline, no auth
 //
 // `run` is the only subcommand that launches a real agent (and therefore costs money / needs
 // auth); the others are fully offline.
@@ -39,7 +40,7 @@ import { getDetector, IMPLEMENTED_DETECTORS } from './detectors/index.js';
 import { fixturesForScenario } from './fixtures/index.js';
 import { BenchmarkRunner } from './runner/runner.js';
 import type { RunConfig, RunManifest, RunnerIds, RunMeta, EvidenceRecord } from './runner/types.js';
-import { report, type ReportFormat, type EvidenceLookup } from './report/index.js';
+import { report, REPOSITORY_URL, type ReportFormat, type EvidenceLookup, type SurfaceLookup } from './report/index.js';
 import { planPublish, readRunDir, writeBundle, formatPlanFailure, selectEvidence } from './report/publish.js';
 
 const REPORT_FORMATS: ReportFormat[] = ['json', 'markdown', 'sarif'];
@@ -72,6 +73,30 @@ export function defaultDeps(): CliDeps {
     stdout: (s) => process.stdout.write(s),
     stderr: (s) => process.stderr.write(s),
   };
+}
+
+/** The package root (dist/.. when installed, src/.. under tests): holds scenarios/ and demo/. */
+function packageRoot(): string {
+  return fileURLToPath(new URL('..', import.meta.url));
+}
+
+/** ADR-0021: the published run shipped with the package for `lurekit demo` (manifest.json and
+ *  report.json only, byte-identical to reports/<id>/ in the repository). */
+export const DEMO_RUN_ID = 'aab-20261103071018-88a78d8f';
+export function demoBundleDir(): string {
+  return path.join(packageRoot(), 'demo', DEMO_RUN_ID);
+}
+
+/** Scenario id -> surface from already-loaded scenarios (ADR-0021 plain-language layers). */
+function surfaceLookupFrom(scenarios: Scenario[]): SurfaceLookup {
+  const bySurface = new Map(scenarios.map((s) => [s.id, s.surface as string]));
+  return (id) => bySurface.get(id);
+}
+
+/** Surfaces from the scenario corpus shipped with this lurekit version. A file that fails to load
+ *  only leaves its surface unknown; the report says so instead of guessing. */
+function shippedSurfaceLookup(): SurfaceLookup {
+  return surfaceLookupFrom(loadScenarioDir(path.join(packageRoot(), 'scenarios')).scenarios);
 }
 
 function toolVersion(): string {
@@ -337,7 +362,11 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
   const runDir = path.join(cfg.resultsRoot, benchmarkRunId);
   const format = (flags.str.get('format') ?? 'markdown') as ReportFormat;
   if (!REPORT_FORMATS.includes(format)) throw new Error(`--format must be ${REPORT_FORMATS.join('|')}`);
-  const rendered = report(manifest, { format, evidenceLookup: makeEvidenceLookup(runDir, manifest) });
+  const rendered = report(manifest, {
+    format,
+    evidenceLookup: makeEvidenceLookup(runDir, manifest),
+    surfaceOf: surfaceLookupFrom(scenarios),
+  });
   const output = flags.str.get('output');
   if (output) writeFileSync(output, rendered, 'utf8');
   else deps.stdout(rendered + '\n');
@@ -357,7 +386,11 @@ export function cmdReport(flags: Flags, deps: CliDeps): number {
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as RunManifest;
   const format = (flags.str.get('format') ?? 'json') as ReportFormat;
   if (!REPORT_FORMATS.includes(format)) throw new Error(`--format must be ${REPORT_FORMATS.join('|')}`);
-  const rendered = report(manifest, { format, evidenceLookup: makeEvidenceLookup(runDir, manifest) });
+  const rendered = report(manifest, {
+    format,
+    evidenceLookup: makeEvidenceLookup(runDir, manifest),
+    ...(format === 'markdown' ? { surfaceOf: shippedSurfaceLookup() } : {}),
+  });
   const output = flags.str.get('output');
   if (output) writeFileSync(output, rendered, 'utf8');
   else deps.stdout(rendered + '\n');
@@ -393,6 +426,7 @@ export function cmdPublish(flags: Flags, deps: CliDeps): number {
     exclude,
     homeDir: deps.homeDir ? deps.homeDir() : homedir(),
     redactHome: flags.bool.has('redact-home'),
+    surfaceOf: shippedSurfaceLookup(),
   });
   if (!plan.ok) {
     deps.stderr(formatPlanFailure(plan));
@@ -416,6 +450,62 @@ export function cmdPublish(flags: Flags, deps: CliDeps): number {
     deps.stdout(`redaction applied: home directory -> <HOME> (${plan.homeReplacements} replacements)\n`);
   }
   deps.stdout(`\npublished ${plan.files.length} file(s) to ${outDir}\n`);
+  return 0;
+}
+
+/** Commands main() dispatches; the demo banner names only commands that exist. */
+export const COMMANDS: readonly string[] = ['run', 'validate', 'list', 'plan', 'selftest', 'report', 'publish', 'demo'];
+
+/** The demo banner (ADR-0021). Every value comes from the bundled manifest. */
+/** `scenariosDir` is the shipped corpus path as the user should type it (relative to their cwd),
+ *  so the suggested command works from an npm install as well as from the repository root. */
+export function demoBanner(manifest: RunManifest, scenariosDir = 'scenarios'): string {
+  const p = manifest.profile;
+  const t = manifest.totals;
+  const date = manifest.created_at.slice(0, 10);
+  const scenarios = manifest.results.length;
+  const k = manifest.config.k;
+  const spend = t.spend_usd.toFixed(2);
+  const perRep = (t.spend_usd / Math.max(k, 1)).toFixed(2);
+  const check = COMMANDS.includes('doctor') ? 'lurekit doctor' : 'lurekit selftest';
+  return (
+    `> **Demo: this is a published LureKit run, not your setup.** It measured ${p.agent} ${p.agent_version} ` +
+    `with model ${p.model} on ${date} (benchmark run ${manifest.benchmark_run_id}, ${scenarios} scenarios, k=${k}, ` +
+    `${manifest.mode} mode); the full public bundle with evidence is ${REPOSITORY_URL}/tree/main/reports/${manifest.benchmark_run_id}. ` +
+    `Only manifest.json and report.json ship with the package, so the per-scenario detector and tool-call ` +
+    `lines (read from evidence files) are not shown here. To evaluate and harden your own setup, run ` +
+    `\`${check}\`, then \`lurekit run ${scenariosDir} --agent ${p.agent} --model <model-id> --agent-version <your-version> --mode smoke\`: ` +
+    `it launches your real, authenticated agent and costs money. This run reported ${spend} USD for ` +
+    `${scenarios} scenarios at k=${k} (the agent's client-side estimate); smoke mode is k=1, so expect roughly ` +
+    `${perRep} USD for the same scenarios (this run's spend divided by k, an estimate).\n\n`
+  );
+}
+
+/** demo [--format json|markdown|sarif] [--output <file>] (ADR-0021): offline, zero cost, no auth.
+ *  Renders the bundled published run through the same reporter as `report`. */
+export function cmdDemo(flags: Flags, deps: CliDeps): number {
+  if (flags._.length > 0) throw new Error(`demo takes no positional arguments (got ${JSON.stringify(flags._[0])})`);
+  const allowed = new Set(['format', 'output']);
+  const extra = [...flags.str.keys(), ...flags.num.keys(), ...flags.multi.keys(), ...flags.bool]
+    .filter((n) => !allowed.has(n));
+  if (extra.length > 0) throw new Error(`demo accepts only --format and --output (got --${extra[0]})`);
+  const format = (flags.str.get('format') ?? 'markdown') as ReportFormat;
+  if (!REPORT_FORMATS.includes(format)) throw new Error(`--format must be ${REPORT_FORMATS.join('|')}`);
+  const manifest = readJsonFile(path.join(demoBundleDir(), 'manifest.json')) as RunManifest;
+  const body = report(manifest, {
+    format,
+    ...(format === 'markdown' ? { surfaceOf: shippedSurfaceLookup() } : {}),
+  });
+  const shipped = path.join(packageRoot(), 'scenarios');
+  const rel = path.relative(deps.cwd(), shipped);
+  const scenariosDir = rel === '' ? '.' : /^[A-Za-z0-9._/-]+$/.test(rel) ? rel : `'${shipped.replace(/'/g, "'\\''")}'`;
+  const banner = demoBanner(manifest, scenariosDir);
+  // Machine formats stay parseable: the banner goes to stderr for json/sarif.
+  const rendered = format === 'markdown' ? banner + body : body;
+  if (format !== 'markdown') deps.stderr(banner);
+  const output = flags.str.get('output');
+  if (output) writeFileSync(path.resolve(deps.cwd(), output), rendered, 'utf8');
+  else deps.stdout(rendered + '\n');
   return 0;
 }
 
@@ -452,6 +542,9 @@ Commands:
                                   an id may not be given to both --withhold and --exclude
                    --redact-home  replace YOUR home dir with <HOME> in the published copies (opt-in;
                                   run dir untouched; other home paths still fail the gate)
+  demo             Print a published run that ships with the package (no agent, no auth, no cost),
+                   rendered exactly like 'report', with a banner saying it is not your setup.
+                   --format json|markdown|sarif (default markdown)  --output <file>
 
 Flags are strict: an unknown --flag, a --flag=value form, or a flag token containing spaces
 is an error (exit 1). Pass each flag and its value as separate arguments.
@@ -488,6 +581,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     case 'run': return cmdRun(flags, deps);
     case 'report': return cmdReport(flags, deps);
     case 'publish': return cmdPublish(flags, deps);
+    case 'demo': return cmdDemo(flags, deps);
     default:
       deps.stderr(`unknown command: ${command}\n\n${USAGE}`);
       return 2;

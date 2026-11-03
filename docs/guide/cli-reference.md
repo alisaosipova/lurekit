@@ -99,6 +99,22 @@ Exit 0 on a clean gate + successful write; 1 if the manifest is missing, a `--wi
 `--exclude` value is not a scenario id, an id is given to both flags, the gate fails, or the write fails (nothing is written on any failure).
 Offline.
 
+### demo
+
+```
+lurekit demo [--format <fmt>] [--output <file>]
+```
+
+Print a published run that ships with the package (`demo/aab-20261103071018-88a78d8f/`:
+`manifest.json` and `report.json`, byte-identical to the bundle under `reports/`), rendered by
+the same reporter as `report`, so you can see a real report with no agent, no auth and no spend
+(ADR-0021). `--format` defaults to `markdown`; the Markdown output starts with a banner naming
+the agent, version, model and date of that run and how to measure your own setup. For `json` and
+`sarif` the banner goes to stderr so stdout stays machine-readable (`--format json` prints the
+published `report.json` exactly). Evidence files are not shipped, so the per-scenario detector
+and tool-call lines are absent. Accepts only `--format` and `--output`; any other flag or a
+positional argument is an error (exit 1). Exit 0. Offline.
+
 ## Flags
 
 ### Profile flags (run, plan)
@@ -131,7 +147,7 @@ the body would be digested into evidence yet never reach the agent.
 | `--budget <usd>` | number | *(none)* | a number |
 | `--results <dir>` | string | `.aab-runs` | a path |
 
-### Output flags (run, report)
+### Output flags (run, report, demo)
 
 | Flag | Type | Default | Allowed values |
 |------|------|---------|----------------|

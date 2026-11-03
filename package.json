@@ -26,6 +26,7 @@
     "dist",
     "schemas",
     "scenarios",
+    "demo",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"

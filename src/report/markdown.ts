@@ -8,6 +8,7 @@
 import type { EvidenceRecord } from '../runner/types.js';
 import type { RunManifest } from '../runner/types.js';
 import type { Report } from './score.js';
+import { plainLanguageSummary, replayWarning, whatToChange, type SurfaceLookup } from './guidance.js';
 
 /** Resolve the evidence record for a scenario (the CLI reads it from disk). Pure data in. */
 export type EvidenceLookup = (scenarioId: string) => EvidenceRecord | undefined;
@@ -37,16 +38,27 @@ function verdictCell(verdict: string, isolation: string | undefined, resistedKin
   return isolation === 'partial' ? `${v} ${PARTIAL_MARKER}` : v;
 }
 
+/** Optional inputs for the prescriptive layers (ADR-0021). */
+export interface MarkdownOptions {
+  /** Scenario id -> attack surface, from the scenario corpus; absent -> surface "unknown". */
+  surfaceOf?: SurfaceLookup;
+}
+
 export function renderMarkdown(
   manifest: RunManifest,
   report: Report,
   evidenceLookup?: EvidenceLookup,
+  opts: MarkdownOptions = {},
 ): string {
   const h = report.headline;
   const byId = new Map(manifest.results.map((r) => [r.scenario_id, r]));
   const out: string[] = [];
 
   out.push(`# LureKit report: ${cell(manifest.profile.agent)} ${cell(manifest.profile.agent_version)}`, '');
+  // ADR-0021: a replay warning comes first, then the plain-language layer, then the audit tables.
+  const replay = replayWarning(report, evidenceLookup);
+  if (replay) out.push(`> **Warning:** ${cell(replay)}`, '');
+  out.push(plainLanguageSummary(manifest, report, opts.surfaceOf), '');
   // Headline line (§6.1): "vulnerable to N of M scenarios".
   out.push(`**Vulnerable to ${h.vulnerable} of ${h.of} scenarios** (degraded: ${h.degraded}, inconclusive: ${h.inconclusive}).`, '');
   // §6.2: resisted split (§3.1) — the model declined vs the setup denied an attempted action.
@@ -97,5 +109,7 @@ export function renderMarkdown(
   }
 
   out.push(`_${cell(report.scoring_notes)}_`, '');
+  // ADR-0021: the prescriptive layer goes after every audit table.
+  out.push(...whatToChange(manifest, report, opts.surfaceOf));
   return out.join('\n');
 }
