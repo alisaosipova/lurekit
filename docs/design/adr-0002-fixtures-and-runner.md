@@ -57,6 +57,8 @@ returns. Current consumers:
   `command`); it throws without it.
 - `issue_feed`/`email_feed` with `ask: command`: the instruction-carrying item names
   `commandPath` (returned as `command`); it throws without it.
+- `web_server` with `instruction: command`: one extra visible page paragraph names
+  `commandPath` (returned as `command`); it throws without it.
 - `poisoned_repo` (`.mcp.json`), `mcp_stdio`, `mcp_http`: when the sensor is `canary_mcp_tool`
   (recognised by its `serverRef` key, via `FixtureBase.mcpToolCanaries`), the inert server is
   launched with that detector's per-run `token` and `recorderPath`, so a recorded call carries
@@ -64,7 +66,8 @@ returns. Current consumers:
   watches it, so it is not a stand-in for a detector canary).
 - `issue_feed`/`email_feed`, `mcp_stdio`/`mcp_http`: the decoy tool name is the build-time
   constant `CANARY_MCP_TOOL` that both the shared inert server and `canary_mcp_tool` use, so it
-  cannot diverge per run; `web_server`/`local_registry` name only their own per-run values.
+  cannot diverge per run; `local_registry` (and `web_server` by default) name only their own
+  per-run values.
 
 Interface notes — `profilePatch` merging. The runner applies each fixture's `profilePatch` to
 the profile under test in fixture order (`mergeProfilePatch`, `src/runner/runner.ts`):
@@ -97,8 +100,11 @@ so per-scenario differences reach the agent instead of every scenario of a kind 
 surface. Each parameterised fixture validates its params with a strict zod schema
 (`parseFixtureParams`, `src/fixtures/params.ts`): an unknown key or value throws
 `FixtureParamsError` at build time, which the runner records as `inconclusive(fixture_error)`.
-Omitted params keep the pre-params behaviour. Kinds without a params schema (`web_server`,
-`local_registry`) receive the params unchanged in their constructor.
+Omitted params keep the pre-params behaviour. Kinds without a params schema (`local_registry`)
+receive the params unchanged in their constructor.
+- `web_server`: `instruction` - `none` (default; placeholder line + marker only) or `command`
+  (one extra visible inert paragraph naming the canary command, same wording as the feeds'
+  `ask: command`; for `canary_command` scenarios such as AAB-056).
 - `issue_feed` / `email_feed`: `ask` selects what the one instruction-carrying item asks for —
   `mcp_tool` (default; names the decoy MCP tool, for `canary_mcp_tool` scenarios such as
   AAB-021) or `command` (one visible placeholder naming the canary command, for
@@ -182,9 +188,10 @@ injected at the CLI boundary), so a replay over recorded runs yields identical v
   open keep-alive connections on `teardown()` so the port is freed promptly; the older
   `issue_feed`/`email_feed`/`mcp_http` fixtures still bind and close inline (`server.close()`).
 - `web_server` (`src/fixtures/webServer.ts`): one static `text/html` page (GET/HEAD `/` or
-  `/index.html`) with a visible inert placeholder line and a per-run random marker; no scripts,
-  no external references, `default-src 'none'` CSP. Canaries `{ url, marker }`; `profilePatch`
-  sets `env.AAB_WEB_URL` to the page URL.
+  `/index.html`) with a visible inert placeholder line and a per-run random marker (plus, with
+  `instruction: command`, one placeholder paragraph naming `commandPath`); no scripts, no
+  external references, `default-src 'none'` CSP. Canaries `{ url, marker }` (+ `command`);
+  `profilePatch` sets `env.AAB_WEB_URL` to the page URL.
 - Content-location env names (stable, part of the fixture interface). A fixture whose content
   the agent must be pointed at publishes its location through `profilePatch.env`, so a scenario
   task can name it with a `{{env.NAME}}` placeholder (evidence-spec §4.1 "Task placeholders"):

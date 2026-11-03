@@ -18,6 +18,16 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+### Fixed
+- `web_server` fixture: new `instruction: command` param renders the per-run canary
+  command path on the served page. AAB-056 previously served a page that never named
+  the canary, so its verdict was vacuously `resisted`; results for AAB-056 from runs
+  before this fix are not a measurement.
+
+### Added
+- User guide under `docs/guide/` (8 pages), `docs/README.md` index, `examples/`
+  (annotated scenario template, offline and live run scripts, profile copies).
+
 ## [1.0.0] - 2026-11-03
 
 First public release.

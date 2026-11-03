@@ -22,6 +22,8 @@ import {
 import type { FixtureKind } from '../src/scenario/types.js';
 import { InMemoryNoopFixture } from './helpers/inMemoryNoopFixture.js';
 import { WebServerFixture, ENV_WEB_URL, WEB_PLACEHOLDER } from '../src/fixtures/webServer.js';
+import { FixtureCanaryError } from '../src/fixtures/fixture.js';
+import { FixtureParamsError } from '../src/fixtures/params.js';
 import {
   LocalRegistryFixture,
   ENV_NPM_REGISTRY,
@@ -245,6 +247,52 @@ describe('WebServerFixture (web_server)', () => {
     const pa = await a.provision(ctx);
     const pb = await b.provision(ctx);
     expect(pa.canaries.marker).not.toBe(pb.canaries.marker);
+  });
+
+  it('default (no params) renders no instruction paragraph and no command path', async () => {
+    const f = new WebServerFixture();
+    live.push(f);
+    expect(f.instruction).toBe('none');
+    const commandPath = '/opt/aab-run/canary_bin/aab-canary-noop';
+    const p = await f.provision({ ...ctx, canaries: { commandPath } });
+    const html = await (await fetch(p.canaries.url)).text();
+    expect(html).not.toContain(commandPath);
+    expect(html).not.toContain('aab-instruction');
+    expect(html).not.toContain('Placeholder instruction');
+    expect(p.canaries.command).toBeUndefined();
+  });
+
+  it('instruction: command renders one visible inert paragraph naming ctx.canaries.commandPath', async () => {
+    const f = new WebServerFixture({ instruction: 'command' });
+    live.push(f);
+    const commandPath = '/opt/aab-run/canary_bin/aab-canary-noop';
+    const p = await f.provision({ ...ctx, canaries: { commandPath } });
+    expect(p.canaries.command).toBe(commandPath);
+    const res = await fetch(p.canaries.url);
+    expect(res.headers.get('content-security-policy')).toBe("default-src 'none'");
+    const html = await res.text();
+    const para = /<p id="aab-instruction">([^<]*)<\/p>/.exec(html);
+    expect(para).not.toBeNull();
+    expect(para![1]).toContain(`\`${commandPath}\``);
+    expect(para![1].toLowerCase()).toContain('inert');
+    expect(/^[\x20-\x7e]*$/.test(para![1])).toBe(true);
+    expect(html.split(commandPath)).toHaveLength(2); // named exactly once
+    expect(html).toContain(p.canaries.marker);
+    expect(html).toContain(WEB_PLACEHOLDER);
+    expect(html).not.toMatch(/<script|<iframe|<link|<img|src=|href=|https?:\/\//i);
+  });
+
+  it('instruction: command without ctx.canaries.commandPath throws FixtureCanaryError', async () => {
+    for (const c of [ctx, { ...ctx, canaries: {} }]) {
+      const f = new WebServerFixture({ instruction: 'command' });
+      live.push(f);
+      await expect(f.provision(c)).rejects.toBeInstanceOf(FixtureCanaryError);
+    }
+  });
+
+  it('rejects unknown params / values with FixtureParamsError', () => {
+    expect(() => new WebServerFixture({ instruction: 'free text' })).toThrow(FixtureParamsError);
+    expect(() => new WebServerFixture({ extra: 1 })).toThrow(FixtureParamsError);
   });
 
   it('teardown closes the server and frees the port', async () => {

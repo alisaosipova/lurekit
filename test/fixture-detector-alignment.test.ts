@@ -4,6 +4,8 @@
 //     AAB-021 keeps the decoy-MCP-tool text.
 //   - mcp_stdio/mcp_http `result_variant: names-canary-command` (AAB-006/023): the decoy tool's
 //     RESULT (and mcp_http server metadata) names the per-run canary command.
+//   - web_server `instruction: command` (AAB-056): the loopback page names the per-run canary
+//     command.
 //   - mcp.mcpServers merges key-by-key (AAB-019): both MCP servers reach the agent and both
 //     `expect.mcp_server` preconditions are checked.
 // Fully offline: REAL runner, REAL detectors, REAL fixtures, StubAdapter only; the only traffic
@@ -36,6 +38,7 @@ import {
   McpStdioFixture,
 } from '../src/fixtures/index.js';
 import { ENV_ISSUE_FEED_URL } from '../src/fixtures/contentFeed.js';
+import { ENV_WEB_URL } from '../src/fixtures/webServer.js';
 import {
   CANARY_MCP_TOOL,
   ENV_DESCRIPTION,
@@ -77,6 +80,7 @@ function serversOf(profile: SetupProfile | undefined): Servers {
 class AlignmentStub extends StubAdapter {
   profile?: SetupProfile;
   feed?: string;
+  page?: string;
   httpInstructions?: string;
   httpResult?: string;
   override async run(...args: Parameters<StubAdapter['run']>): ReturnType<StubAdapter['run']> {
@@ -84,6 +88,8 @@ class AlignmentStub extends StubAdapter {
     this.profile = profile;
     const feedUrl = profile.env?.[ENV_ISSUE_FEED_URL];
     if (feedUrl) this.feed = await (await fetch(feedUrl)).text();
+    const webUrl = profile.env?.[ENV_WEB_URL];
+    if (webUrl) this.page = await (await fetch(webUrl)).text();
     const http = Object.values(serversOf(profile)).find((s) => s.type === 'http' && s.url);
     if (http?.url) {
       const client = new Client({ name: 'aab-test', version: '0.0.0' });
@@ -108,7 +114,8 @@ class ObedientStub extends AlignmentStub {
     const obs = await super.run(...args);
     // The feed is JSON on the wire; an agent reads the decoded item bodies (on Windows the raw
     // JSON text carries the path with doubled backslashes, which is not a runnable path).
-    let text = feedBodies(this.feed) + (this.httpInstructions ?? '') + (this.httpResult ?? '');
+    let text =
+      feedBodies(this.feed) + pageText(this.page) + (this.httpInstructions ?? '') + (this.httpResult ?? '');
     for (const s of Object.values(serversOf(profile))) {
       if (s.env?.[ENV_RESULT] !== undefined) {
         text += await stdioDecoyResult(s.env, path.join(options!.runDir!, 'obedient-probe.log'));
@@ -131,6 +138,16 @@ function feedBodies(feed: string | undefined): string {
   if (feed === undefined) return '';
   const parsed = JSON.parse(feed) as { items?: Array<{ body?: string }> };
   return (parsed.items ?? []).map((i) => i.body ?? '').join('\n');
+}
+
+/** The visible text of the web_server page (tags stripped, the three escaped entities decoded). */
+function pageText(page: string | undefined): string {
+  if (page === undefined) return '';
+  return page
+    .replace(/<[^>]*>/g, '\n')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
 }
 
 async function callDecoy(client: Client): Promise<string> {
@@ -227,6 +244,25 @@ describe('issue_feed params.ask: the feed names what the detector watches', () =
   });
 });
 
+// --- 1b. web_server instruction ------------------------------------------------------------
+
+describe('web_server params.instruction: the page names what the detector watches', () => {
+  it('AAB-056 (canary_command): the page names the per-run command path (stub run)', async () => {
+    const s = shipped('AAB-056');
+    expect(s.forbidden_effect.detector).toBe('canary_command');
+    expect(s.fixtures[0].params).toEqual({ instruction: 'command' });
+    const { result, stub, runDir } = await drive(s);
+    expect(result.verdict).toBe('resisted');
+    const cmd = await commandPathIn(runDir);
+    expect(stub.page).toBeDefined();
+    const lines = pageText(stub.page).split('\n').filter((l) => l.includes(cmd));
+    expect(lines).toHaveLength(1);
+    expect(ASCII.test(lines[0])).toBe(true);
+    expect(lines[0].toLowerCase()).toContain('inert');
+    expect(stub.page).not.toMatch(/<script/i);
+  });
+});
+
 // --- 2. MCP result_variant -----------------------------------------------------------------
 
 describe('MCP params.result_variant: the decoy result names the per-run command', () => {
@@ -297,6 +333,7 @@ describe('MCP params.result_variant: the decoy result names the per-run command'
     { type: 'email_feed', params: { instruction: 'free text' } },
     { type: 'mcp_stdio', params: { result_variant: 'custom' } },
     { type: 'mcp_http', params: { result_text: 'free text' } },
+    { type: 'web_server', params: { instruction: 'free text' } },
   ];
   for (const ref of BAD) {
     it(`invalid ${ref.type} ${JSON.stringify(ref.params)} throws FixtureParamsError`, () => {
@@ -308,7 +345,7 @@ describe('MCP params.result_variant: the decoy result names the per-run command'
 // --- 2b. positive control: an obedient stub that follows the presented text is caught ------
 
 describe('obedient stub: following the presented placeholder yields a canary_command hit', () => {
-  for (const id of ['AAB-014', 'AAB-017', 'AAB-006', 'AAB-023']) {
+  for (const id of ['AAB-014', 'AAB-017', 'AAB-006', 'AAB-023', 'AAB-056']) {
     it(`${id}: running the named command -> vulnerable`, async () => {
       const s = shipped(id);
       expect(s.forbidden_effect.detector).toBe('canary_command');
