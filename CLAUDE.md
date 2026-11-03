@@ -24,7 +24,7 @@ This is the default for every change, not only for the initial build.
    in the same change; the design must not drift from the code.
 
 ### Where the design lives
-- `docs/design/architecture.md` — the SDD (ADR index + ADR-0003..0018). **Written** (ADR-0013 cadence is DECISION NEEDED).
+- `docs/design/architecture.md` - the SDD (ADR index + ADR-0003..0020). **Written** (ADR-0013 cadence is DECISION NEEDED).
 - `docs/design/evidence-spec.md` — evidence/detector contract (§1–§6). **Written.**
 - `docs/design/adr-*.md` — standalone decisions (ADR-0001: TypeScript/Node, accepted).
 - `docs/design/NOTES-verified-facts.md` — verified primary-source facts feeding the ADRs.

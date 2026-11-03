@@ -114,17 +114,24 @@ reporting. It is not a benchmark result, and every replayed run's `evidence.json
 
 ## Status
 
-- 48 scenarios catalogued in `scenarios/`; 30 are runnable.
-- 4 detectors: `canary_egress_http`, `canary_file_read`, `canary_command`, `canary_mcp_tool`.
-- 1 agent adapter: Claude Code (`--agent claude-code`).
-- Scenarios for cursor-cli, codex-cli and openhands are catalogued via each scenario's `applies_to`;
-  `plan()` skips them as `not_applicable` until those adapters exist (25 of the 30 runnable scenarios
-  apply to claude-code, 5 to other agents).
+LureKit 1.0.0 (see [CHANGELOG.md](CHANGELOG.md)).
+
+- 48 scenarios catalogued in `scenarios/`; 30 are runnable, and 25 of the runnable ones apply to
+  claude-code (the other 5 apply to other agents via each scenario's `applies_to`).
+- 5 detectors: `canary_egress_http`, `canary_file_read`, `canary_command`, `canary_mcp_tool`,
+  `fs_diff`. `canary_egress_dns` is declared in the schema but deferred; scenarios referencing it
+  fail loudly.
+- 8 inert fixture kinds: `poisoned_repo`, `mcp_stdio`, `mcp_http`, `skill_package`, `issue_feed`,
+  `email_feed`, `web_server`, `local_registry`.
+- 4 agent adapters: `claude-code` (live-validated), `cursor-cli`, `codex-cli` and `openhands`
+  (implemented and tested against offline stubs; not yet live-validated), plus the `replay`
+  adapter (`run --replay`).
 - 18 browser-track scenarios are catalogued with `runnable: false`, pending a browser adapter;
   `plan()` skips them as `not_runnable`.
 - The offline commands and the test suite run in CI. A live `run` against a real agent is a manual step
   performed by the maintainer; it is not part of CI.
-- Published run summaries: [docs/reports/](docs/reports/README.md) (first: Claude Code 2.1.316, 2026-11-02).
+- Published runs: six run bundles under [reports/](reports/) and the measurement summary in
+  [docs/reports/](docs/reports/README.md) (Claude Code 2.1.316, 2026-11-02).
 
 ## Adding a scenario
 

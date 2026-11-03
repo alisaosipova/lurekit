@@ -1,7 +1,17 @@
 {
   "name": "lurekit",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "description": "LureKit: a runnable, disclosure-traced security benchmark for deployed coding-agent configurations.",
+  "keywords": [
+    "security-benchmark",
+    "coding-agents",
+    "prompt-injection",
+    "mcp",
+    "claude-code",
+    "agent-security",
+    "supply-chain",
+    "canary"
+  ],
   "homepage": "https://github.com/alisaosipova/lurekit#readme",
   "bugs": {
     "url": "https://github.com/alisaosipova/lurekit/issues"
@@ -17,6 +27,7 @@
     "schemas",
     "scenarios",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "engines": {

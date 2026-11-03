@@ -1,6 +1,6 @@
 # LureKit: architecture (SDD)
 
-This is the system design document for LureKit 0.1 — a **measurement instrument**
+This is the system design document for LureKit 1.0 - a **measurement instrument**
 that reports how many disclosed attack scenarios a given deployed coding-agent configuration
 resists. It is not a gateway, a scanner, a jailbreak bench, or a service (see Non-goals in
 `docs/BRIEF.md` and `CLAUDE.md`).
@@ -20,6 +20,12 @@ The design is split across several files so each piece stays small and reviewabl
   MCP-name pseudonymisation, `--withhold`). **Proposed, implemented; awaiting approval.**
 - `adr-0018-codex-cli-adapter.md` — Codex CLI adapter (`codex exec --json`, stream-only, tested
   offline against a stub). **Proposed, implemented for the stream layer; awaiting approval.**
+- `adr-0019-openhands-adapter.md` - OpenHands adapter (legacy `openhands --headless --json`,
+  stream layer with a transcript cross-check, tested offline against a stub). **Proposed,
+  implemented for the stream layer; awaiting approval.**
+- `adr-0020-profile-settings-forwarding.md` - profile settings and hooks forwarded to Claude Code
+  through the harness settings file (`forwarded_settings` recorded). **Proposed, implemented;
+  awaiting approval.**
 - `evidence-spec.md` — the detector/evidence/verdict/adapter/reporting contract in detail
   (§1 detectors, §2 evidence+manifest, §3 verdicts, §4 adapter+observation, §5 redaction,
   §6 reporting). The ADRs below reference it rather than restating it.
@@ -442,7 +448,7 @@ plumbing, keep decisions in ADRs; codified in `CLAUDE.md`. This document was ass
 | 0005 | Reproducibility + manifest | accepted, implemented |
 | 0006 | Cost control | accepted, partially implemented |
 | 0007 | Isolation + safety (inert by construction) | accepted, implemented |
-| 0008 | Agent adapter contract | accepted; 3 adapters done (claude-code, cursor-cli, codex-cli) + replay; OpenHands pending |
+| 0008 | Agent adapter contract | accepted; 4 adapters (claude-code, cursor-cli, codex-cli, openhands) + replay; only claude-code live-validated |
 | 0009 | Effect detectors + observation | accepted; 5 of 6 detectors done (`canary_egress_dns` deferred: needs ADR-0007 resolver control); all 8 fixture kinds done |
 | 0010 | Dependency policy | accepted |
 | 0011 | Repository layout | accepted, implemented |
@@ -453,3 +459,5 @@ plumbing, keep decisions in ADRs; codified in `CLAUDE.md`. This document was ass
 | 0016 | Cursor CLI adapter (`adr-0016-cursor-cli-adapter.md`) | proposed, implemented (stream layer); awaiting approval |
 | 0017 | Publish + redaction gate (`adr-0017-publish-run.md`) | proposed, implemented; awaiting approval |
 | 0018 | Codex CLI adapter (`adr-0018-codex-cli-adapter.md`) | proposed, implemented (stream layer); awaiting approval |
+| 0019 | OpenHands adapter (`adr-0019-openhands-adapter.md`) | proposed, implemented (stream layer, transcript cross-check); awaiting approval |
+| 0020 | Profile settings forwarding (`adr-0020-profile-settings-forwarding.md`) | proposed, implemented; awaiting approval |
