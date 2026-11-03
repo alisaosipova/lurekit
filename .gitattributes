@@ -1,0 +1,6 @@
+# Keep line endings as committed on every OS: the demo bundle, the published bundles and the
+# generated docs are compared byte for byte in tests and in the CI docs job.
+* text=auto eol=lf
+*.svg text eol=lf
+*.json text eol=lf
+*.md text eol=lf
