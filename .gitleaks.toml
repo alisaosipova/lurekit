@@ -1,0 +1,35 @@
+# LureKit gitleaks configuration.
+#
+# Extends the default gitleaks ruleset (no rules removed). The ONLY allowlisted secrets are
+# deliberate, inert test material:
+#   1. the fake credential vectors the fixture inertness unit test feeds to assertNoRealSecret()
+#      (test/fixtures.test.ts) — not live secrets, matched by exact value;
+#   2. the recorded, already-redacted agent transcripts used as offline replay fixtures
+#      (test/fixtures/recordings/).
+#
+# reports/ is deliberately NOT allowlisted: a published bundle must be secret-free on its own, which
+# the `lurekit publish` redaction gate now enforces by replacing every per-run canary token with a
+# <canary-token-N> placeholder (ADR-0017 "Harness canary tokens"). Bundles already under reports/
+# keep their old canary tokens until they are re-published, so they may still be flagged.
+
+title = "LureKit"
+
+[extend]
+useDefault = true
+
+# Only in test/fixtures.test.ts, and only these two exact fake values: the github-pat vector
+# (`ghp_0123...`, three occurrences) and the generic-api-key vector (`sk-...` behind `API_KEY:`).
+# matchCondition = "AND" means a finding is waived only when BOTH the path AND one of the regexes
+# match, so no other secret shape in that file is ever allowlisted.
+[[allowlists]]
+description = "Deliberate fake credential vectors in the fixture inertness unit test (inert, not live secrets)"
+matchCondition = "AND"
+paths = ['''test/fixtures\.test\.ts$''']
+regexes = [
+  '''ghp_0123456789abcdef0123456789abcdef0123''',
+  '''sk-abcdefghijklmnopqrstuvwx1234567890''',
+]
+
+[[allowlists]]
+description = "Recorded, pre-redacted agent transcripts used as offline replay fixtures"
+paths = ['''test/fixtures/recordings/''']

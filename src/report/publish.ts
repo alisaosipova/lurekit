@@ -29,6 +29,18 @@
 // source are kept. These entries describe the operator's own MCP servers / connectors, which are
 // never part of the measurement. Applied before --redact-home and before the gate.
 //
+// Unconditional (ADR-0017 "Harness canary tokens"): the random per-run token/marker/command/
+// package values the detectors mint (src/detectors/*.ts: detector_hits[].matched.token / .marker
+// / .command / .package) are not findings. Each distinct value is replaced everywhere in the
+// bundle by a stable <canary-token-N> (one N per distinct value within the run), including where a
+// token is embedded in a URL, an argv entry or a request path. Values no detector hit recorded
+// are harvested too: any `aab-canary-<hex>` substring, and the token/marker/command/package values
+// of the kept scenarios' <kind>.canary.json detector metadata (read, never published; a malformed
+// one fails closed). Integrity digests (scenario_version,
+// task_sha256, settings_digest, input_digest, corpus_digest) live at other keys and are kept, as
+// are scenario source URLs and ids. Applied with the MCP-name rewrite, before --redact-home and
+// the gate.
+//
 // Opt-in (--withhold <id>, ADR-0017 "Withholding a scenario", ADR-0014 disclosure policy): the
 // named scenario is dropped from the published manifest.results, totals are recomputed from the
 // rest, its evidence is not copied, and every render plus index.md comes from the reduced
@@ -57,6 +69,11 @@ export interface BundleFile {
 export interface RunDirContents {
   manifestText: string;
   evidence: BundleFile[]; // rel = <scenario>/<rep>/evidence.json
+  /** Detector metadata files (rel = <scenario>/<rep>/<kind>.canary.json). Never published: read
+   *  only so every per-run canary value the detectors minted is known to the redaction, including
+   *  values that appear in a transcript although no detector hit recorded them (ADR-0017 "Harness
+   *  canary tokens"). Optional: absent = harvest from the bundle alone. */
+  canaryMeta?: BundleFile[];
 }
 
 export interface PublishPolicy {
@@ -102,6 +119,8 @@ export type PublishPlan =
       homeEncodedReplacements?: HomeEncodedCounts;
       /** Operator MCP server entries renamed to <user-mcp-N> (always counted; 0 = none). */
       mcpNameReplacements: number;
+      /** Harness canary token values replaced by <canary-token-N> (always counted; 0 = none). */
+      canaryTokenReplacements: number;
       /** Scenario ids withheld via --withhold (in manifest order; empty = none). */
       withheld: string[];
     }
@@ -212,6 +231,82 @@ export function collectHarnessMcpNames(value: unknown, out: Set<string>): Set<st
     }
   }
   return out;
+}
+
+// --- harness canary tokens (pure) -------------------------------------------------------
+
+/** JSON keys whose string value, when it has a canary-token shape, is a per-run harness secret a
+ *  detector minted (src/detectors/*.ts): `token` (canary_egress_http / canary_mcp_tool), `marker`
+ *  (canary_file_read), `command` (canary_command, `aab-canary-<hex>`) and `package`
+ *  (canary_egress_http registry mode, `aab-canary-<hex>`). Digest keys (scenario_version,
+ *  task_sha256, settings_digest, input_digest, corpus_digest) are deliberately absent: those are
+ *  integrity hashes that must survive. */
+export const CANARY_TOKEN_KEYS: ReadonlySet<string> = new Set(['token', 'marker', 'command', 'package']);
+
+/** The shape of a minted canary value: the `aab-canary-<hex>` family (command base and registry
+ *  package name) or a bare hex run of 16+ (randomBytes(8|16).toString('hex') = 16 or 32 hex). The
+ *  shape guard means a real agent value sharing one of these keys (e.g. a tool call's
+ *  `input.command` of `ls`, which is not canary-shaped) is never harvested. The whole string must
+ *  match, so a command line that merely contains the token is not itself taken (the token inside
+ *  it is still replaced, as a substring, by replaceCanaryTokens). */
+const CANARY_TOKEN_SHAPE = /^(?:aab-canary-[0-9a-f]{8,}|[0-9a-f]{16,})$/;
+
+/** The `aab-canary-<hex>` family as a substring: the prefix is harness-only, so any occurrence
+ *  anywhere (a tool-call command, a URL path) is a minted canary even without a detector hit. */
+const CANARY_PREFIXED_RE = /aab-canary-[0-9a-f]{8,}/g;
+
+/** Add every `aab-canary-<hex>` substring of `text` to `tokens` (first-seen order). Pure. */
+export function collectPrefixedCanaryTokens(text: string, tokens: Map<string, string>): Map<string, string> {
+  for (const m of text.matchAll(CANARY_PREFIXED_RE)) {
+    if (!tokens.has(m[0])) tokens.set(m[0], canaryTokenPlaceholder(tokens.size + 1));
+  }
+  return tokens;
+}
+
+/** The placeholder for the n-th (1-based) distinct canary token value within a run. */
+export const canaryTokenPlaceholder = (n: number): string => `<canary-token-${n}>`;
+
+/** Walk `value`, adding to `tokens` (original value -> placeholder) every canary-shaped string
+ *  found at a CANARY_TOKEN_KEYS key. First-seen order fixes the numbering; `tokens` is shared
+ *  across the manifest and every evidence record, so one value gets one placeholder everywhere.
+ *  Pure (reads only). */
+export function collectCanaryTokens(value: unknown, tokens: Map<string, string>): Map<string, string> {
+  if (!value || typeof value !== 'object') return tokens;
+  if (Array.isArray(value)) {
+    for (const v of value) collectCanaryTokens(v, tokens);
+    return tokens;
+  }
+  for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof v === 'string' && CANARY_TOKEN_KEYS.has(key) && CANARY_TOKEN_SHAPE.test(v)) {
+      if (!tokens.has(v)) tokens.set(v, canaryTokenPlaceholder(tokens.size + 1));
+    } else {
+      collectCanaryTokens(v, tokens);
+    }
+  }
+  return tokens;
+}
+
+/** Replace every occurrence of each harvested canary token value in `text` with its placeholder.
+ *  Longest value first, so one value can never clip another, and a placeholder (which carries no
+ *  hex run and no `aab-canary-` prefix) is never itself a replacement target. Returns the new text
+ *  and the number of replacements. Pure. */
+export function replaceCanaryTokens(
+  text: string,
+  tokens: Map<string, string>,
+  used?: Set<string>,
+): { text: string; count: number } {
+  if (tokens.size === 0) return { text, count: 0 };
+  let out = text;
+  let count = 0;
+  for (const value of [...tokens.keys()].sort((a, b) => b.length - a.length)) {
+    const placeholder = tokens.get(value) as string;
+    out = out.replace(new RegExp(escapeRe(value), 'g'), () => {
+      count++;
+      used?.add(value);
+      return placeholder;
+    });
+  }
+  return { text: out, count };
 }
 
 /** Re-serialise a rewritten JSON file in the layout of its original text (indent detected from
@@ -475,6 +570,10 @@ export interface IndexNotes {
   mcpNameReplacements?: number;
   /** Distinct operator MCP server names behind those replacements. */
   mcpDistinctNames?: number;
+  /** Harness canary token values replaced by <canary-token-N>; the note is shown when > 0. */
+  canaryTokenReplacements?: number;
+  /** Distinct canary token values behind those replacements. */
+  canaryDistinctTokens?: number;
   /** Scenario ids withheld via --withhold; a `## Withheld` section is shown when non-empty. */
   withheld?: string[];
 }
@@ -526,7 +625,8 @@ export function renderIndex(manifest: RunManifest, evidenceRels: string[], notes
   for (const rel of evidenceRels) out.push(`- [${rel}](${rel})`);
   out.push('');
   const mcpNotes = (notes.mcpNameReplacements ?? 0) > 0;
-  if (notes.homeReplacements !== undefined || mcpNotes) {
+  const canaryNotes = (notes.canaryTokenReplacements ?? 0) > 0;
+  if (notes.homeReplacements !== undefined || mcpNotes || canaryNotes) {
     out.push('## Redaction', '');
     if (notes.homeReplacements !== undefined) {
       out.push(`- redaction applied: home directory -> ${HOME_PLACEHOLDER} (${notes.homeReplacements} replacements)`);
@@ -541,6 +641,13 @@ export function renderIndex(manifest: RunManifest, evidenceRels: string[], notes
         `- redaction applied: operator MCP server names (mcp_servers entries whose source is not ` +
           `${[...HARNESS_MCP_SOURCES].join('/')}) -> <user-mcp-N> ` +
           `(${notes.mcpNameReplacements} replacements, ${notes.mcpDistinctNames ?? 0} distinct names)`,
+      );
+    }
+    if (canaryNotes) {
+      out.push(
+        `- redaction applied: harness canary tokens (per-run detector token/marker/command/package ` +
+          `values) -> <canary-token-N> ` +
+          `(${notes.canaryTokenReplacements} replacements, ${notes.canaryDistinctTokens ?? 0} distinct tokens)`,
       );
     }
     out.push('');
@@ -645,7 +752,6 @@ export function planPublish(contents: RunDirContents, policy: PublishPolicy = {}
   }
   const lookup = lookupFromRecords(manifest, records);
   const evidenceRels = keptEvidence.map((f) => f.rel);
-  const mcpNotes: IndexNotes = { mcpNameReplacements, mcpDistinctNames: mcpNames.size, withheld };
 
   let files: BundleFile[] = [
     { rel: 'manifest.json', text: manifestText },
@@ -654,6 +760,51 @@ export function planPublish(contents: RunDirContents, policy: PublishPolicy = {}
     { rel: 'report.json', text: report(manifest, { format: 'json' }) },
     { rel: 'report.sarif', text: report(manifest, { format: 'sarif' }) },
   ];
+
+  // Harness canary tokens (unconditional, ADR-0017 "Harness canary tokens"): harvest every
+  // distinct per-run token/marker/command/package value the detectors minted from the parsed
+  // objects (manifest first, then evidence in bundle order, so the numbering is deterministic),
+  // then replace each value everywhere in the bundle with <canary-token-N> — including where a
+  // token is embedded in a URL, an argv entry or a request path. Done here with the MCP-name
+  // rewrite, before --redact-home and the gate. index.md (built below) is passed through the same
+  // replacement so a token can never ride along there either. Source run dir is never touched.
+  // Values a detector minted but no hit recorded (the agent only named the canary in a tool
+  // call) are covered twice: by the `aab-canary-<hex>` substring shape, and by the kept
+  // scenarios' detector metadata files (read here, never published). A malformed metadata file
+  // fails closed, since its values could otherwise ship unredacted.
+  const canaryTokens = new Map<string, string>();
+  collectCanaryTokens(manifest, canaryTokens);
+  collectPrefixedCanaryTokens(manifestText, canaryTokens);
+  for (const p of parsed) {
+    collectCanaryTokens(p.rec, canaryTokens);
+    collectPrefixedCanaryTokens(p.text, canaryTokens);
+  }
+  for (const f of contents.canaryMeta ?? []) {
+    if (withholdSet.has(f.rel.split('/')[0])) continue;
+    try {
+      collectCanaryTokens(JSON.parse(f.text), canaryTokens);
+    } catch (err) {
+      return { ok: false, benchmarkRunId: id, error: `${f.rel} is not valid JSON: ${(err as Error).message}`, leaks: [] };
+    }
+  }
+  let canaryTokenReplacements = 0;
+  const canaryUsed = new Set<string>();
+  if (canaryTokens.size > 0) {
+    files = files.map((f) => {
+      const r = replaceCanaryTokens(f.text, canaryTokens, canaryUsed);
+      canaryTokenReplacements += r.count;
+      return { rel: f.rel, text: r.text };
+    });
+  }
+  const redactCanary = (text: string): string =>
+    canaryTokens.size > 0 ? replaceCanaryTokens(text, canaryTokens).text : text;
+  const mcpNotes: IndexNotes = {
+    mcpNameReplacements,
+    mcpDistinctNames: mcpNames.size,
+    withheld,
+    canaryTokenReplacements,
+    canaryDistinctTokens: canaryUsed.size,
+  };
 
   // --redact-home: rewrite the in-memory copies only (contents.* are fresh objects per file, the
   // run dir is never touched). index.md is rendered last so its note can carry the total count;
@@ -687,10 +838,10 @@ export function planPublish(contents: RunDirContents, policy: PublishPolicy = {}
     add(redactAll(renderIndex(manifest, evidenceRels, mcpNotes)));
     homeReplacements = total;
     homeEncodedReplacements = enc;
-    const index = redactAll(renderIndex(manifest, evidenceRels, { ...mcpNotes, homeReplacements, homeEncodedReplacements }));
+    const index = redactAll(redactCanary(renderIndex(manifest, evidenceRels, { ...mcpNotes, homeReplacements, homeEncodedReplacements })));
     files.push({ rel: 'index.md', text: index.text });
   } else {
-    files.push({ rel: 'index.md', text: renderIndex(manifest, evidenceRels, mcpNotes) });
+    files.push({ rel: 'index.md', text: redactCanary(renderIndex(manifest, evidenceRels, mcpNotes)) });
   }
 
   const allowed = new Set<string>();
@@ -705,8 +856,8 @@ export function planPublish(contents: RunDirContents, policy: PublishPolicy = {}
   if (policy.redactHome) leaks.push(...findUsernameTokens(files, policy.homeDir));
   if (leaks.length > 0) return { ok: false, benchmarkRunId: id, leaks };
   return homeReplacements === undefined
-    ? { ok: true, benchmarkRunId: id, files, mcpNameReplacements, withheld }
-    : { ok: true, benchmarkRunId: id, files, homeReplacements, homeEncodedReplacements, mcpNameReplacements, withheld };
+    ? { ok: true, benchmarkRunId: id, files, mcpNameReplacements, canaryTokenReplacements, withheld }
+    : { ok: true, benchmarkRunId: id, files, homeReplacements, homeEncodedReplacements, mcpNameReplacements, canaryTokenReplacements, withheld };
 }
 
 /** Human-readable failure text for a rejected plan. */
@@ -731,6 +882,7 @@ export function formatPlanFailure(plan: Extract<PublishPlan, { ok: false }>): st
 export function readRunDir(runDir: string): RunDirContents {
   const manifestText = readFileSync(path.join(runDir, 'manifest.json'), 'utf8');
   const evidence: BundleFile[] = [];
+  const canaryMeta: BundleFile[] = [];
   let ids: string[] = [];
   try {
     const m = JSON.parse(manifestText) as RunManifest;
@@ -749,9 +901,13 @@ export function readRunDir(runDir: string): RunDirContents {
     for (const rep of reps) {
       const p = path.join(sdir, String(rep), 'evidence.json');
       if (existsSync(p)) evidence.push({ rel: `${id}/${rep}/evidence.json`, text: readFileSync(p, 'utf8') });
+      const rdir = path.join(sdir, String(rep));
+      for (const name of readdirSync(rdir).filter((n) => n.endsWith('.canary.json')).sort()) {
+        canaryMeta.push({ rel: `${id}/${rep}/${name}`, text: readFileSync(path.join(rdir, name), 'utf8') });
+      }
     }
   }
-  return { manifestText, evidence };
+  return { manifestText, evidence, canaryMeta };
 }
 
 /** Write a gated bundle. Refuses a non-empty out dir so stale, unscanned files cannot ride along. */

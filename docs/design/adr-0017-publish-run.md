@@ -7,7 +7,8 @@ server names"). Amended 2026-11-02: `--withhold <scenario-id>` (repeatable) to k
 scenario out of the published copy under the ADR-0014 disclosure policy (see "Withholding a
 scenario"). Amended 2026-11-02: encoded spellings of the operator home (dash-encoded project
 slug, percent-encoded path) fail the gate and are rewritten by `--redact-home`, followed by a
-bare-username check (see "Encoded home spellings").
+bare-username check (see "Encoded home spellings"). Amended 2026-11-02: unconditional replacement
+of per-run harness canary token values with `<canary-token-N>` (see "Harness canary tokens").
 Authorises `src/report/publish.ts`, the `publish` subcommand in `src/cli.ts`, the exported
 `findSecretShape()` / `extractHost()` helpers in `src/fixtures/fixture.ts` (and the
 path-before-userinfo order of `extractHost()`), and
@@ -144,6 +145,43 @@ Option 3.
     `redaction applied: operator MCP server names (mcp_servers entries whose source is not
     dynamic/project) -> <user-mcp-N> (R replacements, D distinct names)`;
   - the run dir is never modified.
+- **Harness canary tokens (unconditional).** Each detector mints a random per-run secret and
+  records it in the evidence it writes (`src/detectors/*.ts`): `canary_egress_http` and
+  `canary_mcp_tool` a 32-hex `token`, `canary_file_read` a 32-hex `marker`, `canary_command` an
+  `aab-canary-<hex>` command name, `canary_egress_http` (registry mode) an `aab-canary-<hex>`
+  `package`. These land at `detector_hits[].matched.token` / `.marker` / `.command` / `.package`
+  (and, embedded, inside a URL, an argv entry or a request path the same hit carries). They are
+  control-sensor bookkeeping, not findings, and a bare hex run or `aab-canary-...` name is neither
+  a URL, a known token prefix nor a home path, so the §5 gate does not catch it — yet a published
+  `"token": "<32 hex>"` reads as a live credential to a secret scanner (gitleaks `generic-api-key`).
+  Therefore, with the MCP-name rewrite and before `--redact-home` and the gate:
+  - every `manifest.json` and evidence record is walked; the string value at a key in
+    {`token`, `marker`, `command`, `package`} is harvested **only when it has a canary shape**
+    (`aab-canary-<hex>`, or a hex run of 16+), so a real value sharing one of those keys (a tool
+    call's `input.command` of `ls`, a fixed decoy tool name) is never taken;
+  - each distinct harvested value is assigned `<canary-token-N>`, `N` in first-seen order
+    (manifest, then evidence in bundle order), with one map for the whole publish, so one value
+    gets one placeholder in every file;
+  - a value no detector hit recorded (the agent only named the registry package, the canary
+    command or the token in a tool call, so `detector_hits` is empty) is harvested as well, two
+    ways: any `aab-canary-<hex>` **substring** of the manifest or an evidence file (the prefix is
+    harness-only), then the `token` / `marker` / `command` / `package` values (same shape guard)
+    of each kept scenario's `<id>/<rep>/<kind>.canary.json` detector metadata. Those metadata files
+    are read for this only and are **never published**; a withheld scenario's metadata is not read;
+    a metadata file that is not valid JSON fails the publish closed (nothing written). The decoy
+    file name (`fileName`, `canary_<hex>.decoy`) is a path, not a token, and is not harvested;
+  - every occurrence of each value is replaced across the **whole** bundle (manifest, evidence,
+    the three renders, `index.md`), including where the value is embedded in a larger string, so a
+    token inside a URL, an `argv` entry or a captured request path is masked too; the surrounding
+    structure (a loopback host, the rest of a command line) is kept;
+  - integrity digests (`scenario_version`, `task_sha256`, `settings_digest`, `input_digest`,
+    `corpus_digest`), scenario `source` URLs and scenario ids live at other keys and are never
+    harvested, so they survive unchanged;
+  - when at least one value was replaced, `index.md`'s `## Redaction` section gains the line
+    `redaction applied: harness canary tokens (per-run detector token/marker/command/package
+    values) -> <canary-token-N> (R replacements, D distinct tokens)`, where `D` counts only the
+    harvested values that were actually replaced;
+  - the run dir is never modified (the replacement is on the in-memory copies only).
 - **Withholding a scenario (`--withhold <scenario-id>`, repeatable, opt-in).** ADR-0014 keeps
   a scenario citing a still-unpatched issue out of the public catalog until the fix ships or 90
   days pass. A run may still include it (CI runs the private tier), so its verdict and evidence
@@ -228,6 +266,16 @@ publish: redaction gate failed (evidence-spec §5), 1 finding(s); nothing writte
   how many, their status and their source class, e.g. to see that strict MCP isolation was not
   in effect) survives the rewrite. Making it opt-in would publish the operator's connector list
   by default, which no reader needs. The bytes in the run dir are unchanged for local audit.
+- Harness canary tokens are rewritten unconditionally, like operator MCP server names and unlike
+  `--redact-home`: the value is the tool's own per-run secret, never an observed fact, so masking
+  it changes no published finding. Replacement is by exact value, substring-wide, so a token is
+  caught wherever it was echoed; it is guarded by a canary shape so a real agent command or a
+  digest is never touched, and the `index.md` count tells a reader `<canary-token-N>` is a
+  substitution. A bundle published before this amendment still carries its raw tokens until the
+  run is re-published; the committed `reports/` tree is historical and `.gitleaks.toml` does **not**
+  allowlist it, so a re-publish (not an allowlist) is what makes it clean. The gate still runs
+  afterwards, so a token with an unknown canary shape that this step missed is only caught if it
+  also matches a `SECRET_PATTERNS` family.
 - The rewrite covers only the structured `mcp_servers` field. If the agent actually called a
   tool of an operator server, its `mcp__<server>__<tool>` name in `tool_calls` is a fact of the
   run and is published as is; a maintainer who must not disclose it should not publish that run.

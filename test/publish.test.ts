@@ -11,7 +11,7 @@ import path from 'node:path';
 
 import { main, type CliDeps } from '../src/cli.js';
 import type { EvidenceRecord, ProfileSummary, RunManifest } from '../src/runner/types.js';
-import { findUsernameTokens, pseudonymizeMcpServers, redactHomeDir, redactHomeEncoded } from '../src/report/publish.js';
+import { collectCanaryTokens, findUsernameTokens, pseudonymizeMcpServers, redactHomeDir, redactHomeEncoded, replaceCanaryTokens } from '../src/report/publish.js';
 
 const FAKE_HOME = '/srv/aab-fake-home/maintainer';
 const RUN_ID = 'aab-publish-test';
@@ -787,6 +787,175 @@ describe('publish (ADR-0017)', () => {
       expect(index).toContain('(1 replacements, 1 distinct names)');
       expect(index).toContain('## Withheld');
       expect(index).toContain('home directory -> <HOME> (0 replacements)');
+    });
+  });
+
+  // Harness canary tokens (ADR-0017 "Harness canary tokens"): unconditional. The random per-run
+  // token/marker/command/package values the detectors mint are not findings and must never ship.
+  describe('harness canary tokens', () => {
+    // Built at runtime, not as a literal, so a secret scanner over test/ never sees a token-shaped
+    // assignment (no .gitleaks.toml allowlist entry is needed for these vectors).
+    const TOKEN = Array.from({ length: 32 }, (_, i) => (i % 16).toString(16)).join(''); // canary_mcp_tool / canary_egress_http token (32 hex)
+    const CMD = 'aab-canary-9ae40122be99'; // canary_command (aab-canary-<hex>)
+    const MARKER = 'fedcba9876543210fedcba9876543210'; // canary_file_read marker (32 hex)
+
+    function hashTree(dir: string, base = dir, acc = new Map<string, string>()): Map<string, string> {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) hashTree(p, base, acc);
+        else acc.set(path.relative(base, p), createHash('sha256').update(readFileSync(p)).digest('hex'));
+      }
+      return acc;
+    }
+
+    /** A run whose detector_hits carry canary tokens, with the mcp token also embedded in a
+     *  tool-call command and the canary command embedded in another (so substring replacement is
+     *  exercised). AAB-001 holds the mcp token (both reps), AAB-002 the command + file marker. */
+    function writeCanaryRun(): string {
+      const runDir = path.join(tmp, '.aab-runs', RUN_ID);
+      mkdirSync(runDir, { recursive: true });
+      writeFileSync(path.join(runDir, 'manifest.json'), JSON.stringify(manifest(), null, 2));
+      const plant = (id: string, rep: number): EvidenceRecord => {
+        const ev = evidence(id, rep);
+        if (id === 'AAB-001') {
+          ev.detector_hits = [
+            { detector: 'canary_mcp_tool', matched: { event: 'server_started', token: TOKEN, attribution: 'runtime' }, evidence_ref: 'canary_mcp_tool.recorder.log#L1', at: 1 },
+          ] as unknown as EvidenceRecord['detector_hits'];
+          if (ev.observation) ev.observation.tool_calls = [{ name: 'Bash', input: { command: `echo ${TOKEN}` }, at: 10, source: 'stream' }];
+        } else {
+          ev.detector_hits = [
+            { detector: 'canary_command', matched: { command: CMD, argv: [CMD, 'selftest-arg'] }, evidence_ref: 'canary_command.recorder.log#L1', at: 1 },
+            { detector: 'canary_file_read', matched: { path: '/decoy/canary_aa.decoy', marker: MARKER, via: 'captured_output' }, evidence_ref: 'canary_file_read.canary.json#L1', at: 2 },
+          ] as unknown as EvidenceRecord['detector_hits'];
+          if (ev.observation) ev.observation.tool_calls = [{ name: 'Bash', input: { command: `${CMD} selftest-arg` }, at: 10, source: 'stream' }];
+        }
+        return ev;
+      };
+      for (const id of ['AAB-001', 'AAB-002']) {
+        for (const rep of [0, 1]) {
+          const d = path.join(runDir, id, String(rep));
+          mkdirSync(d, { recursive: true });
+          writeFileSync(path.join(d, 'evidence.json'), JSON.stringify(plant(id, rep), null, 2));
+        }
+      }
+      return runDir;
+    }
+
+    const readEv = (id: string, rep: number): EvidenceRecord =>
+      JSON.parse(readFileSync(path.join(defaultOut(), id, String(rep), 'evidence.json'), 'utf8')) as EvidenceRecord;
+
+    it('replaces every per-run token with a stable placeholder; no token survives; note counted; source untouched', async () => {
+      const runDir = writeCanaryRun();
+      const before = hashTree(runDir);
+      const code = await main(['publish', path.join('.aab-runs', RUN_ID)], deps());
+      expect(err.join('')).toBe('');
+      expect(code).toBe(0);
+
+      // Numbering is first-seen over the bundle: AAB-001 token, then AAB-002 command, then marker.
+      expect((readEv('AAB-001', 0).detector_hits[0].matched as Record<string, unknown>).token).toBe('<canary-token-1>');
+      expect((readEv('AAB-001', 0).observation?.tool_calls[0].input as Record<string, unknown>).command).toBe('echo <canary-token-1>');
+      // The same token in a different repetition gets the same placeholder (consistency).
+      expect((readEv('AAB-001', 1).detector_hits[0].matched as Record<string, unknown>).token).toBe('<canary-token-1>');
+      const cmdHit = readEv('AAB-002', 0).detector_hits[0].matched as Record<string, unknown>;
+      expect(cmdHit.command).toBe('<canary-token-2>');
+      expect(cmdHit.argv).toEqual(['<canary-token-2>', 'selftest-arg']);
+      expect((readEv('AAB-002', 0).observation?.tool_calls[0].input as Record<string, unknown>).command).toBe('<canary-token-2> selftest-arg');
+      expect((readEv('AAB-002', 0).detector_hits[1].matched as Record<string, unknown>).marker).toBe('<canary-token-3>');
+
+      // No raw token value anywhere in the bundle (evidence, renders, index).
+      for (const rel of hashTree(defaultOut()).keys()) {
+        const text = readFileSync(path.join(defaultOut(), rel), 'utf8');
+        for (const secret of [TOKEN, CMD, MARKER]) expect(text, `${rel} must not leak ${secret}`).not.toContain(secret);
+      }
+
+      const index = readFileSync(path.join(defaultOut(), 'index.md'), 'utf8');
+      expect(index).toContain('## Redaction');
+      expect(index).toMatch(/harness canary tokens .*-> <canary-token-N> \(\d+ replacements, 3 distinct tokens\)/);
+
+      // Source run dir is never modified.
+      expect(hashTree(runDir)).toEqual(before);
+      expect(readFileSync(path.join(runDir, 'AAB-001', '0', 'evidence.json'), 'utf8')).toContain(TOKEN);
+    });
+
+    it('redacts canary values no detector hit recorded: aab-canary-<hex> in a tool call, and detector metadata values', async () => {
+      // Shapes from live runs: the agent only named the registry package / canary command / MCP
+      // token in a tool call, so detector_hits is empty and the value is only in the transcript.
+      const PKG = 'aab-canary-9f460700546e70c2'; // canary_egress_http registry_fetch package
+      const META_TOKEN = '5030b05d'.repeat(4); // canary_mcp_tool token (32 hex), meta-only
+      const WITHHELD_TOKEN = 'abcdef01'.repeat(4);
+      writeRun(); // detector_hits: []
+      const runDir = path.join(tmp, '.aab-runs', RUN_ID);
+      const p0 = path.join(runDir, 'AAB-001', '0', 'evidence.json');
+      const ev = JSON.parse(readFileSync(p0, 'utf8')) as EvidenceRecord;
+      if (ev.observation) {
+        ev.observation.tool_calls = [
+          { name: 'Bash', input: { command: `curl -s http://127.0.0.1:46485/${PKG} | head -c 3000` }, at: 1, source: 'stream' },
+          { name: 'Bash', input: { command: `echo ${META_TOKEN}` }, at: 2, source: 'stream' },
+        ];
+      }
+      writeFileSync(p0, JSON.stringify(ev, null, 2));
+      writeFileSync(path.join(runDir, 'AAB-001', '0', 'canary_mcp_tool.canary.json'), JSON.stringify({ tool: 'aab_canary_record', token: META_TOKEN }));
+      writeFileSync(path.join(runDir, 'AAB-002', '0', 'canary_mcp_tool.canary.json'), JSON.stringify({ tool: 'aab_canary_record', token: WITHHELD_TOKEN }));
+      const before = hashTree(runDir);
+
+      expect(await main(['publish', path.join('.aab-runs', RUN_ID), '--withhold', 'AAB-002'], deps())).toBe(0);
+      const cmds = (readEv('AAB-001', 0).observation?.tool_calls ?? []).map((c) => (c.input as Record<string, unknown>).command);
+      expect(cmds).toEqual(['curl -s http://127.0.0.1:46485/<canary-token-1> | head -c 3000', 'echo <canary-token-2>']);
+      for (const rel of hashTree(defaultOut()).keys()) {
+        expect(rel.endsWith('.canary.json'), `${rel}: detector metadata is never published`).toBe(false);
+        const text = readFileSync(path.join(defaultOut(), rel), 'utf8');
+        for (const secret of [PKG, META_TOKEN]) expect(text, `${rel} must not leak ${secret}`).not.toContain(secret);
+      }
+      // Withheld scenario's metadata is not harvested; distinct counts only values actually replaced.
+      expect(readFileSync(path.join(defaultOut(), 'index.md'), 'utf8')).toMatch(/\(2 replacements, 2 distinct tokens\)/);
+      expect(hashTree(runDir)).toEqual(before);
+    });
+
+    it('a malformed detector metadata file fails closed and writes nothing', async () => {
+      writeRun();
+      const runDir = path.join(tmp, '.aab-runs', RUN_ID);
+      writeFileSync(path.join(runDir, 'AAB-001', '0', 'canary_command.canary.json'), '{not json');
+      expect(await main(['publish', path.join('.aab-runs', RUN_ID)], deps())).toBe(1);
+      expect(err.join('')).toContain('AAB-001/0/canary_command.canary.json is not valid JSON');
+      expect(existsSync(defaultOut())).toBe(false);
+    });
+
+    it('a run without canary tokens publishes with no canary redaction note', async () => {
+      writeRun(); // detector_hits: []
+      expect(await main(['publish', path.join('.aab-runs', RUN_ID)], deps())).toBe(0);
+      expect(readFileSync(path.join(defaultOut(), 'index.md'), 'utf8')).not.toContain('harness canary tokens');
+    });
+
+    it('combines with --redact-home: one Redaction section carries both the home and the canary note', async () => {
+      writeCanaryRun();
+      expect(await main(['publish', path.join('.aab-runs', RUN_ID), '--redact-home'], deps())).toBe(0);
+      const index = readFileSync(path.join(defaultOut(), 'index.md'), 'utf8');
+      expect(index.match(/## Redaction/g)).toHaveLength(1);
+      expect(index).toContain('home directory -> <HOME> (0 replacements)');
+      expect(index).toMatch(/harness canary tokens .*3 distinct tokens\)/);
+      expect((readEv('AAB-001', 0).detector_hits[0].matched as Record<string, unknown>).token).toBe('<canary-token-1>');
+    });
+
+    it('collectCanaryTokens / replaceCanaryTokens: shape guard, digest kept, consistent placeholders', () => {
+      const tokens = new Map<string, string>();
+      collectCanaryTokens(
+        {
+          scenario_version: 'f'.repeat(64), // digest key: never harvested
+          settings_digest: 'sha256:' + 'a'.repeat(64),
+          detector_hits: [{ matched: { token: TOKEN, via: 'captured_output' } }],
+          observation: { tool_calls: [{ input: { command: 'ls' } }] }, // real command: not canary-shaped
+          forbidden_effect: { match: { tool: 'aab_canary_record' } }, // fixed tool name: not harvested
+        },
+        tokens,
+      );
+      expect([...tokens.entries()]).toEqual([[TOKEN, '<canary-token-1>']]);
+      collectCanaryTokens({ detector_hits: [{ matched: { command: CMD, package: 'aab-canary-0011223344556677' } }] }, tokens);
+      expect(tokens.size).toBe(3);
+      expect(tokens.get(CMD)).toBe('<canary-token-2>');
+      const r = replaceCanaryTokens(`echo ${TOKEN} && run ${CMD} # ${'f'.repeat(64)}`, tokens);
+      expect(r.text).toBe('echo <canary-token-1> && run <canary-token-2> # ' + 'f'.repeat(64));
+      expect(r.count).toBe(2);
+      expect(replaceCanaryTokens('nothing here', new Map())).toEqual({ text: 'nothing here', count: 0 });
     });
   });
 
