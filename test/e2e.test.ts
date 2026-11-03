@@ -13,8 +13,7 @@
 // workdirs live under a temp root removed in afterEach.
 
 import { afterEach, describe, it, expect } from 'vitest';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { rm, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -24,6 +23,7 @@ import type { DetectorKind, Scenario } from '../src/scenario/types.js';
 import type { SetupProfile } from '../src/adapters/adapter.js';
 import { fixturesForScenario } from '../src/fixtures/index.js';
 import { StubAdapter } from './helpers/stubAdapter.js';
+import { mkScratch } from './helpers/scratch.js';
 
 const SCENARIOS_DIR = fileURLToPath(new URL('../scenarios', import.meta.url));
 // One row per shipped RUNNABLE scenario: its expected detector (the stub's trigger in vulnerable mode)
@@ -196,7 +196,7 @@ const RUNNABLE_IDS = [...CLAUDE_CODE_IDS, ...NOT_APPLICABLE_IDS].sort();
 
 const roots: string[] = [];
 async function tmpRoot(): Promise<string> {
-  const d = await mkdtemp(path.join(tmpdir(), 'aab-e2e-'));
+  const d = await mkScratch('aab-e2e-');
   roots.push(d);
   return d;
 }

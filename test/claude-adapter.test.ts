@@ -6,10 +6,9 @@
 // cost, effective model/mode from system/init, and that the AbortSignal kills the child.
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { chmod, copyFile, mkdir, mkdtemp, readdir, rm, readFile, stat, symlink, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, readdir, rm, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -28,6 +27,8 @@ import type { RunObservation, SetupProfile } from '../src/adapters/adapter.js';
 import { BenchmarkRunner, canonical, type RunConfig } from '../src/runner/runner.js';
 import type { Scenario } from '../src/scenario/types.js';
 import { createHash } from 'node:crypto';
+import { mkScratch } from './helpers/scratch.js';
+import { pollUntil } from './helpers/deadline.js';
 
 const STUB = fileURLToPath(new URL('./fixtures/agents/stub-claude.mjs', import.meta.url));
 const MODEL = 'claude-opus-4-8';
@@ -46,7 +47,7 @@ async function harness(
   overrides: Partial<SetupProfile> = {},
   extraEnv: Record<string, string> = {},
 ): Promise<Harness> {
-  const base = await mkdtemp(path.join(tmpdir(), 'aab-cc-adapter-'));
+  const base = await mkScratch('aab-cc-adapter-');
   tmpDirs.push(base);
   const workdir = path.join(base, 'work');
   const runDir = path.join(base, 'run');
@@ -71,17 +72,8 @@ async function readArgv(argvPath: string): Promise<string[]> {
 }
 
 /** Poll until a file exists (used to abort only once the stub has emitted init). */
-async function waitForFile(file: string, timeoutMs = 5000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    try {
-      await stat(file);
-      return;
-    } catch {
-      if (Date.now() > deadline) throw new Error(`timed out waiting for ${file}`);
-      await new Promise((r) => setTimeout(r, 10));
-    }
-  }
+async function waitForFile(file: string): Promise<void> {
+  await pollUntil(() => stat(file), `timed out waiting for ${file}`);
 }
 
 afterEach(async () => {
@@ -263,7 +255,7 @@ describe('ClaudeCodeAdapter stub isolation + abort (§4.5)', () => {
   });
 
   it('kills the child when the AbortSignal fires', async () => {
-    const base = await mkdtemp(path.join(tmpdir(), 'aab-cc-abort-'));
+    const base = await mkScratch('aab-cc-abort-');
     tmpDirs.push(base);
     const runDir = path.join(base, 'run');
     const readyPath = path.join(runDir, 'stub-ready');
@@ -408,7 +400,7 @@ describe('ClaudeCodeAdapter --setting-sources hardening knob (§4.3)', () => {
 // injected, so no test waits on the real 1s/2s/4s schedule.
 describe('ClaudeCodeAdapter binary resolution and launch retry (§4.3)', () => {
   async function binDir(): Promise<string> {
-    const d = await mkdtemp(path.join(tmpdir(), 'aab-cc-bin-'));
+    const d = await mkScratch('aab-cc-bin-');
     tmpDirs.push(d);
     return d;
   }
@@ -565,7 +557,7 @@ describe('retryLaunch (§4.3)', () => {
 // differs from the cached one is warned about.
 describe('ClaudeCodeAdapter launch retry boundaries (§4.3)', () => {
   async function binDir(): Promise<string> {
-    const d = await mkdtemp(path.join(tmpdir(), 'aab-cc-bin-'));
+    const d = await mkScratch('aab-cc-bin-');
     tmpDirs.push(d);
     return d;
   }
@@ -804,7 +796,7 @@ describe('ClaudeCodeAdapter forwards profile settings/hooks in the one --setting
   });
 
   it('evidence digests (settings_digest, hooks) match the profile portion of the forwarded body', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'aab-cc-fwd-'));
+    const root = await mkScratch('aab-cc-fwd-');
     tmpDirs.push(root);
     const echo = (n: string) => path.join(root, `${n}.json`);
     const scenario = (id: string): Scenario => ({

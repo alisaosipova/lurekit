@@ -7,8 +7,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { createHash } from 'node:crypto';
 import { createServer as createNetServer } from 'node:net';
 import { gunzipSync } from 'node:zlib';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
@@ -32,8 +31,12 @@ import {
 } from '../src/fixtures/localRegistry.js';
 import { buildFixture, IMPLEMENTED_FIXTURES } from '../src/fixtures/index.js';
 import type { Fixture } from '../src/fixtures/fixture.js';
+import { mkScratch, TEST_WORK_ROOT } from './helpers/scratch.js';
 
-const ctx: FixtureContext = { runDir: '/tmp/aab-noop-run', workdir: '/tmp/aab-noop-work' };
+// Never created: a fixture that appends to <runDir> (local_registry access log) fails silently
+// instead of writing anywhere, and the path is repo-local, never under /tmp (evidence-spec s2.1).
+const NOOP_BASE = path.join(TEST_WORK_ROOT, 'never-created');
+const ctx: FixtureContext = { runDir: path.join(NOOP_BASE, 'run'), workdir: path.join(NOOP_BASE, 'work') };
 
 describe('assertLoopback (invariant a)', () => {
   it('accepts loopback hosts, host:port and URLs', () => {
@@ -376,7 +379,7 @@ describe('LocalRegistryFixture (local_registry)', () => {
   });
 
   it('logs one JSON line per request (method, path, time, kind) into the run dir', async () => {
-    const runDir = await mkdtemp(path.join(tmpdir(), 'aab-reg-log-'));
+    const runDir = await mkScratch('aab-reg-log-');
     const f = new LocalRegistryFixture();
     live.push(f);
     try {

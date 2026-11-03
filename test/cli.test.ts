@@ -3,8 +3,7 @@
 // Proves the entry point wires scenarios -> adapter -> runner -> reporter and writes a manifest.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, copyFileSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync, mkdirSync, copyFileSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -12,6 +11,7 @@ import { main, type CliDeps } from '../src/cli.js';
 import type { AgentId } from '../src/scenario/types.js';
 import type { RunManifest } from '../src/runner/types.js';
 import { StubAdapter } from './helpers/stubAdapter.js';
+import { mkScratchSync } from './helpers/scratch.js';
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 const realScenarios = path.join(repoRoot, 'scenarios');
@@ -35,7 +35,7 @@ function deps(adapterFor?: CliDeps['adapterFor']): CliDeps {
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(tmpdir(), 'aab-cli-'));
+  tmp = mkScratchSync('aab-cli-');
 });
 afterEach(() => {
   rmSync(tmp, { recursive: true, force: true });

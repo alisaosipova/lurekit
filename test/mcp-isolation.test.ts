@@ -11,9 +11,8 @@
 //     installed through --settings and never rewrites the planted .claude/settings.json.
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, readFile, rm } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -28,6 +27,7 @@ import type { FixtureContext, FixtureProvision } from '../src/fixtures/fixture.j
 import { buildScore, renderMarkdown } from '../src/report/index.js';
 import { PARTIAL_MARKER } from '../src/report/markdown.js';
 import type { Scenario } from '../src/scenario/types.js';
+import { mkScratch } from './helpers/scratch.js';
 
 type AjvCtor = new (opts: Record<string, unknown>) => {
   compile<T = unknown>(schema: unknown): ValidateFunction<T>;
@@ -77,7 +77,7 @@ class HookedPoisonedRepoFixture extends PoisonedRepoFixture {
 }
 
 async function setup(brid: string) {
-  const root = await mkdtemp(path.join(tmpdir(), 'aab-mcp-iso-'));
+  const root = await mkScratch('aab-mcp-iso-');
   roots.push(root);
   const argvDir = path.join(root, 'argv');
   const runner = new BenchmarkRunner({

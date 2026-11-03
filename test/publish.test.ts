@@ -4,8 +4,7 @@
 // finding, exit 1 and nothing is written.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
@@ -16,6 +15,7 @@ import type { ValidateFunction } from 'ajv';
 import { main, type CliDeps } from '../src/cli.js';
 import type { EvidenceRecord, ProfileSummary, RunManifest } from '../src/runner/types.js';
 import { collectCanaryTokens, findUsernameTokens, pseudonymizeMcpServers, redactHomeDir, redactHomeEncoded, replaceCanaryTokens } from '../src/report/publish.js';
+import { mkScratchSync } from './helpers/scratch.js';
 
 type AjvCtor = new (opts: Record<string, unknown>) => { compile(schema: unknown): ValidateFunction };
 const Ajv2020 = ((_Ajv2020 as unknown as { default?: AjvCtor }).default ?? _Ajv2020) as AjvCtor;
@@ -117,7 +117,7 @@ function writeRun(plant?: Record<string, unknown>): string {
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(tmpdir(), 'aab-publish-'));
+  tmp = mkScratchSync('aab-publish-');
 });
 afterEach(() => {
   rmSync(tmp, { recursive: true, force: true });

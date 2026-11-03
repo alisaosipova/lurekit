@@ -18,6 +18,29 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+### Changed
+- Tests: `testTimeout` and `hookTimeout` are 30 s (one constant in `test/helpers/deadline.ts`);
+  the stub ready-file polls in the claude/cursor/codex/openhands adapter tests use the shared
+  `pollUntil` with a deadline derived from, and below, the test timeout. Fixes spurious 5 s
+  timeouts on a loaded host.
+- Tests: every scratch directory is allocated by `test/helpers/scratch.ts` under the ignored
+  `.aab-test-work/` instead of `os.tmpdir()` (evidence-spec s2.1); only the TMPDIR sentinel test
+  still calls `tmpdir()`. Because repo-local scratch always has the repository as a git
+  ancestor, the codex-cli "workdir has no .git entry" test now covers the nested-in-a-repo
+  warning; the outside-any-repository branch is no longer exercised by the suite.
+- `package.json` gains `"prepack": "npm run build"`: `npm pack` / `npm publish` cannot ship a stale
+  `dist/`.
+- CI (ADR-0012): the package job runs `doctor --format json`, `demo` and `list` with the
+  installed bin from an empty directory and checks the pack lists `dist/`; a new hygiene job
+  rejects `tmpdir()` scratch in `src/` and `test/`.
+- `examples/profiles/` is a README pointer to `profiles/` (ADR-0011, one profiles directory); the
+  drifted copies are removed. `examples/run-live.sh` types the pinned Claude Code version once and
+  reads `--agent-version` from the pinned binary instead of a literal (it said 2.1.316 for a
+  2.1.317 install).
+
+### Removed
+- The empty, untracked `src/profile/` directory.
+
 ## [1.2.0] - 2026-11-04
 
 Minor release: new subcommands `demo` and `doctor`, `run` is smoke by default and asks before it

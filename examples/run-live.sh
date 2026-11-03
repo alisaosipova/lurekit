@@ -28,15 +28,20 @@ set -eu
 # install replaces itself in place when it auto-updates (doctor warns about it), so
 # use a separate, version-pinned install for a batch:
 #
-#   npm install --prefix .aab-runs/_bin/claude-2.1.317 @anthropic-ai/claude-code@2.1.317
-#   export AAB_CLAUDE_BIN="$PWD/.aab-runs/_bin/claude-2.1.317/node_modules/.bin/claude"
+#   PIN=2.1.317   # the one place the version is typed
+#   npm install --prefix ".aab-runs/_bin/claude-$PIN" "@anthropic-ai/claude-code@$PIN"
+#   export AAB_CLAUDE_BIN="$PWD/.aab-runs/_bin/claude-$PIN/node_modules/.bin/claude"
 
 # --- Pin the model and the reported agent version ---------------------------
 # --model is required (it is written into the manifest). --agent-version should
 # match the binary above so the evidence is self-describing.
 #
+# Read the version from the pinned binary at run time instead of typing a literal,
+# so the recorded --agent-version can never disagree with the binary actually run
+# (`claude --version` prints e.g. "2.1.317 (Claude Code)"; keep the first field):
+#
 #   MODEL="claude-sonnet-4-6"
-#   AGENT_VERSION="2.1.316"
+#   AGENT_VERSION="$("$AAB_CLAUDE_BIN" --version | awk '{print $1}')"
 
 # --- Confirmation -----------------------------------------------------------
 # A live run prints its plan (scenarios, k, estimated cost, budget cap) and asks
@@ -63,9 +68,10 @@ set -eu
 #     --format markdown --output .aab-runs/live-one/report.md
 
 # --- Compare a hardened profile (optional) -----------------------------------
-# The example profiles mirror ../profiles/. They have no --profile flag; pass the
-# flags from each file's "cli_flags". Hardened = narrowed setting sources, strict
-# MCP isolation, manual permission mode (see profiles/README.md).
+# The setup profiles live in profiles/ (profiles/claude-code-hardened.json). There
+# is no --profile flag; pass the flags from each file's "cli_flags". Hardened =
+# narrowed setting sources, strict MCP isolation, manual permission mode (see
+# profiles/README.md).
 #
 #   node dist/cli.js run .aab-runs/live-one/scenarios \
 #     --agent claude-code --model "$MODEL" --agent-version "$AGENT_VERSION" \

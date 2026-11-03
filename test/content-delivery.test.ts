@@ -13,7 +13,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { request as httpRequest } from 'node:http';
@@ -36,6 +36,7 @@ import type { RunManifest } from '../src/runner/types.js';
 import type { FixtureKind, Scenario } from '../src/scenario/types.js';
 import { loadScenarioDir } from '../src/scenario/load.js';
 import { StubAdapter } from './helpers/stubAdapter.js';
+import { mkScratch, rmScratch } from './helpers/scratch.js';
 
 type AjvCtor = new (opts: Record<string, unknown>) => {
   compile<T = unknown>(schema: unknown): ValidateFunction<T>;
@@ -47,20 +48,18 @@ const validateEvidence = new Ajv2020({ strict: false, allErrors: true }).compile
 );
 const RECORDING = path.join(repoRoot, 'test/fixtures/recordings/claude-sample');
 const SCENARIOS = path.join(repoRoot, 'scenarios');
-const WORK_BASE = path.join(repoRoot, '.aab-test-work');
 
 const NEVER_FETCHED = (type: string) =>
   `precondition failed: fixture content was never fetched by the agent (${type})`;
 
 const roots: string[] = [];
 async function tmpRoot(): Promise<string> {
-  mkdirSync(WORK_BASE, { recursive: true });
-  const d = await mkdtemp(path.join(WORK_BASE, 'content-delivery-'));
+  const d = await mkScratch('content-delivery-');
   roots.push(d);
   return d;
 }
 afterEach(async () => {
-  while (roots.length > 0) await rm(roots.pop()!, { recursive: true, force: true });
+  while (roots.length > 0) await rmScratch(roots.pop()!);
 });
 
 function send(method: string, url: string): Promise<{ status: number; body: string }> {

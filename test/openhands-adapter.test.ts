@@ -3,8 +3,7 @@
 // network is touched and nothing is spent.
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -25,6 +24,8 @@ import {
 import type { SetupProfile } from '../src/adapters/adapter.js';
 import { defaultDeps } from '../src/cli.js';
 import { realpathOf } from './helpers/osPaths.js';
+import { mkScratch } from './helpers/scratch.js';
+import { pollUntil } from './helpers/deadline.js';
 
 const STUB = fileURLToPath(new URL('./fixtures/agents/stub-openhands.mjs', import.meta.url));
 const MODEL = 'anthropic/claude-sonnet-4-5';
@@ -44,7 +45,7 @@ interface StubEnv {
 interface Harness { profile: SetupProfile; runDir: string; argvPath: string; envPath: string; versionFile: string; }
 
 async function harness(overrides: Partial<SetupProfile> = {}, extraEnv: Record<string, string> = {}): Promise<Harness> {
-  const base = await mkdtemp(path.join(tmpdir(), 'aab-openhands-adapter-'));
+  const base = await mkScratch('aab-openhands-adapter-');
   tmpDirs.push(base);
   const runDir = path.join(base, 'run');
   const argvPath = path.join(base, 'stub-argv.json');
@@ -298,17 +299,13 @@ describe('binary resolution, abort, errors', () => {
   });
 
   it('kills the child on abort', async () => {
-    const base = await mkdtemp(path.join(tmpdir(), 'aab-openhands-abort-'));
+    const base = await mkScratch('aab-openhands-abort-');
     tmpDirs.push(base);
     const ready = path.join(base, 'ready');
     const h = await harness({}, { AAB_STUB_HANG: '1', AAB_STUB_READY: ready });
     const ac = new AbortController();
     const p = adapter().run(h.profile, TASK, ac.signal, { runDir: h.runDir });
-    const deadline = Date.now() + 5000;
-    for (;;) {
-      try { await stat(ready); break; } catch { if (Date.now() > deadline) throw new Error('stub never ready'); }
-      await new Promise((r) => setTimeout(r, 10));
-    }
+    await pollUntil(() => stat(ready), 'stub never ready');
     ac.abort();
     expect((await p).exit_code).not.toBe(0);
   });

@@ -2,12 +2,12 @@
 // present) AND (not_contains absent or absent from the content). Fully offline: writes a file
 // into a temp workdir and calls checkBenign directly.
 import { afterEach, describe, it, expect } from 'vitest';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { checkBenign } from '../src/runner/runner.js';
 import type { Scenario } from '../src/scenario/types.js';
+import { mkScratch } from './helpers/scratch.js';
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -15,7 +15,7 @@ afterEach(async () => {
 });
 
 async function check(match: Record<string, unknown>, content?: string) {
-  const workdir = await mkdtemp(path.join(tmpdir(), 'aab-benign-fw-'));
+  const workdir = await mkScratch('aab-benign-fw-');
   dirs.push(workdir);
   if (content !== undefined) await writeFile(path.join(workdir, 'notes.txt'), content, 'utf8');
   const benign = { check: 'file_written', match: { path: 'notes.txt', ...match } } as Scenario['benign_task'];

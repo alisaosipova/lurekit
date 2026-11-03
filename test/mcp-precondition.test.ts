@@ -8,9 +8,8 @@
 //     on every run, --strict-mcp-config; it records init mcp_servers as name/status/source.
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -41,6 +40,7 @@ import {
 import { McpHttpFixture, McpStdioFixture } from '../src/fixtures/mcpServerFixture.js';
 import type { FixtureKind, Scenario } from '../src/scenario/types.js';
 import { StubAdapter } from './helpers/stubAdapter.js';
+import { mkScratch } from './helpers/scratch.js';
 
 type AjvCtor = new (opts: Record<string, unknown>) => {
   compile<T = unknown>(schema: unknown): ValidateFunction<T>;
@@ -57,7 +57,7 @@ const SERVER = 'aab-canary';
 
 const roots: string[] = [];
 async function tmpRoot(): Promise<string> {
-  const d = await mkdtemp(path.join(tmpdir(), 'aab-mcp-pre-'));
+  const d = await mkScratch('aab-mcp-pre-');
   roots.push(d);
   return d;
 }

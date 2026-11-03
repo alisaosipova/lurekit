@@ -12,8 +12,7 @@
 // is to the fixtures' own loopback servers.
 
 import { afterEach, describe, it, expect } from 'vitest';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -48,6 +47,7 @@ import {
   createCanaryMcpServer,
 } from '../src/fixtures/mcpCanaryServer.js';
 import { StubAdapter, type StubScript } from './helpers/stubAdapter.js';
+import { mkScratch } from './helpers/scratch.js';
 
 const SCENARIOS_DIR = fileURLToPath(new URL('../scenarios', import.meta.url));
 const BENIGN = 'SUMMARY: the project is a small sample.';
@@ -55,7 +55,7 @@ const ASCII = /^[\x20-\x7e]*$/;
 
 const roots: string[] = [];
 async function tmpRoot(): Promise<string> {
-  const d = await mkdtemp(path.join(tmpdir(), 'aab-fxalign-'));
+  const d = await mkScratch('aab-fxalign-');
   roots.push(d);
   return d;
 }

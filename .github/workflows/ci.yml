@@ -209,7 +209,8 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci --ignore-scripts
-      # No prepack script: build before packing, as release.yml does.
+      # package.json "prepack" runs the build, so `npm pack` (and a manual `npm publish`) never ships a stale
+      # dist/. The explicit build stays so a build failure is reported as its own step.
       - run: npm run build
       - name: Pack, install the tarball and run the installed bin (offline commands only)
         run: |
@@ -221,3 +222,61 @@ jobs:
           test "$("$bin" --version)" = "$(node -p "require('$GITHUB_WORKSPACE/package.json').version")"
           "$bin" validate node_modules/lurekit/scenarios
           "$bin" selftest
+      # ADR-0012: the newcomer commands, run the way a first-time user runs them, from an EMPTY directory (no
+      # checkout, no scenarios/ next to the cwd). Offline: no agent is installed on the runner and none is launched.
+      - name: Newcomer commands from an empty directory (installed bin, offline)
+        shell: bash
+        run: |
+          bin="$RUNNER_TEMP/smoke/node_modules/.bin/lurekit"
+          shipped="$RUNNER_TEMP/smoke/node_modules/lurekit/scenarios"
+          mkdir "$RUNNER_TEMP/empty" && cd "$RUNNER_TEMP/empty"
+          test -z "$(ls -A)"
+          # doctor: exit 1 is expected here (no agent binary on the runner); the JSON must still parse and list checks.
+          set +e
+          "$bin" doctor --format json > doctor.json
+          rc=$?
+          set -e
+          test "$rc" -eq 0 -o "$rc" -eq 1 || { echo "::error::doctor exited $rc"; exit 1; }
+          node -e 'const j = JSON.parse(require("fs").readFileSync("doctor.json", "utf8")); if (!Array.isArray(j.checks) || j.checks.length === 0) { console.error("FAIL: doctor JSON has no checks"); process.exit(1); } console.log(`ok: doctor ${j.checks.length} checks, fail=${j.fail}`);'
+          rm doctor.json
+          # demo: replays the shipped demo run; exit 0 and the plain-language summary.
+          "$bin" demo > demo.txt
+          grep -q "In plain language" demo.txt || { echo "::error::demo output lacks 'In plain language'"; exit 1; }
+          rm demo.txt
+          # list: the CLI defaults to ./scenarios relative to the cwd and does not yet fall back to the shipped
+          # corpus, so it is given the installed corpus explicitly.
+          # TODO(block 5): drop the argument once `lurekit list` falls back to the shipped corpus.
+          "$bin" list "$shipped"
+          # run --replay: skipped. The recordings live under test/fixtures/recordings/, which package.json "files"
+          # does not ship, so there is no recording in the tarball to replay (the replay job covers it from a checkout).
+          test -z "$(ls -A)" || { echo "::error::newcomer commands left files in the empty directory:"; ls -A; exit 1; }
+      - name: npm pack lists dist/ (prepack builds it)
+        shell: bash
+        run: |
+          npm pack --dry-run --json > "$RUNNER_TEMP/pack.json"
+          node -e 'const p = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))[0]; const n = p.files.filter((f) => f.path.startsWith("dist/")).length; if (n === 0 || !p.files.some((f) => f.path === "dist/cli.js")) { console.error("FAIL: dist/ missing from the pack"); process.exit(1); } console.log(`ok: ${n} dist files`);' "$RUNNER_TEMP/pack.json"
+
+  hygiene:
+    # evidence-spec s2.1: nothing under os.tmpdir(). Scratch goes to repo-local ignored dirs (.aab-runs/,
+    # .aab-test-work/); the one allowed test is test/per-run-workdir.test.ts, which redirects TMPDIR to an empty
+    # sentinel and proves the runner writes nothing there.
+    name: Repository hygiene (no os.tmpdir scratch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: No os.tmpdir() / tmpdir() call in src/ or test/ (except the TMPDIR sentinel test)
+        shell: bash
+        run: |
+          hits="$(grep -rnE '(os\.)?\btmpdir\(' src test | grep -v '^test/per-run-workdir\.test\.ts:' | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*|/\*)' || true)"
+          if [ -n "$hits" ]; then echo "::error::tmpdir() scratch found (evidence-spec s2.1):"; echo "$hits"; exit 1; fi
+          echo "ok: no tmpdir() call outside the sentinel test"
+      # The captured-stdout file name is still read by src/detectors/canaryFileRead.ts; it is retired in block 2.
+      # Until then this step only warns. TODO(block 2): turn the warning into a failure (src/ only; test/ may keep it).
+      - name: No agent-output.log in src/ (warning until block 2)
+        shell: bash
+        run: |
+          hits="$(grep -rn 'agent-output\.log' src || true)"
+          if [ -n "$hits" ]; then echo "::warning::agent-output.log still referenced in src/ (block 2 retires it):"; echo "$hits"; else echo "ok: no agent-output.log in src/"; fi

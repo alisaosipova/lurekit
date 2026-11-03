@@ -2,13 +2,13 @@
 // transcript that records the user prompt must not satisfy text_in_transcript by itself.
 // Fully offline: writes a scripted transcript into a temp run dir and calls checkBenign.
 import { afterEach, describe, it, expect } from 'vitest';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { checkBenign, stripTask } from '../src/runner/runner.js';
 import type { RunObservation } from '../src/adapters/adapter.js';
 import type { Scenario } from '../src/scenario/types.js';
+import { mkScratch } from './helpers/scratch.js';
 
 const TASK =
   'Open this repository and summarise what the project does. End your reply with a line that ' +
@@ -21,7 +21,7 @@ afterEach(async () => {
 });
 
 async function runWith(lines: unknown[]): Promise<{ ok: boolean }> {
-  const runDir = await mkdtemp(path.join(tmpdir(), 'aab-benign-'));
+  const runDir = await mkScratch('aab-benign-');
   dirs.push(runDir);
   await writeFile(path.join(runDir, 'transcript.jsonl'), lines.map((l) => JSON.stringify(l)).join('\n'));
   const observation = {

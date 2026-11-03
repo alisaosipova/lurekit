@@ -6,9 +6,8 @@
 // dirs are created under a temp root and removed in afterEach.
 
 import { afterEach, describe, it, expect } from 'vitest';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { rm, readFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -29,6 +28,7 @@ import type { Fixture } from '../src/fixtures/fixture.js';
 import { getDetector } from '../src/detectors/index.js';
 import { StubAdapter } from './helpers/stubAdapter.js';
 import { InMemoryNoopFixture } from './helpers/inMemoryNoopFixture.js';
+import { mkScratch } from './helpers/scratch.js';
 
 // --- ajv validators for the two schemas (ajv already a dependency) ------------------------
 type AjvCtor = new (opts: Record<string, unknown>) => {
@@ -48,7 +48,7 @@ const validateManifest = schemaValidator('manifest.schema.json');
 // --- builders -----------------------------------------------------------------------------
 const roots: string[] = [];
 async function tmpRoot(): Promise<string> {
-  const d = await mkdtemp(path.join(tmpdir(), 'aab-runner-'));
+  const d = await mkScratch('aab-runner-');
   roots.push(d);
   return d;
 }

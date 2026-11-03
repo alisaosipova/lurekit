@@ -7,8 +7,7 @@
 // Fully offline: REAL runner, REAL detectors, REAL fixtures, StubAdapter only.
 
 import { afterEach, describe, it, expect } from 'vitest';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile, rm, stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
@@ -44,13 +43,14 @@ import {
 import type { FixtureContext } from '../src/fixtures/fixture.js';
 import { StubAdapter, collapseBlankLines, type StubScript } from './helpers/stubAdapter.js';
 import { containsEscapedOrRaw, countEscapedOrRaw, listPosixFiles } from './helpers/osPaths.js';
+import { mkScratch } from './helpers/scratch.js';
 
 const SCENARIOS_DIR = fileURLToPath(new URL('../scenarios', import.meta.url));
 const BENIGN = 'SUMMARY: the project is a small sample.';
 
 const roots: string[] = [];
 async function tmpRoot(): Promise<string> {
-  const d = await mkdtemp(path.join(tmpdir(), 'aab-fxparams-'));
+  const d = await mkScratch('aab-fxparams-');
   roots.push(d);
   return d;
 }

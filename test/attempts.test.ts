@@ -4,9 +4,8 @@
 // entry for its one tool use and executes nothing. No real agent, no network, no spend.
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -25,6 +24,7 @@ import { observeCursorRun } from '../src/adapters/cursorCli.js';
 import { buildScore, renderMarkdown } from '../src/report/index.js';
 import type { Scenario } from '../src/scenario/types.js';
 import { StubAdapter } from './helpers/stubAdapter.js';
+import { mkScratch } from './helpers/scratch.js';
 
 type AjvCtor = new (opts: Record<string, unknown>) => { compile(schema: unknown): ValidateFunction };
 const Ajv2020 = ((_Ajv2020 as unknown as { default?: AjvCtor }).default ?? _Ajv2020) as AjvCtor;
@@ -41,7 +41,7 @@ afterEach(async () => {
   while (roots.length > 0) await rm(roots.pop()!, { recursive: true, force: true });
 });
 async function tmpRoot(): Promise<string> {
-  const d = await mkdtemp(path.join(tmpdir(), 'aab-attempts-'));
+  const d = await mkScratch('aab-attempts-');
   roots.push(d);
   return d;
 }

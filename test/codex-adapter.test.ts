@@ -3,8 +3,7 @@
 // touched and nothing is spent.
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -21,6 +20,8 @@ import {
 } from '../src/adapters/codexCli.js';
 import type { SetupProfile } from '../src/adapters/adapter.js';
 import { defaultDeps } from '../src/cli.js';
+import { mkScratch } from './helpers/scratch.js';
+import { pollUntil } from './helpers/deadline.js';
 
 const STUB = fileURLToPath(new URL('./fixtures/agents/stub-codex.mjs', import.meta.url));
 const MODEL = 'gpt-5.5-codex';
@@ -43,7 +44,7 @@ async function harness(
   extraEnv: Record<string, string> = {},
   opts: { git?: boolean } = {},
 ): Promise<Harness> {
-  const base = await mkdtemp(path.join(tmpdir(), 'aab-codex-adapter-'));
+  const base = await mkScratch('aab-codex-adapter-');
   tmpDirs.push(base);
   const runDir = path.join(base, 'run');
   const argvPath = path.join(base, 'stub-argv.json');
@@ -253,11 +254,17 @@ describe('warnings', () => {
     expect((await readJson<{ CODEX_HOME: string }>(h2.envPath)).CODEX_HOME).toBe(home);
   });
 
-  it('warns on a workdir without .git unless the git check is skipped', async () => {
+  // Scratch is repo-local (.aab-test-work/, evidence-spec s2.1), so a .git-less workdir always
+  // has the repository as a git ancestor: this exercises the nested-workdir branch. The
+  // "outside any git repository" branch cannot be reached from repo-local scratch without a
+  // seam in the adapter's ancestor lookup; it is not covered here (see CHANGELOG, Unreleased).
+  it('warns on a .git-less workdir nested in a repository, with or without the git-check skip', async () => {
     const h = await harness({}, {}, { git: false });
-    expect((await run(h)).warnings!.join('\n')).toMatch(/no \.git entry/);
+    const w = (await run(h)).warnings!.join('\n');
+    expect(w).toMatch(/no \.git entry but an ancestor is a git repository/);
+    expect(w).not.toMatch(/exits 1 outside a git repository/);
     const h2 = await harness({ permission_mode: 'skip-git-repo-check' }, {}, { git: false });
-    expect((await run(h2)).warnings!.join('\n')).not.toMatch(/no \.git entry/);
+    expect((await run(h2)).warnings!.join('\n')).toMatch(/ancestor is a git repository/);
   });
 
   it('warns on a project .codex/ layer, on bypass-hook-trust and on --bare', async () => {
@@ -302,17 +309,13 @@ describe('binary resolution, abort, errors', () => {
   });
 
   it('kills the child on abort', async () => {
-    const base = await mkdtemp(path.join(tmpdir(), 'aab-codex-abort-'));
+    const base = await mkScratch('aab-codex-abort-');
     tmpDirs.push(base);
     const ready = path.join(base, 'ready');
     const h = await harness({}, { AAB_STUB_HANG: '1', AAB_STUB_READY: ready });
     const ac = new AbortController();
     const p = adapter().run(h.profile, TASK, ac.signal, { runDir: h.runDir });
-    const deadline = Date.now() + 5000;
-    for (;;) {
-      try { await stat(ready); break; } catch { if (Date.now() > deadline) throw new Error('stub never ready'); }
-      await new Promise((r) => setTimeout(r, 10));
-    }
+    await pollUntil(() => stat(ready), 'stub never ready');
     ac.abort();
     const obs = await p;
     expect(obs.exit_code).not.toBe(0);

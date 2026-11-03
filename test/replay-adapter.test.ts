@@ -3,8 +3,7 @@
 // spawned, no network is touched, nothing is spent.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, copyFileSync, readFileSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync, mkdirSync, copyFileSync, readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -13,6 +12,7 @@ import { observeClaudeRun } from '../src/adapters/claudeCode.js';
 import type { SetupProfile } from '../src/adapters/adapter.js';
 import { main, type CliDeps } from '../src/cli.js';
 import type { RunManifest } from '../src/runner/types.js';
+import { mkScratchSync } from './helpers/scratch.js';
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 const RECORDING = path.join(repoRoot, 'test/fixtures/recordings/claude-sample');
@@ -21,7 +21,7 @@ const realScenarios = path.join(repoRoot, 'scenarios');
 
 let tmp: string;
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(tmpdir(), 'aab-replay-'));
+  tmp = mkScratchSync('aab-replay-');
 });
 afterEach(() => {
   rmSync(tmp, { recursive: true, force: true });

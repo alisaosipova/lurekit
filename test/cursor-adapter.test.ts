@@ -3,8 +3,7 @@
 // is touched and nothing is spent.
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -18,6 +17,8 @@ import {
 } from '../src/adapters/cursorCli.js';
 import type { SetupProfile } from '../src/adapters/adapter.js';
 import { defaultDeps } from '../src/cli.js';
+import { mkScratch } from './helpers/scratch.js';
+import { pollUntil } from './helpers/deadline.js';
 
 const STUB = fileURLToPath(new URL('./fixtures/agents/stub-cursor.mjs', import.meta.url));
 const MODEL = 'claude-4-sonnet';
@@ -31,7 +32,7 @@ afterEach(async () => {
 interface Harness { profile: SetupProfile; runDir: string; argvPath: string; versionFile: string; }
 
 async function harness(overrides: Partial<SetupProfile> = {}, extraEnv: Record<string, string> = {}): Promise<Harness> {
-  const base = await mkdtemp(path.join(tmpdir(), 'aab-cursor-adapter-'));
+  const base = await mkScratch('aab-cursor-adapter-');
   tmpDirs.push(base);
   const runDir = path.join(base, 'run');
   const argvPath = path.join(base, 'stub-argv.json');
@@ -227,17 +228,13 @@ describe('binary resolution, abort, errors', () => {
   });
 
   it('kills the child on abort', async () => {
-    const base = await mkdtemp(path.join(tmpdir(), 'aab-cursor-abort-'));
+    const base = await mkScratch('aab-cursor-abort-');
     tmpDirs.push(base);
     const ready = path.join(base, 'ready');
     const h = await harness({}, { AAB_STUB_HANG: '1', AAB_STUB_READY: ready });
     const ac = new AbortController();
     const p = adapter().run(h.profile, TASK, ac.signal, { runDir: h.runDir });
-    const deadline = Date.now() + 5000;
-    for (;;) {
-      try { await stat(ready); break; } catch { if (Date.now() > deadline) throw new Error('stub never ready'); }
-      await new Promise((r) => setTimeout(r, 10));
-    }
+    await pollUntil(() => stat(ready), 'stub never ready');
     ac.abort();
     const obs = await p;
     expect(obs.exit_code).not.toBe(0);

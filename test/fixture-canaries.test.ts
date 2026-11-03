@@ -5,8 +5,7 @@
 // Fully offline: REAL runner, REAL detectors, REAL fixtures, StubAdapter only.
 
 import { afterEach, describe, it, expect } from 'vitest';
-import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readFile, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -21,12 +20,13 @@ import {
   SkillPackageFixture,
 } from '../src/fixtures/index.js';
 import { StubAdapter } from './helpers/stubAdapter.js';
+import { mkScratch } from './helpers/scratch.js';
 
 const SCENARIOS_DIR = fileURLToPath(new URL('../scenarios', import.meta.url));
 
 const roots: string[] = [];
 async function tmpRoot(): Promise<string> {
-  const d = await mkdtemp(path.join(tmpdir(), 'aab-fxcanary-'));
+  const d = await mkScratch('aab-fxcanary-');
   roots.push(d);
   return d;
 }

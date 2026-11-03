@@ -9,7 +9,7 @@ concepts behind them, read [docs/guide/scenarios.md](../docs/guide/scenarios.md)
 | Path | What it is |
 | --- | --- |
 | `scenario-template.yaml` | A fully annotated scenario. Every field explained inline; schema-valid and runnable offline. |
-| `profiles/` | Copies of the canonical setup profiles in `../profiles/`, so the scripts are self-contained. |
+| `profiles/README.md` | A pointer: the setup profiles live in [`../profiles/`](../profiles/) (one directory, no copies). |
 | `run-offline.sh` | The whole pipeline with no agent and no spend. Safe to run; execute it. |
 | `run-live.sh` | A reference for a budgeted LIVE run against a pinned binary. Commented out; not executed. |
 
@@ -45,8 +45,8 @@ into `scenarios/`, rename it to the next free `AAB-NNN.yaml`, and set `id: AAB-N
 
 ## profiles/
 
-Copies of `../profiles/claude-code-bare.json` and `../profiles/claude-code-hardened.json`. The
-canonical directory is the source of truth; see [profiles/README.md](profiles/README.md) here and
+The setup profiles live in one directory, [`../profiles/`](../profiles/); `examples/` keeps no
+copies (they drifted). The scripts here reference `profiles/` directly. See
 [../profiles/README.md](../profiles/README.md) for what each knob excludes. There is no `--profile`
 flag - pass the flags listed in each file's `cli_flags`.
 

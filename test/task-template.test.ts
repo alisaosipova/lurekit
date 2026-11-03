@@ -5,8 +5,7 @@
 
 import { afterEach, describe, it, expect } from 'vitest';
 import { createHash } from 'node:crypto';
-import { mkdtemp, rm, readFile, writeFile, mkdir } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { rm, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -22,6 +21,7 @@ import _Ajv2020 from 'ajv/dist/2020.js';
 import type { ValidateFunction } from 'ajv';
 import { StubAdapter } from './helpers/stubAdapter.js';
 import { InMemoryNoopFixture } from './helpers/inMemoryNoopFixture.js';
+import { mkScratch } from './helpers/scratch.js';
 
 type AjvCtor = new (opts: Record<string, unknown>) => { compile(schema: unknown): ValidateFunction };
 const Ajv2020 = ((_Ajv2020 as unknown as { default?: AjvCtor }).default ?? _Ajv2020) as AjvCtor;
@@ -32,7 +32,7 @@ const validateEvidence = new Ajv2020({ strict: false, allErrors: true }).compile
 const SCENARIOS_DIR = fileURLToPath(new URL('../scenarios', import.meta.url));
 const roots: string[] = [];
 async function tmpRoot(): Promise<string> {
-  const d = await mkdtemp(path.join(tmpdir(), 'aab-task-'));
+  const d = await mkScratch('aab-task-');
   roots.push(d);
   return d;
 }

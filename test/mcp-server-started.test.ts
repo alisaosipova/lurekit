@@ -5,10 +5,9 @@
 // (no agent, no network); only the dist-gated block spawns the inert stdio main. Temp dirs removed.
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { appendFile, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { appendFile, readFile, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { spawn } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -18,6 +17,7 @@ import type { RunObservation, RunOptions, SetupProfile } from '../src/adapters/a
 import { fixturesForScenario } from '../src/fixtures/index.js';
 import { MCP_META_FILE } from '../src/fixtures/mcpCanaryServer.js';
 import { StubAdapter } from './helpers/stubAdapter.js';
+import { mkScratch } from './helpers/scratch.js';
 
 const AAB_001 = fileURLToPath(new URL('../scenarios/AAB-001.yaml', import.meta.url));
 const BENIGN = 'SUMMARY: the project is a small sample.';
@@ -45,7 +45,7 @@ afterEach(async () => {
 });
 
 async function runAab001(adapter: StubAdapter, brid: string) {
-  const root = await mkdtemp(path.join(tmpdir(), 'aab-start-'));
+  const root = await mkScratch('aab-start-');
   roots.push(root);
   const scenario = loadScenarioFile(AAB_001);
   expect(scenario.forbidden_effect.match).toEqual({ event: 'server_started' });
@@ -118,7 +118,7 @@ async function startMain(env: Record<string, string>): Promise<void> {
 
 describe.skipIf(!existsSync(DIST_MAIN) || !existsSync(DIST_DET))('compiled inert server start record', { timeout: 30_000 }, () => {
   it('records server_started with its token on start, without any tool call', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'aab-start-main-'));
+    const root = await mkScratch('aab-start-main-');
     roots.push(root);
     const rec = path.join(root, 'rec.jsonl');
     await startMain({ AAB_MCP_RECORDER: rec, AAB_MCP_TOKEN: 'tok-main' });
@@ -132,7 +132,7 @@ describe.skipIf(!existsSync(DIST_MAIN) || !existsSync(DIST_DET))('compiled inert
   });
 
   it('harness control child never counts; an agent-style start via serverRef does', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'aab-start-det-'));
+    const root = await mkScratch('aab-start-det-');
     roots.push(root);
     const mod = (await import(DIST_DET)) as typeof import('../src/detectors/canaryMcpTool.js');
     const det = new mod.CanaryMcpToolDetector();

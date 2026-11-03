@@ -3,17 +3,17 @@
 // import.meta.url is the real file; the guard must resolve both to the same real path.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, symlinkSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync, writeFileSync, symlinkSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { isMainModule } from '../src/cli.js';
+import { mkScratchSync } from './helpers/scratch.js';
 
 let tmp: string;
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(tmpdir(), 'aab-cli-main-'));
+  tmp = mkScratchSync('aab-cli-main-');
 });
 
 afterEach(() => {

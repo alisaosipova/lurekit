@@ -343,6 +343,15 @@ small core, "adding a scenario = one-file PR."
 - Curators touch only `scenarios/` + `schemas/`; engine changes stay in `src/`.
 - The boundary between data and code keeps one-file contributions reviewable.
 
+**Amendment (2026-11-03): one profiles directory.** Setup profiles live only in `profiles/`
+(`profiles/*.json` plus `profiles/settings/`). `examples/profiles/` holds a README pointer and no
+copies: the copies had already drifted from the canonical files, and two sources of truth for
+the flags a measured run used defeat the point of recording them. Example scripts reference
+`profiles/` directly. The never-populated `src/profile/` directory is removed; profile handling
+stays in the CLI flags (`cli_flags` in each profile file), as there is no `--profile` flag.
+Test scratch lives under the ignored `.aab-test-work/` via `test/helpers/scratch.ts`, never
+`os.tmpdir()` (evidence-spec s2.1).
+
 ## ADR-0012: Contribution model
 
 **Status:** accepted (2026-11-01), to be published (roadmap Week 4). CI scope revised 2026-11-02:
@@ -378,6 +387,19 @@ reproducibility checklist.
 - The mechanical quality bar (schema, detector controls, pipeline end to end) is enforced by CI;
   the behavioural bar (a live agent run) is enforced by the maintainer before merge.
 - A contributor cannot merge a scenario that reaches a real host or lacks a disclosure.
+
+**Amendment (2026-11-03): package smoke from an empty directory, prepack.** The package job
+installs the packed tarball and runs the installed bin the way a first-time user does, from an
+EMPTY directory (no checkout, no `scenarios/` beside the cwd): `doctor --format json` (exit 0 or
+1, as the runner has no agent; the JSON must parse and list checks), `demo` (exit 0, output
+carries the plain-language summary), and `list` on the installed corpus (until `list` falls back
+to the shipped corpus, roadmap block 5); `run --replay` is not smoked there because the
+recordings are not in the package `files`. The directory must still be empty afterwards.
+`package.json` has `"prepack": "npm run build"`, so `npm pack` and a manual `npm publish` always
+build `dist/` first and cannot ship a stale build; the job checks that the pack lists `dist/`.
+A hygiene job fails on any `tmpdir()` call in `src/` or `test/` outside the TMPDIR sentinel test
+(`test/per-run-workdir.test.ts`), and warns (until block 2 retires it) on `agent-output.log` in
+`src/`.
 
 ## ADR-0013: Weekly update cadence — **DECISION NEEDED**
 

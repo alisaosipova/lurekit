@@ -9,9 +9,8 @@
 // before the spawn.
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdir, readFile, rm, stat } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -24,6 +23,7 @@ import type { SetupProfile } from '../src/adapters/adapter.js';
 import { STDERR_EXCERPT_MAX, stderrExcerpt } from '../src/adapters/adapter.js';
 import { CursorCliAdapter, cursorFailureWarning } from '../src/adapters/cursorCli.js';
 import { CodexCliAdapter, observeCodexRun } from '../src/adapters/codexCli.js';
+import { mkScratch } from './helpers/scratch.js';
 
 const CURSOR_STUB = fileURLToPath(new URL('./fixtures/agents/stub-cursor.mjs', import.meta.url));
 const CODEX_STUB = fileURLToPath(new URL('./fixtures/agents/stub-codex.mjs', import.meta.url));
@@ -40,7 +40,7 @@ afterEach(async () => {
   while (roots.length > 0) await rm(roots.pop()!, { recursive: true, force: true });
 });
 async function tmpRoot(): Promise<string> {
-  const d = await mkdtemp(path.join(tmpdir(), 'aab-auth-fail-'));
+  const d = await mkScratch('aab-auth-fail-');
   roots.push(d);
   return d;
 }

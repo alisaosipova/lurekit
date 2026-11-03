@@ -6,8 +6,7 @@
 // would be false). Everything stays on loopback / temp dirs and is cleaned up in afterEach.
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, rm, appendFile, mkdir, writeFile, readFile, symlink, chmod } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { rm, appendFile, mkdir, writeFile, readFile, symlink, chmod } from 'node:fs/promises';
 import path from 'node:path';
 
 import type { ToolCall } from '../src/adapters/adapter.js';
@@ -23,10 +22,11 @@ import {
   IMPLEMENTED_DETECTORS,
 } from '../src/detectors/index.js';
 import { LocalRegistryFixture } from '../src/fixtures/localRegistry.js';
+import { mkScratch } from './helpers/scratch.js';
 
 const tmpDirs: string[] = [];
 async function runDir(prefix: string): Promise<string> {
-  const dir = await mkdtemp(path.join(tmpdir(), prefix));
+  const dir = await mkScratch(prefix);
   tmpDirs.push(dir);
   return dir;
 }
