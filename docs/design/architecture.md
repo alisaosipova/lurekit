@@ -201,11 +201,11 @@ on it).
 
 ## ADR-0008: Agent adapter contract
 
-**Status:** accepted (2026-11-01); three live-agent adapters implemented (updated 2026-11-02):
-Claude Code (`src/adapters/claudeCode.ts`), Cursor CLI (`src/adapters/cursorCli.ts`, ADR-0016)
-and Codex CLI (`src/adapters/codexCli.ts`, ADR-0018), plus the offline replay adapter
-(`src/adapters/replay.ts`, ADR-0015). OpenHands not yet implemented. Full contract in
-`evidence-spec.md` §4.
+**Status:** accepted (2026-11-01); four live-agent adapters implemented (updated 2026-11-04):
+Claude Code (`src/adapters/claudeCode.ts`), Cursor CLI (`src/adapters/cursorCli.ts`, ADR-0016),
+Codex CLI (`src/adapters/codexCli.ts`, ADR-0018) and OpenHands (`src/adapters/openhands.ts`,
+ADR-0019), plus the offline replay adapter (`src/adapters/replay.ts`, ADR-0015). Only Claude
+Code is live-validated; the other three are stub-tested. Full contract in `evidence-spec.md` §4.
 
 ### Context
 Each agent (Claude Code, Cursor CLI, Codex CLI, OpenHands) is driven differently and observed
