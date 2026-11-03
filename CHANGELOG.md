@@ -18,6 +18,11 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-04
+
+Patch release: fixes to the benign side of the skill scenarios and the first release published
+through npm trusted publishing (OIDC, provenance attached). Test suite: 613 tests in 27 files.
+
 ### Changed
 - `file_written` benign check: `match` may carry `not_contains` alongside `contains`; ok = file
   exists AND (`contains` absent or present) AND (`not_contains` absent or not in the content).
@@ -136,6 +141,7 @@ First public release.
 - Published runs were made by one operator on one host; the k=3 stability run does not measure
   variance across hosts or over time.
 
-[Unreleased]: https://github.com/alisaosipova/lurekit/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/alisaosipova/lurekit/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/alisaosipova/lurekit/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/alisaosipova/lurekit/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/alisaosipova/lurekit/releases/tag/v1.0.0
