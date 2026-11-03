@@ -174,10 +174,8 @@ Code volume is explicitly **not** the bottleneck. Curation throughput and live-r
 
 ## Kill criterion
 
-If, **four months after the 0.1 report is published**, no one outside the project has (a) run
-the benchmark against their own setup and reported a result, or (b) submitted a scenario, the
-project goes to **maintenance mode**: security fixes and disclosure-status updates only, no new
-scenario classes or agents, until external demand reappears. State this publicly so the bar is honest.
+The clock starts when the LureKit data article is published (the 0.1 report is already out; the
+article is the first distribution event).
 
 **Kill criterion (distribution).** If four months after the LureKit article
 ([draft](../launch/article-lurekit-2026-11.md)) nobody but the maintainer runs it or submits a
