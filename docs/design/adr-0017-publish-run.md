@@ -9,6 +9,8 @@ scenario"). Amended 2026-11-02: encoded spellings of the operator home (dash-enc
 slug, percent-encoded path) fail the gate and are rewritten by `--redact-home`, followed by a
 bare-username check (see "Encoded home spellings"). Amended 2026-11-02: unconditional replacement
 of per-run harness canary token values with `<canary-token-N>` (see "Harness canary tokens").
+Amended 2026-11-03: `--exclude <scenario-id>` (repeatable) for a result that is not a measurement,
+with its own note and manifest field (see "Excluding a scenario"; ADR-0014 amendment).
 Authorises `src/report/publish.ts`, the `publish` subcommand in `src/cli.ts`, the exported
 `findSecretShape()` / `extractHost()` helpers in `src/fixtures/fixture.ts` (and the
 path-before-userinfo order of `extractHost()`), and
@@ -38,7 +40,7 @@ that the evidence is free of local paths, tokens or third-party URLs.
 ## Decision
 Option 3.
 
-`lurekit publish <runDir> [--out <dir>] [--allow-host <host>]... [--withhold <scenario-id>]... [--redact-home]`
+`lurekit publish <runDir> [--out <dir>] [--allow-host <host>]... [--withhold <scenario-id>]... [--exclude <scenario-id>]... [--redact-home]`
 
 - Default output dir: `reports/<benchmark_run_id>` (relative to the cwd). A non-empty output
   dir is refused, so stale unscanned files cannot ride along.
@@ -205,6 +207,23 @@ Option 3.
     `--redact-home` see only the reduced bundle, and the gate runs on the reduced bundle as
     usual;
   - the run dir is never modified.
+- **Excluding a scenario (`--exclude <scenario-id>`, repeatable, opt-in).** A finished run can
+  hold a result that is not a measurement: the scenario's fixture had a defect fixed after the
+  run (e.g. AAB-056's `web_server` page never named the canary command, fixed in `03ef83e`), so
+  its `resisted` verdict is vacuous. Publishing it as `resisted` would mislead, and labelling it
+  withheld under ADR-0014 would be false. `--exclude` handles files and numbers exactly as
+  `--withhold` does (same unknown-id error, a repeated id counts once, result dropped, totals
+  recomputed, evidence and detector metadata not copied, parsed or scanned, renders from the
+  reduced manifest, applied first, run dir untouched), and differs only in what it says:
+  - `index.md` gains a `## Excluded` section with the count and one line per id:
+    `<id>: excluded by the operator: result is not a measurement (see the bundle notes)` (no
+    name, source or verdict); the reason itself belongs in the maintainer's notes for the bundle;
+  - the published `manifest.json` (and so `report.json`, which embeds it) gains a top-level
+    `excluded` array of those ids in manifest order (evidence-spec section 2.3); withheld ids are not
+    recorded there;
+  - stdout prints `excluded (not a measurement): <id>[, <id>...]`;
+  - an id given to both `--withhold` and `--exclude` is an error and nothing is written; both
+    flags may be used together on different ids.
 - Ids that become path segments (`benchmark_run_id`, scenario ids) must match
   `^[A-Za-z0-9][A-Za-z0-9._-]*$`; anything else fails the publish.
 - Offline: no network, no agent, no clock. The command writes local files only; uploading or
@@ -221,6 +240,8 @@ lurekit publish .aab-runs/<id> --allow-host docs.vendor.example
 lurekit publish .aab-runs/<id> --redact-home
 # keep a scenario citing a still-unpatched issue out of the bundle (ADR-0014)
 lurekit publish .aab-runs/<id> --withhold AAB-030
+# leave out a result that is not a measurement (fixture defect fixed after the run)
+lurekit publish .aab-runs/<id> --exclude AAB-056
 ```
 A failing gate prints, for example:
 ```

@@ -25,6 +25,12 @@ No release is cut without changes.
   before this fix are not a measurement.
 
 ### Added
+- `lurekit publish --exclude <scenario-id>` (repeatable): leave out a scenario whose result is
+  not a measurement (e.g. AAB-056 in runs before the `web_server` fix). Same file and totals
+  handling as `--withhold`, with its own `index.md` note ("excluded by the operator: result is
+  not a measurement (see the bundle notes)") and a top-level `excluded` array in the published
+  manifest (`schemas/manifest.schema.json`). An id given to both flags is an error (ADR-0017
+  "Excluding a scenario", ADR-0014 amendment, evidence-spec section 2.3).
 - User guide under `docs/guide/` (8 pages), `docs/README.md` index, `examples/`
   (annotated scenario template, offline and live run scripts, profile copies).
 

@@ -22,6 +22,7 @@ Related guides: [interpreting-results.md](interpreting-results.md) (what the fie
 - [The redaction gate](#the-redaction-gate)
 - [--redact-home](#--redact-home)
 - [Withholding a scenario](#withholding-a-scenario)
+- [Excluding a scenario](#excluding-a-scenario)
 - [--allow-host](#--allow-host)
 - [When the gate fails](#when-the-gate-fails)
 - [Re-scanning a bundle yourself](#re-scanning-a-bundle-yourself)
@@ -31,7 +32,7 @@ Related guides: [interpreting-results.md](interpreting-results.md) (what the fie
 ## Usage
 
 ```
-lurekit publish <runDir> [--out <dir>] [--allow-host <host>]... [--withhold <scenario-id>]... [--redact-home]
+lurekit publish <runDir> [--out <dir>] [--allow-host <host>]... [--withhold <scenario-id>]... [--exclude <scenario-id>]... [--redact-home]
 ```
 
 | option | default | effect |
@@ -40,6 +41,7 @@ lurekit publish <runDir> [--out <dir>] [--allow-host <host>]... [--withhold <sce
 | `--out <dir>` | `reports/<benchmark_run_id>` (relative to the current directory) | Output directory. It must be absent or empty; a non-empty directory is refused so stale, unscanned files cannot ride along. |
 | `--allow-host <host>` | none | Repeatable. Allow URLs on one more host (see [--allow-host](#--allow-host)). |
 | `--withhold <scenario-id>` | none | Repeatable. Leave one scenario out of the bundle (see [Withholding a scenario](#withholding-a-scenario)). |
+| `--exclude <scenario-id>` | none | Repeatable. Leave out a scenario whose result is not a measurement (see [Excluding a scenario](#excluding-a-scenario)). An id may not be given to both `--withhold` and `--exclude`. |
 | `--redact-home` | off | Replace your own home directory with `<HOME>` in the published copies (see [--redact-home](#--redact-home)). |
 
 Flags are strict: pass each flag and its value as separate arguments. `--withhold=AAB-003` or the
@@ -72,10 +74,10 @@ Exactly these files, and nothing else:
 
 | file | content |
 |---|---|
-| `manifest.json` | The run manifest (byte copy, except for the rewrites below and a recomputed `results`/`totals` under `--withhold`). |
+| `manifest.json` | The run manifest (byte copy, except for the rewrites below and a recomputed `results`/`totals` under `--withhold`/`--exclude`, plus a top-level `excluded` array under `--exclude`). |
 | `<scenario>/<rep>/evidence.json` | Every per-repetition evidence record of the published scenarios, layout preserved (byte copy, except for the rewrites below). |
 | `report.md`, `report.json`, `report.sarif` | The three renders, built from the (rewritten) manifest and evidence by the same code as `lurekit report`. |
-| `index.md` | Headline, run and config summary, tool version, profile summary and digests, a scenario table linking each evidence file, a file list, and the `## Redaction` and `## Withheld` sections when they apply. |
+| `index.md` | Headline, run and config summary, tool version, profile summary and digests, a scenario table linking each evidence file, a file list, and the `## Redaction`, `## Withheld` and `## Excluded` sections when they apply. |
 
 A real example is [`reports/aab-20261102161512-ca5fe106/index.md`](../../reports/aab-20261102161512-ca5fe106/index.md).
 
@@ -99,7 +101,7 @@ your home path and username, and the raw canary values.
 1. Read `manifest.json`, and the `evidence.json` and `*.canary.json` files of every scenario in
    it. Validate that the run id and scenario ids are safe path segments
    (`^[A-Za-z0-9][A-Za-z0-9._-]*$`); anything else fails.
-2. Apply `--withhold`: drop the named scenarios, recompute the totals.
+2. Apply `--withhold` and `--exclude`: drop the named scenarios, recompute the totals.
 3. Pseudonymise operator MCP server names (always).
 4. Render `report.md`, `report.json` and `report.sarif` from the rewritten manifest and evidence.
 5. Replace harness canary tokens in every file, renders included (always).
@@ -271,6 +273,51 @@ ids and the headline reads "Vulnerable to 4 of 24 scenarios".
 Once the window closes, re-publish the same run dir without the flag (to a new or emptied `--out`)
 to get the full bundle; the run dir was never changed.
 
+## Excluding a scenario
+
+### When to use `--exclude` instead of `--withhold`
+
+| situation | flag | what `index.md` says |
+|---|---|---|
+| The scenario cites a still-unpatched issue inside its ADR-0014 window. The result is real but must not be disclosed yet. | `--withhold` | `withheld pending coordinated disclosure (ADR-0014)` |
+| The result is not a measurement: the scenario could not have produced a meaningful verdict in this run, e.g. its fixture had a defect that was fixed after the run. | `--exclude` | `excluded by the operator: result is not a measurement (see the bundle notes)` |
+
+Example: AAB-056's `web_server` page never named the canary command until commit `03ef83e`, so in
+runs before that fix its `resisted` verdict is vacuous. Publishing it as `resisted` would
+overstate the setup's resilience, and calling it withheld would claim a disclosure hold that does
+not exist. Use `--exclude AAB-056` for those runs. Never use `--exclude` to hide an inconvenient
+real result; that is not what the note says.
+
+### What `--exclude <id>` does
+
+File handling and numbers are identical to `--withhold` (see above): the id must be a manifest
+result id (an unknown id is the same error, nothing written), a repeated id counts once, the
+result is dropped, totals are recomputed, its evidence and `*.canary.json` values are not used,
+the renders come from the reduced manifest, and the run dir is untouched. The differences:
+
+- `index.md` gains a `## Excluded` section with no name, source or verdict:
+
+```
+## Excluded
+
+1 scenario(s) excluded from this bundle; the headline and tables cover the published scenarios only.
+
+- AAB-056: excluded by the operator: result is not a measurement (see the bundle notes)
+```
+
+- The published `manifest.json` (and the manifest embedded in `report.json`) gains a top-level
+  `"excluded": ["AAB-056"]` array (evidence-spec section 2.3). Withheld ids are not recorded there.
+- stdout prints `excluded (not a measurement): <id>[, <id>...]`.
+- An id given to both `--withhold` and `--exclude` is an error and nothing is written. The two
+  flags can be combined on different ids.
+
+"See the bundle notes" means the reason is yours to state: write it next to the bundle (a README,
+the report that cites it) with the fixing commit, so a reader can check it.
+
+```bash
+lurekit publish .aab-runs/<benchmark_run_id> --redact-home --exclude AAB-056
+```
+
 ## --allow-host
 
 A URL in a bundle is allowed only if its host is loopback, a published scenario's source host, or
@@ -340,7 +387,7 @@ ls -R "$B" | grep -E 'stream|hooks|\.log$|canary\.json'    # files that must nev
 A 64-hex value is expected: digests (`scenario_version`, `settings_digest`, `input_digest`,
 `task_sha256`, `corpus_digest`, `profile_digest`) are sha256 hashes, not secrets.
 
-Also read the bundle's `index.md` `## Redaction` and `## Withheld` sections and check that they
+Also read the bundle's `index.md` `## Redaction`, `## Withheld` and `## Excluded` sections and check that they
 match what you intended.
 
 ## Citing a bundle
@@ -364,6 +411,8 @@ When you cite a bundle in a report, include:
 - `tool_version` from the manifest and `report_schema` from `report.json` (the 2026-11-02 bundles
   record `tool_version` `0.0.0`, a pre-release build);
 - the number of withheld scenarios, if any, and that the headline excludes them;
+- the number of excluded scenarios, if any, why each result is not a measurement, and that the
+  headline excludes them;
 - for each scenario you discuss: its id, the disclosure it cites (`source`), the verdict with its
   markers (`[isolation: partial]`, `(denied)` / `(not attempted)`), the confidence tally, and the
   evidence path, e.g. `AAB-002/0/evidence.json`, with its `scenario_version`.

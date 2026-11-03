@@ -99,7 +99,7 @@ const STRING_FLAGS = new Set([
   'replay', 'out', 'setting-sources',
 ]);
 const NUMBER_FLAGS = new Set(['k', 'budget']);
-const MULTI_FLAGS = new Set(['skill', 'allow-host', 'withhold']);
+const MULTI_FLAGS = new Set(['skill', 'allow-host', 'withhold', 'exclude']);
 /** Explicit allowlist of boolean flags: only the ones main()/a command actually reads. Anything
  *  else is rejected, so a typo or a mis-quoted flag can never be silently ignored (a single
  *  token like "--withhold AAB-003" once nearly published a withheld scenario). */
@@ -364,8 +364,9 @@ export function cmdReport(flags: Flags, deps: CliDeps): number {
   return 0;
 }
 
-/** publish <runDir> [--out <dir>] [--allow-host <host>]... [--withhold <id>]... [--redact-home]
- *  (ADR-0017). Builds the whole bundle in memory, optionally withholds scenarios (ADR-0014),
+/** publish <runDir> [--out <dir>] [--allow-host <host>]... [--withhold <id>]... [--exclude <id>]...
+ *  [--redact-home] (ADR-0017). Builds the whole bundle in memory, optionally withholds scenarios
+ *  (ADR-0014) or excludes operator-declared non-measurements (ADR-0017 "Excluding a scenario"),
  *  optionally replaces the operator home dir with <HOME> in the copies,
  *  runs the §5 redaction gate, and writes only if the gate is clean. */
 export function cmdPublish(flags: Flags, deps: CliDeps): number {
@@ -381,9 +382,15 @@ export function cmdPublish(flags: Flags, deps: CliDeps): number {
     deps.stderr('publish: --withhold needs a scenario id; nothing written\n');
     return 1;
   }
+  const exclude = flags.multi.get('exclude') ?? [];
+  if (exclude.some((x) => typeof x !== 'string' || x === '' || x.startsWith('--'))) {
+    deps.stderr('publish: --exclude needs a scenario id; nothing written\n');
+    return 1;
+  }
   const plan = planPublish(readRunDir(runDir), {
     allowHosts: flags.multi.get('allow-host') ?? [],
     withhold,
+    exclude,
     homeDir: deps.homeDir ? deps.homeDir() : homedir(),
     redactHome: flags.bool.has('redact-home'),
   });
@@ -401,6 +408,9 @@ export function cmdPublish(flags: Flags, deps: CliDeps): number {
   for (const f of plan.files) deps.stdout(`wrote ${f.rel}\n`);
   if (plan.withheld.length > 0) {
     deps.stdout(`withheld (ADR-0014): ${plan.withheld.join(', ')}\n`);
+  }
+  if (plan.excluded.length > 0) {
+    deps.stdout(`excluded (not a measurement): ${plan.excluded.join(', ')}\n`);
   }
   if (plan.homeReplacements !== undefined) {
     deps.stdout(`redaction applied: home directory -> <HOME> (${plan.homeReplacements} replacements)\n`);
@@ -437,6 +447,9 @@ Commands:
                    --out <dir> (default reports/<benchmark_run_id>)  --allow-host <host> (repeatable)
                    --withhold <scenario-id> (repeatable)  leave a scenario out of the bundle
                                   pending coordinated disclosure (ADR-0014); totals recomputed
+                   --exclude <scenario-id> (repeatable)  leave out a scenario whose result is not
+                                  a measurement (e.g. fixture defect); same handling, own note;
+                                  an id may not be given to both --withhold and --exclude
                    --redact-home  replace YOUR home dir with <HOME> in the published copies (opt-in;
                                   run dir untouched; other home paths still fail the gate)
 

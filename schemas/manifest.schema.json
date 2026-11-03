@@ -113,6 +113,13 @@
         "inconclusive": { "type": "integer", "minimum": 0 },
         "spend_usd": { "type": "number" }
       }
+    },
+    "excluded": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string" },
+      "description": "Published bundles only (publish --exclude, ADR-0017 \"Excluding a scenario\"): scenario ids whose results were left out because the operator declared them not a measurement. Each id stays in corpus.scenario_ids and is absent from results; totals cover results only. Never written by the runner; not a disclosure hold (withheld ids are not recorded here)."
     }
   }
 }

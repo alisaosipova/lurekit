@@ -230,6 +230,10 @@ export interface RunManifest {
     inconclusive: number;
     spend_usd: number;
   };
+  // evidence-spec section 2.3 / ADR-0017 "Excluding a scenario": set only in a published bundle by
+  // `publish --exclude`: scenario ids whose results were left out as an operator-declared
+  // non-measurement. Never written by the runner.
+  excluded?: string[];
 }
 
 /** Metadata the caller injects for a whole benchmark run (never generated in the runner). */

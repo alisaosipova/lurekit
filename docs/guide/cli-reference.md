@@ -89,14 +89,14 @@ Render a report from a completed run directory. `<runDir>` is required and must 
 ### publish
 
 ```
-lurekit publish <runDir> [--out <dir>] [--allow-host <host>]... [--withhold <id>]... [--redact-home]
+lurekit publish <runDir> [--out <dir>] [--allow-host <host>]... [--withhold <id>]... [--exclude <id>]... [--redact-home]
 ```
 
 Run the redaction gate and write a shareable bundle (manifest, each scenario's
 `evidence.json`, `report.md`/`.json`/`.sarif`, `index.md`); no raw transcripts. `<runDir>` is
 required and must contain a `manifest.json`. Default output is `reports/<benchmark_run_id>`.
-Exit 0 on a clean gate + successful write; 1 if the manifest is missing, a `--withhold` value
-is not a scenario id, the gate fails, or the write fails (nothing is written on any failure).
+Exit 0 on a clean gate + successful write; 1 if the manifest is missing, a `--withhold` or
+`--exclude` value is not a scenario id, an id is given to both flags, the gate fails, or the write fails (nothing is written on any failure).
 Offline.
 
 ## Flags
@@ -151,6 +151,7 @@ the body would be digested into evidence yet never reach the agent.
 | `--out <dir>` | string | `reports/<benchmark_run_id>` | bundle destination |
 | `--allow-host <host>` | string (repeatable) | *(none)* | whitelist a host for the gate |
 | `--withhold <scenario-id>` | string (repeatable) | *(none)* | leave a scenario out of the bundle; totals recomputed |
+| `--exclude <scenario-id>` | string (repeatable) | *(none)* | leave out a scenario whose result is not a measurement (own `index.md` note, manifest `excluded`); same handling as `--withhold`; an id may not be given to both |
 | `--redact-home` | boolean | off | replace your home dir with `<HOME>` in the published copies (run dir untouched) |
 
 ### Global flags
@@ -201,7 +202,7 @@ non-claude agent, and `--replay` with a non-claude agent.
 | Code | Meaning |
 |------|---------|
 | `0` | Success. For `validate`/`list`/`selftest` this also means no errors/failures. |
-| `1` | A handled failure or a thrown error: invalid scenarios (`validate`, or `run` refusing to start), a failed detector self-test, a missing `manifest.json` (`report`, `publish`), a publish gate or write failure, a bad `--withhold`, or any parsing/validation error (unknown flag, `--flag=value`, whitespace token, missing value, missing `--model`, a bad enum value, an agent-flag mismatch, `--replay` on a non-claude agent). |
+| `1` | A handled failure or a thrown error: invalid scenarios (`validate`, or `run` refusing to start), a failed detector self-test, a missing `manifest.json` (`report`, `publish`), a publish gate or write failure, a bad `--withhold` or `--exclude`, or any parsing/validation error (unknown flag, `--flag=value`, whitespace token, missing value, missing `--model`, a bad enum value, an agent-flag mismatch, `--replay` on a non-claude agent). |
 | `2` | Unknown command (usage is printed to stderr). |
 
 ## Environment variables

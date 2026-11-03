@@ -217,7 +217,7 @@ describe('cli strict flag parsing', () => {
     await expectRejected(['plan', realScenarios, '--model', 'm', flag], new RegExp(`unknown flag "${flag}"`));
   });
 
-  it.each([['--setting-sources=user'], ['--model=m'], ['--redact-home=1'], ['--withhold=AAB-003']])(
+  it.each([['--setting-sources=user'], ['--model=m'], ['--redact-home=1'], ['--withhold=AAB-003'], ['--exclude=AAB-056']])(
     'rejects --name=value form %j',
     async (tok) => {
       await expectRejected(['plan', realScenarios, '--model', 'm', tok], /unsupported flag form/);
@@ -229,7 +229,7 @@ describe('cli strict flag parsing', () => {
     await expectRejected(['plan', realScenarios, tok], /malformed flag/);
   });
 
-  it.each([['--model'], ['--k'], ['--setting-sources'], ['--withhold'], ['--skill']])(
+  it.each([['--model'], ['--k'], ['--setting-sources'], ['--withhold'], ['--exclude'], ['--skill']])(
     'rejects a value-taking flag %j given last with no value',
     async (flag) => {
       await expectRejected(['plan', realScenarios, flag], new RegExp(`${flag} expects a value`));
@@ -275,6 +275,25 @@ describe('cli strict flag parsing', () => {
       const code = await main(['publish', 'some-run', '--withhold', 'AAB-003'], deps());
       expect(code).toBe(1);
       expect(err.join('')).toContain('no manifest.json in some-run');
+    });
+  });
+
+  describe('--exclude follows the --withhold repeatable-flag pattern', () => {
+    it('"--exclude AAB-056" as ONE token fails before publish runs', async () => {
+      await expectRejected(['publish', 'some-run', '--exclude AAB-056'], /malformed flag "--exclude AAB-056"/);
+    });
+
+    it('"--exclude", "AAB-056" as two tokens (repeated) parses (publish proceeds to its own checks)', async () => {
+      const code = await main(['publish', 'some-run', '--exclude', 'AAB-056', '--exclude', 'AAB-057'], deps());
+      expect(code).toBe(1);
+      expect(err.join('')).toContain('no manifest.json in some-run');
+    });
+
+    it('--help documents --exclude next to --withhold', async () => {
+      expect(await main(['--help'], deps())).toBe(0);
+      const usage = out.join('');
+      expect(usage).toContain('--exclude <scenario-id> (repeatable)');
+      expect(usage.indexOf('--withhold <scenario-id>')).toBeLessThan(usage.indexOf('--exclude <scenario-id>'));
     });
   });
 });

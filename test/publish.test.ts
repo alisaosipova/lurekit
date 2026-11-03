@@ -9,9 +9,19 @@ import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
+import { fileURLToPath } from 'node:url';
+import _Ajv2020 from 'ajv/dist/2020.js';
+import type { ValidateFunction } from 'ajv';
+
 import { main, type CliDeps } from '../src/cli.js';
 import type { EvidenceRecord, ProfileSummary, RunManifest } from '../src/runner/types.js';
 import { collectCanaryTokens, findUsernameTokens, pseudonymizeMcpServers, redactHomeDir, redactHomeEncoded, replaceCanaryTokens } from '../src/report/publish.js';
+
+type AjvCtor = new (opts: Record<string, unknown>) => { compile(schema: unknown): ValidateFunction };
+const Ajv2020 = ((_Ajv2020 as unknown as { default?: AjvCtor }).default ?? _Ajv2020) as AjvCtor;
+const validateManifest = new Ajv2020({ strict: false, allErrors: true }).compile(
+  JSON.parse(readFileSync(fileURLToPath(new URL('../schemas/manifest.schema.json', import.meta.url)), 'utf8')),
+);
 
 const FAKE_HOME = '/srv/aab-fake-home/maintainer';
 const RUN_ID = 'aab-publish-test';
@@ -788,6 +798,165 @@ describe('publish (ADR-0017)', () => {
       expect(index).toContain('(1 replacements, 1 distinct names)');
       expect(index).toContain('## Withheld');
       expect(index).toContain('home directory -> <HOME> (0 replacements)');
+    });
+  });
+
+  describe('--exclude (ADR-0017 "Excluding a scenario")', () => {
+    function hashTree(dir: string, base = dir, acc = new Map<string, string>()): Map<string, string> {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) hashTree(p, base, acc);
+        else acc.set(path.relative(base, p), createHash('sha256').update(readFileSync(p)).digest('hex'));
+      }
+      return acc;
+    }
+    const read = (rel: string): string => readFileSync(path.join(defaultOut(), rel), 'utf8');
+    const EXCLUDED_LINE = '- AAB-002: excluded by the operator: result is not a measurement (see the bundle notes)';
+
+    it('drops the scenario like --withhold, with its own note and manifest.excluded; source untouched', async () => {
+      const runDir = writeRun();
+      const before = hashTree(runDir);
+      const code = await main(['publish', path.join('.aab-runs', RUN_ID), '--exclude', 'AAB-002'], deps());
+      expect(err.join('')).toBe('');
+      expect(code).toBe(0);
+
+      const m = JSON.parse(read('manifest.json')) as RunManifest;
+      expect(m.results.map((r) => r.scenario_id)).toEqual(['AAB-001']);
+      // AAB-002 was the only resisted scenario: it must not be published as "resisted".
+      expect(m.totals).toEqual({ resisted: 0, vulnerable: 1, degraded: 0, inconclusive: 0, spend_usd: 0 });
+      expect(m.corpus).toEqual(manifest().corpus);
+      expect(m.excluded).toEqual(['AAB-002']);
+      expect(validateManifest(m), JSON.stringify(validateManifest.errors)).toBe(true);
+
+      expect(existsSync(path.join(defaultOut(), 'AAB-002'))).toBe(false);
+      for (const rep of [0, 1]) expect(existsSync(path.join(defaultOut(), 'AAB-001', String(rep), 'evidence.json'))).toBe(true);
+
+      // report.json embeds the same reduced manifest (excluded included); the headline shrinks.
+      const rj = JSON.parse(read('report.json')) as { manifest: RunManifest; score: { headline: { vulnerable: number; of: number } } };
+      expect(rj.manifest.results.map((r) => r.scenario_id)).toEqual(['AAB-001']);
+      expect(rj.manifest.totals).toEqual(m.totals);
+      expect(rj.manifest.excluded).toEqual(['AAB-002']);
+      expect(rj.score.headline).toMatchObject({ vulnerable: 1, of: 1 });
+      for (const f of ['report.md', 'report.sarif']) {
+        const t = read(f);
+        expect(t, f).not.toContain('AAB-002');
+        expect(t, f).not.toContain('Resisted command');
+        expect(t, f).not.toContain('GHSA-x');
+      }
+      const sarif = JSON.parse(read('report.sarif')) as { runs: { results: { ruleId?: string }[] }[] };
+      for (const r of sarif.runs[0].results) expect(JSON.stringify(r)).not.toContain('AAB-002');
+
+      const index = read('index.md');
+      expect(index).toContain('**Vulnerable to 1 of 1 scenarios**');
+      expect(index).toContain('## Excluded');
+      expect(index).toContain('1 scenario(s) excluded');
+      expect(index).toContain(EXCLUDED_LINE);
+      // Never labelled as a disclosure hold.
+      expect(index).not.toContain('## Withheld');
+      expect(index).not.toContain('coordinated disclosure');
+      expect(index).not.toContain('AAB-002/');
+      expect(out.join('')).toContain('excluded (not a measurement): AAB-002');
+      expect(out.join('')).not.toContain('withheld');
+
+      for (const rel of hashTree(defaultOut()).keys()) {
+        const t = read(rel);
+        expect(t, rel).not.toContain('Resisted command');
+        expect(t, rel).not.toContain('GHSA-x');
+        const hits = t.split('\n').filter((l) => l.includes('AAB-002'));
+        if (rel === 'index.md') expect(hits, rel).toEqual([EXCLUDED_LINE]);
+        else if (rel === 'manifest.json' || rel === 'report.json') {
+          // corpus.scenario_ids (kept) plus the excluded array.
+          expect(hits.map((l) => l.trim()), rel).toEqual(['"AAB-002"', '"AAB-002"']);
+        } else expect(hits, rel).toEqual([]);
+      }
+
+      expect(hashTree(runDir)).toEqual(before);
+    });
+
+    it('is repeatable; a repeated id counts once; combines with --withhold on other ids', async () => {
+      const runDir = writeRun();
+      const m0 = manifest();
+      m0.results.push({ scenario_id: 'AAB-003', name: 'Degraded', source: 'https://disclosure.example.org/advisory/3', detector: 'canary_command', verdict: 'degraded', confidence: '-', runs: 2, spend_usd: 0.5 });
+      m0.results[1].spend_usd = 0.25;
+      m0.totals = { resisted: 1, vulnerable: 1, degraded: 1, inconclusive: 0, spend_usd: 0.75 };
+      writeFileSync(path.join(runDir, 'manifest.json'), JSON.stringify(m0, null, 2));
+      const code = await main(
+        ['publish', path.join('.aab-runs', RUN_ID), '--exclude', 'AAB-003', '--withhold', 'AAB-001', '--exclude', 'AAB-002', '--exclude', 'AAB-003'],
+        deps(),
+      );
+      expect(err.join('')).toBe('');
+      expect(code).toBe(0);
+      const m = JSON.parse(read('manifest.json')) as RunManifest;
+      expect(m.results).toEqual([]);
+      expect(m.totals).toEqual({ resisted: 0, vulnerable: 0, degraded: 0, inconclusive: 0, spend_usd: 0 });
+      // Manifest order, not flag order.
+      expect(m.excluded).toEqual(['AAB-002', 'AAB-003']);
+      expect(validateManifest(m), JSON.stringify(validateManifest.errors)).toBe(true);
+      const index = read('index.md');
+      expect(index).toContain('2 scenario(s) excluded');
+      expect(index).toContain('1 scenario(s) withheld');
+      expect(index).toContain('- AAB-001: withheld pending coordinated disclosure (ADR-0014)');
+      expect(index.indexOf('- AAB-002: excluded')).toBeLessThan(index.indexOf('- AAB-003: excluded'));
+      expect(index.match(/: excluded by the operator/g)?.length).toBe(2);
+      expect(index.match(/: withheld pending/g)?.length).toBe(1);
+    });
+
+    it('recomputes spend and verdict counts from the remaining results', async () => {
+      const runDir = writeRun();
+      const m0 = manifest();
+      m0.results[0].spend_usd = 0.1234567;
+      m0.results[1].spend_usd = 0.2;
+      writeFileSync(path.join(runDir, 'manifest.json'), JSON.stringify(m0, null, 2));
+      expect(await main(['publish', path.join('.aab-runs', RUN_ID), '--exclude', 'AAB-002'], deps())).toBe(0);
+      const m = JSON.parse(read('manifest.json')) as RunManifest;
+      expect(m.totals).toEqual({ resisted: 0, vulnerable: 1, degraded: 0, inconclusive: 0, spend_usd: 0.123457 });
+    });
+
+    it('an id given to both --withhold and --exclude fails and nothing is written', async () => {
+      const runDir = writeRun();
+      const before = hashTree(runDir);
+      const code = await main(['publish', path.join('.aab-runs', RUN_ID), '--withhold', 'AAB-001', '--exclude', 'AAB-001'], deps());
+      expect(code).toBe(1);
+      expect(err.join('')).toMatch(/"AAB-001" given to both --withhold and --exclude/);
+      expect(err.join('')).toMatch(/nothing written/);
+      expect(existsSync(defaultOut())).toBe(false);
+      expect(hashTree(runDir)).toEqual(before);
+    });
+
+    it('an unknown id fails exactly like --withhold and nothing is written', async () => {
+      const runDir = writeRun();
+      const before = hashTree(runDir);
+      const code = await main(['publish', path.join('.aab-runs', RUN_ID), '--exclude', 'AAB-999'], deps());
+      expect(code).toBe(1);
+      expect(err.join('')).toBe('publish: --exclude: unknown scenario id(s) "AAB-999" (not in manifest results); nothing written\n');
+      expect(existsSync(defaultOut())).toBe(false);
+      expect(hashTree(runDir)).toEqual(before);
+    });
+
+    it('a missing id value fails and nothing is written', async () => {
+      writeRun();
+      await expect(main(['publish', path.join('.aab-runs', RUN_ID), '--exclude'], deps())).rejects.toThrow(/--exclude expects a value/);
+      expect(existsSync(defaultOut())).toBe(false);
+    });
+
+    it('excluded evidence and detector metadata are not read; the gate still runs on the reduced bundle', async () => {
+      // A home path planted in AAB-002/1 fails the gate unless AAB-002 is excluded: the gate
+      // runs over the remaining files under --exclude.
+      const runDir = writeRun({ cwd: `${FAKE_HOME}/work` });
+      expect(await main(['publish', path.join('.aab-runs', RUN_ID), '--exclude', 'AAB-001'], deps())).toBe(1);
+      expect(err.join('')).toMatch(/AAB-002\/1\/evidence\.json: home_path/);
+      expect(existsSync(defaultOut())).toBe(false);
+      // A malformed metadata file in the excluded scenario would fail closed if it were read.
+      writeFileSync(path.join(runDir, 'AAB-002', '0', 'canary_command.canary.json'), '{not json');
+      expect(await main(['publish', path.join('.aab-runs', RUN_ID), '--exclude', 'AAB-002'], deps())).toBe(0);
+      expect(existsSync(path.join(defaultOut(), 'AAB-002'))).toBe(false);
+    });
+
+    it('without --exclude the manifest carries no excluded field (byte copy)', async () => {
+      writeRun();
+      expect(await main(['publish', path.join('.aab-runs', RUN_ID), '--withhold', 'AAB-001'], deps())).toBe(0);
+      const m = JSON.parse(read('manifest.json')) as RunManifest;
+      expect('excluded' in m).toBe(false);
     });
   });
 

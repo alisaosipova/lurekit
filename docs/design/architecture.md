@@ -410,6 +410,15 @@ only — no working-exploit, evasion, or obfuscation detail.
 - `fix_status` also drives the staleness response: a patched scenario becomes a regression test
   rather than being deleted (see Threats to validity).
 
+### Amendment (2026-11-03): exclusion is not a disclosure hold
+`lurekit publish --withhold <id>` (ADR-0017) is the only publish-time tool of this policy, and its
+fixed note ("withheld pending coordinated disclosure (ADR-0014)") must stay true. A result that is
+not a measurement (for example, a fixture defect fixed after the run, so the scenario could not
+have triggered its detector) is a different case and uses `--exclude <id>` (ADR-0017 "Excluding a
+scenario"): an operator-declared non-measurement, never a disclosure hold. It has its own note
+and its own manifest field (`excluded`, evidence-spec section 2.3), and an id may not be both withheld
+and excluded, so a reader can always tell the two apart.
+
 ---
 
 # Part C — Threats to validity

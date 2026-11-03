@@ -583,6 +583,13 @@ adapter, or one reported no argv, e.g. replay). It agrees with each repetition's
 (weakest per-run isolation); the two fields are complementary, not redundant: `isolation` also
 distinguishes `unreported`, and `strict_mcp_config` states the flag itself.
 
+**Excluded results (published bundles only).** A manifest copy written by `lurekit publish
+--exclude <id>` (ADR-0017 "Excluding a scenario") may carry a top-level `"excluded": ["<id>", ...]`
+array (manifest order, unique, non-empty when present): scenario ids whose results the operator
+declared not a measurement and left out. Each such id stays in `corpus.scenario_ids`, is absent
+from `results`, and `totals` cover `results` only. The runner never writes this field. It is not a
+disclosure hold: scenarios withheld under ADR-0014 (`--withhold`) are not listed here.
+
 The manifest lets someone else re-run the same corpus against the same pinned profile and
 compare. It records cost so a run stays inside `budget_usd`.
 
