@@ -62,16 +62,51 @@ jobs:
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           name: package
+      # The publish job has no checkout, so the version is read from package.json inside the downloaded tarball.
+      # The build job already checks the tag against the source tree; checking again here guards the artifact
+      # that is actually published: a tag vX.Y.Z must match exactly the version packed in the tarball.
+      - name: Tag matches the packed package.json version
+        id: version
+        run: |
+          version="$(tar -xOzf lurekit-*.tgz package/package.json | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")"
+          if [[ "$GITHUB_REF" != "refs/tags/v$version" ]]; then
+            echo "::error::Tag $GITHUB_REF does not match package.json version $version (expected refs/tags/v$version)"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      # Idempotency: a version can be published only once (the first release, lurekit@1.0.0, is published locally
+      # with a token before the tag is pushed). Ask the registry whether this exact version already exists:
+      # E404 means "not published yet"; any other npm failure stops the release rather than guessing.
+      - name: Check whether the version is already on the registry
+        id: registry
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if out="$(npm view "lurekit@$VERSION" version 2> view.err)"; then
+            if [[ "$out" == "$VERSION" ]]; then
+              echo "already_published=true" >> "$GITHUB_OUTPUT"
+              echo "::notice::lurekit@$VERSION already on the registry - publish skipped"
+            else
+              echo "already_published=false" >> "$GITHUB_OUTPUT"
+            fi
+          elif grep -q E404 view.err; then
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+          else
+            cat view.err
+            echo "::error::npm view lurekit@$VERSION failed for a reason other than 404"
+            exit 1
+          fi
       # Pre-release tags (v0.2.0-rc.1) go to the "next" dist-tag.
       # Trusted publishing (OIDC): no token in the environment, so npm cannot fall back to a long-lived one.
+      # Skipped when the version is already on the registry, so re-running the tag does not fail with E403.
       - name: Publish to npm (trusted publishing)
-        if: env.HAS_NPM_TOKEN != 'true'
+        if: steps.registry.outputs.already_published == 'false' && env.HAS_NPM_TOKEN != 'true'
         run: npm publish ./lurekit-*.tgz $([[ "$GITHUB_REF_NAME" == *-* ]] && echo "--tag next")
       # Only for the very first publish (a trusted publisher can be configured only once the package exists):
       # a short-lived granular token in the NPM_TOKEN secret. Delete the secret right afterwards, so later
-      # releases take the step above.
+      # releases take the step above. Also skipped when the version is already on the registry.
       - name: Publish to npm (first release, NPM_TOKEN)
-        if: env.HAS_NPM_TOKEN == 'true'
+        if: steps.registry.outputs.already_published == 'false' && env.HAS_NPM_TOKEN == 'true'
         run: |
           echo "::warning::Publishing with the NPM_TOKEN secret. Configure the trusted publisher on npmjs.com and delete the secret."
           npm publish ./lurekit-*.tgz $([[ "$GITHUB_REF_NAME" == *-* ]] && echo "--tag next")
@@ -80,9 +115,14 @@ jobs:
       # Whichever step published, the registry must show a provenance attestation for this version; a publish
       # that silently lost provenance (publishConfig ignored, OIDC missing) fails the release before the GitHub
       # release is created. The registry can lag behind the publish, so retry for about a minute.
+      # Runs only when this workflow published: a version published locally beforehand carries no provenance
+      # by design, and this run must not fail because of it.
       - name: Published version carries npm provenance
+        if: steps.registry.outputs.already_published == 'false'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          version="$VERSION"
           for attempt in 1 2 3 4 5 6 7; do
             if npm view "lurekit@$version" --json > view.json 2> view.err &&
                node -e "const d=require('./view.json'); const v=Array.isArray(d)?d[d.length-1]:d; process.exit(v?.dist?.attestations ? 0 : 1)"; then
