@@ -150,8 +150,7 @@ AAB-003 is withheld from all four bundles pending coordinated disclosure.
 
 Start offline. `lurekit demo` prints the published bare run (`aab-20261103071018-88a78d8f`)
 through the same reporter as a real run, with a banner saying it is not your setup. No agent, no
-auth, no cost. (Draft note: `demo` is under Unreleased in CHANGELOG.md; until the next npm
-release, run `node dist/cli.js demo` from a checkout.)
+auth, no cost (LureKit 1.2.0 or newer).
 
 ```sh
 npx lurekit demo

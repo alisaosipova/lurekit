@@ -89,8 +89,7 @@ PR body:
 > (`npx lurekit demo`, once released; see note). Scenarios cite public disclosures; fixtures bind to
 > loopback only and carry only canary values. I am the author.
 
-Note: `lurekit demo` is under Unreleased in `CHANGELOG.md`; mention it only after the release
-that ships it.
+Note: `lurekit demo` ships in LureKit 1.2.0; verify it is on npm before mentioning it.
 
 ## Rules for all of these
 

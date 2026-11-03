@@ -18,6 +18,13 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-04
+
+Minor release: new subcommands `demo` and `doctor`, `run` is smoke by default and asks before it
+spends, reports gain a plain-language summary and a What-to-change section, the corpus grows to 52
+scenarios, and the Cursor/Codex adapters are reconciled with the real binaries. Test suite: 677 tests
+in 32 files.
+
 ### Added
 - `lurekit doctor [dir] [--agent <id>] [--model <id>] [--format text|json]` (ADR-0022): ok / warn /
   fail lines with a fix command for Node, the agent binary (real path, version, npm-global
@@ -217,7 +224,8 @@ First public release.
 - Published runs were made by one operator on one host; the k=3 stability run does not measure
   variance across hosts or over time.
 
-[Unreleased]: https://github.com/alisaosipova/lurekit/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/alisaosipova/lurekit/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/alisaosipova/lurekit/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/alisaosipova/lurekit/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/alisaosipova/lurekit/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/alisaosipova/lurekit/releases/tag/v1.0.0

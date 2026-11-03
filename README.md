@@ -25,13 +25,8 @@ npx lurekit demo
 ```
 
 `demo` prints the published bare run `aab-20261103071018-88a78d8f` through the same reporter as a real run,
-with a banner saying it is not your setup. No agent, no auth, no cost. `demo` is under Unreleased in
-[CHANGELOG.md](CHANGELOG.md): it is available from the next npm release. Until then, run it from a checkout:
-
-```bash
-npm ci && npm run build
-node dist/cli.js demo
-```
+with a banner saying it is not your setup. No agent, no auth, no cost (LureKit 1.2.0 or newer; from a
+checkout: `npm ci && npm run build && node dist/cli.js demo`).
 
 ## First real run
 
@@ -50,9 +45,8 @@ npx lurekit run node_modules/lurekit/scenarios --agent claude-code --model sonne
   `--mode full` (k=3). The basis is the published bare run's spend per scenario-repetition (3.84 USD for 21
   scenarios x 3 in `aab-20261103071018-88a78d8f`), the agent's client-side estimate; other models differ.
   `--budget` has no default, so set one.
-- `doctor` and the launch confirmation are under Unreleased as well. On the released 1.1.1, `run` is smoke by
-  default but launches **without asking**; use `node dist/cli.js doctor` / `run` from a checkout, or set
-  `--budget` and check the command before pressing enter.
+- `doctor` and the launch confirmation need LureKit 1.2.0 or newer. On 1.1.1 and older, `run` launches
+  **without asking**; set `--budget` and check the command before pressing enter.
 - Add the flags of your real setup (`--settings`, `--mcp`, `--hooks`, `--skill`, `--permission-mode`,
   `--setting-sources`) so the run measures what you use.
 - Isolation is reduced: `--isolation` is only a label, LureKit starts no container, and the agent runs as you,
@@ -172,8 +166,7 @@ reporting. It is not a benchmark result, and every replayed run's `evidence.json
 
 ## Status
 
-LureKit 1.1.1 is the latest npm release; `demo`, `doctor` and the launch confirmation are under Unreleased
-(see [CHANGELOG.md](CHANGELOG.md)).
+LureKit 1.2.0 is the latest npm release (see [CHANGELOG.md](CHANGELOG.md)).
 
 - 52 scenarios catalogued in `scenarios/` ([catalog](docs/catalog.md)); 34 are runnable, and 25 of the
   runnable ones apply to claude-code (the other 9 apply to other agents via each scenario's `applies_to`:

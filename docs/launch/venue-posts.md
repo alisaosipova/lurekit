@@ -80,8 +80,7 @@ Body:
 > agent usage, the agent's own estimate; the current corpus has 25 Claude Code scenarios.
 > Repo and evidence: https://github.com/alisaosipova/lurekit
 
-Note: `lurekit demo` is under Unreleased in `CHANGELOG.md`; post this only after the release that ships
-it is on npm (verify with `npm view lurekit version`).
+Note: `lurekit demo` ships in LureKit 1.2.0; verify it is on npm before posting (`npm view lurekit version`).
 
 ## r/cursor
 
