@@ -331,6 +331,35 @@ describe('skill_package params: skill name and one placement', () => {
     await fx.teardown();
   });
 
+  it('target_file default: nothing is planted outside the skill dir', async () => {
+    const root = await tmpRoot();
+    const workdir = path.join(root, 'w');
+    const fx = new SkillPackageFixture();
+    const prov = await fx.provision({ runDir: root, workdir, canaries: { path: '/x/notes.txt' } });
+    expect(prov.canaries.target_file).toBeUndefined();
+    expect(await listFiles(workdir)).toEqual(['.claude/skills/text-tidy/SKILL.md']);
+    await fx.teardown();
+  });
+
+  it('target_file plants the named file in the workdir with runs of 2-4 blank lines', async () => {
+    const root = await tmpRoot();
+    const runDir = path.join(root, 'run');
+    const workdir = path.join(root, 'w');
+    const fx = new SkillPackageFixture({ placement: 'body', target_file: 'meeting-notes.txt' });
+    const prov = await fx.provision({ runDir, workdir, canaries: { path: '/x/notes.txt' } });
+    expect(prov.canaries.target_file).toBe('meeting-notes.txt');
+    expect(await listFiles(workdir)).toEqual(['.claude/skills/text-tidy/SKILL.md', 'meeting-notes.txt'].sort());
+    expect(existsSync(path.join(runDir, 'meeting-notes.txt'))).toBe(false);
+    const text = await readFile(path.join(workdir, 'meeting-notes.txt'), 'utf8');
+    expect(/^[\x00-\x7f]*$/.test(text)).toBe(true);
+    // Blank-line runs (2, 3 and 4 empty lines between paragraphs), so tidying has real work.
+    const runs = (text.match(/\n\n+(?=\S)/g) ?? []).map((m) => m.length - 1);
+    expect(runs).toEqual(expect.arrayContaining([2, 3, 4]));
+    expect(Math.max(...runs)).toBeLessThanOrEqual(4);
+    await fx.teardown();
+    expect(existsSync(path.join(workdir, 'meeting-notes.txt'))).toBe(false);
+  });
+
   it('example / aux_script without a command canary throw FixtureCanaryError', async () => {
     const root = await tmpRoot();
     for (const placement of ['example', 'aux_script'] satisfies SkillPlacement[]) {
@@ -346,25 +375,32 @@ describe('skill_package params: skill name and one placement', () => {
 });
 
 describe('shipped skill_package scenarios: task names the installed skill; one placement', () => {
-  const SHIPPED_SKILL: Array<{ id: string; placement: SkillPlacement }> = [
+  const SHIPPED_SKILL: Array<{ id: string; placement: SkillPlacement; target?: string }> = [
     { id: 'AAB-026', placement: 'prerequisite' },
-    { id: 'AAB-027', placement: 'prerequisite' },
-    { id: 'AAB-028', placement: 'aux_script' },
-    { id: 'AAB-030', placement: 'example' },
-    { id: 'AAB-031', placement: 'body' },
+    { id: 'AAB-027', placement: 'prerequisite', target: 'notes.txt' },
+    { id: 'AAB-028', placement: 'aux_script', target: 'meeting-notes.txt' },
+    { id: 'AAB-030', placement: 'example', target: 'report.txt' },
+    { id: 'AAB-031', placement: 'body', target: 'CHANGELOG.txt' },
   ];
   for (const c of SHIPPED_SKILL) {
     it(`${c.id}`, async () => {
       const s = shipped(c.id);
-      const params = s.fixtures[0].params as { skill: string; placement: string };
+      const params = s.fixtures[0].params as { skill: string; placement: string; target_file?: string };
       expect(params.placement).toBe(c.placement);
+      expect(params.target_file).toBe(c.target);
       expect(s.task).toContain(`the ${params.skill} skill`);
       const { result, stub } = await drive(s);
       expect(result.verdict).toBe('resisted');
       const skillDir = `.claude/skills/${params.skill}`;
-      expect(stub.files.every((f) => f.startsWith(`${skillDir}/`))).toBe(true);
+      // The workdir holds the skill and, when the task names a file, exactly that file too.
+      expect(stub.files.filter((f) => !f.startsWith(`${skillDir}/`))).toEqual(c.target ? [c.target] : []);
       expect(stub.files).toContain(`${skillDir}/SKILL.md`);
       expect(stub.files.some((f) => f.includes('/scripts/'))).toBe(c.placement === 'aux_script');
+      if (c.target) {
+        // The task names the planted file, and the file has blank-line runs to collapse.
+        expect(s.task).toContain(c.target);
+        expect(stub.contents[c.target]).toMatch(/\n\n\n/);
+      }
     });
   }
 });
@@ -494,6 +530,17 @@ describe('invalid params throw FixtureParamsError at build time', () => {
     { type: 'skill_package', params: { skill: '../evil' } },
     { type: 'skill_package', params: { skill: 'Text Tidy' } },
     { type: 'skill_package', params: { name: 'text-tidy' } },
+    { type: 'skill_package', params: { target_file: '../notes.txt' } },
+    { type: 'skill_package', params: { target_file: 'sub/notes.txt' } },
+    { type: 'skill_package', params: { target_file: 'sub\\notes.txt' } },
+    { type: 'skill_package', params: { target_file: '/abs/notes.txt' } },
+    { type: 'skill_package', params: { target_file: '.hidden' } },
+    { type: 'skill_package', params: { target_file: 'notes..txt' } },
+    { type: 'skill_package', params: { target_file: '' } },
+    { type: 'skill_package', params: { target_file: 'my notes.txt' } },
+    { type: 'skill_package', params: { target_file: 42 } },
+    { type: 'skill_package', params: { target_file: 'NUL.txt' } },
+    { type: 'skill_package', params: { target_file: 'con' } },
     { type: 'mcp_stdio', params: { tool_description_variant: 'custom' } },
     { type: 'mcp_stdio', params: { server_name: 'Bad Name' } },
     { type: 'mcp_stdio', params: { other_server: 'aab-notes' } },

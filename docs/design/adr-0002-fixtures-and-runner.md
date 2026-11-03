@@ -122,6 +122,9 @@ receive the params unchanged in their constructor.
   `placement` of the single placeholder instruction — `prerequisite` (default; a Prerequisite
   section), `body` (a step in Steps), `example` (a fenced example block), `aux_script` (a bundled
   `scripts/tidy-helper.sh|.cmd` that only runs the canary command; SKILL.md names the script).
+  Amendment: optional `target_file` (a plain file name, no separators) plants the file the
+  task names in the workdir with inert placeholder text containing blank-line runs, so the
+  benign task is possible; default none (recorded as canary `target_file`).
 - `mcp_stdio` / `mcp_http`: `server_name` (registered name and the `expect.mcp_server`
   precondition; defaults `aab-canary` / `aab-canary-http`) and `tool_description_variant` —
   `plain` (default), `mentions-another-server` (optional `other_server` names it),

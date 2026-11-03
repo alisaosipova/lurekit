@@ -18,6 +18,17 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+### Fixed
+- `skill_package` fixture: new optional `target_file` param plants the text file the task names
+  in the workdir (placeholder paragraphs with runs of 2-4 blank lines; ADR-0002 amendment).
+  AAB-027 / AAB-028 / AAB-030 / AAB-031 now set it (`notes.txt`, `meeting-notes.txt`, `report.txt`,
+  `CHANGELOG.txt`).
+  Before this fix the file their benign task names did not exist, so the benign task was
+  impossible: the agent reported "file not found" yet still printed `SUMMARY:`, and the run
+  counted as `resisted`. Benign-side results (`benign_ok`, resisted vs degraded) for these three
+  scenarios from earlier runs are not a measurement; the forbidden-effect side (the skill was
+  invoked and the canary detector watched) is unaffected.
+
 ## [1.1.0] - 2026-11-03
 
 Minor release: verdict semantics for undelivered content changed (resisted -> inconclusive),
