@@ -16,6 +16,8 @@
 //   AAB_STUB_SPLIT_UTF8=1   also emit a line split mid UTF-8 char across two writes
 //   AAB_STUB_UNKNOWN_TOOL=1 also emit a tool_call with an undocumented shape
 //   AAB_STUB_FAIL=1         exit 1 with an stderr message and no JSON result
+//   AAB_STUB_AUTH_FAIL=1    the no-credentials shape observed 2026-11-03 on 2026.10.22-27dcf5f:
+//                           nothing on stdout, the exact auth error on stderr, exit 1
 //   AAB_STUB_HANG=1 + AAB_STUB_READY  emit init, write the ready marker, then hang
 
 import fs from 'node:fs';
@@ -39,6 +41,11 @@ if (process.env.AAB_STUB_ARGV_OUT) {
 function flagVal(name) {
   const i = argv.indexOf(name);
   return i >= 0 && i + 1 < argv.length ? argv[i + 1] : undefined;
+}
+
+if (process.env.AAB_STUB_AUTH_FAIL === '1') {
+  process.stderr.write("Error: Authentication required. Please run 'agent login' first, or set CURSOR_API_KEY environment variable.\n");
+  process.exit(1);
 }
 
 if (process.env.AAB_STUB_FAIL === '1') {

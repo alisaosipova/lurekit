@@ -29,7 +29,7 @@ import type {
   ToolCall,
   McpServerStatus,
 } from './adapter.js';
-import { normalizeMcpServers, requireWorkdir } from './adapter.js';
+import { normalizeMcpServers, requireWorkdir, stderrExcerpt } from './adapter.js';
 import type { AgentId } from '../scenario/types.js';
 
 export const CURSOR_STREAM_FILE = 'cursor-stream.jsonl';
@@ -42,9 +42,11 @@ export const CURSOR_BIN_ENV = 'AAB_CURSOR_BIN';
 export interface CursorCliAdapterOptions {
   bin?: string;    // explicit binary path; else env override; else 'agent' on PATH
   runDir?: string; // default run dir if run() is not given one
-  /** Pass `--disable-auto-update`. Default false: the flag is documented only in the January
-   *  2026 changelog and is absent from the current parameters page (UNVERIFIED, NOTES). Turn it
-   *  on only after confirming it in the live `agent --help`. */
+  /** Pass `--disable-auto-update`. Default false. Verified 2026-11-03 on agent
+   *  2026.10.22-27dcf5f (NOTES, Cursor CLI section): the parser accepts it (an unknown option is
+   *  rejected with "error: unknown option"), but it is a hidden option (`hideHelp()` in the
+   *  bundle) absent from `agent --help` and the parameters page, so it is not part of the
+   *  documented surface and stays opt-in. */
   disableAutoUpdate?: boolean;
 }
 
@@ -102,7 +104,9 @@ export function buildCursorArgv(
   const flags = parseCursorPermissionMode(profile.permission_mode);
   // `-p, --print` is a boolean flag and the prompt is positional (NOTES § Cursor CLI), so a task
   // starting with '-' would be parsed as an option (e.g. "--force") and could loosen the run
-  // (§4.1 invariant 1). Whether `--` ends option parsing is UNVERIFIED, so refuse instead.
+  // (s4.1 invariant 1). On 2026.10.22-27dcf5f `--` was observed to end option parsing
+  // (`agent -p "--bogus-flag"` -> "unknown option", `agent -p -- "--bogus-flag"` -> no parse
+  // error; NOTES), but that is one build of an auto-updating CLI, so the adapter still refuses.
   if (task.startsWith('-')) {
     throw new Error('cursor-cli: task text must not start with "-" (it would be parsed as a CLI option)');
   }
@@ -168,7 +172,7 @@ export class CursorCliAdapter implements Adapter {
       warnings.push('--bare is a Claude Code option; cursor-cli has no equivalent and it was not applied');
     }
     if (!this.disableAutoUpdate) {
-      warnings.push('auto-update not disabled: --disable-auto-update is unverified on the current CLI (NOTES § Cursor CLI); version drift is checked before/after');
+      warnings.push('auto-update not disabled: --disable-auto-update is a hidden, undocumented option (accepted by the parser, absent from --help; NOTES, Cursor CLI section) and is opt-in; version drift is checked before/after');
     }
     if (await hasClaudeSettingsHooks(workdir)) {
       // NOTES § Cursor CLI: "Claude Code settings.json hooks are read and merged" (changelog).
@@ -240,7 +244,10 @@ export class CursorCliAdapter implements Adapter {
 
     const rawPath = path.join(runDir, CURSOR_STREAM_FILE);
     await writeFile(rawPath, Buffer.concat(stdoutChunks));
-    await writeFile(path.join(runDir, CURSOR_STDERR_FILE), Buffer.concat(stderrChunks));
+    const stderrBuf = Buffer.concat(stderrChunks);
+    await writeFile(path.join(runDir, CURSOR_STDERR_FILE), stderrBuf);
+    const failure = cursorFailureWarning(exitCode, stderrBuf.toString('utf8'));
+    if (failure) warnings.push(failure);
 
     const versionAfter = probeVersion(bin, env);
     if (versionBefore && versionAfter && versionAfter !== versionBefore) {
@@ -257,6 +264,20 @@ export class CursorCliAdapter implements Adapter {
       warnings,
     });
   }
+}
+
+/** Observed 2026-11-03 (agent 2026.10.22-27dcf5f, no credentials): `agent -p` prints this on
+ *  stderr, nothing on stdout, and exits 1 (NOTES, Cursor CLI section). */
+export const CURSOR_AUTH_ERROR_RE = /Authentication required/i;
+
+/** Warning for a non-zero exit, carrying a stderr excerpt (on failure Cursor writes its error
+ *  to stderr and no JSON, NOTES). Undefined for exit 0. Pure; exported for tests. */
+export function cursorFailureWarning(exitCode: number, stderr: string): string | undefined {
+  if (exitCode === 0) return undefined;
+  const excerpt = stderrExcerpt(stderr);
+  if (excerpt === undefined) return `agent exited ${exitCode} with an empty stderr`;
+  if (CURSOR_AUTH_ERROR_RE.test(stderr)) return `agent authentication failed (exit ${exitCode}): ${excerpt}`;
+  return `agent exited ${exitCode}; stderr: ${excerpt}`;
 }
 
 // --- pure parse step (evidence-spec §4.5) ------------------------------------------------

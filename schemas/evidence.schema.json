@@ -188,6 +188,10 @@
           "items": { "type": "string" },
           "description": "Option names actually passed to the agent binary, argv order, values omitted (evidence-spec §4.3)."
         },
+        "agent_version_reported": {
+          "type": "string",
+          "description": "The agent binary's raw --version output read by the adapter for this repetition (evidence-spec s4.3, s4.4b). Absent when the probe failed or the adapter does not probe."
+        },
         "attempts": {
           "type": "array",
           "description": "Tool uses the agent issued that did not take effect (evidence-spec §4.2 Attempts). The input is stored as a digest only, never raw.",

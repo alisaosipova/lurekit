@@ -16,7 +16,8 @@ ADR-0015 and ADR-0016 (the Cursor adapter, whose structure this mirrors).
 `web_search`; `collab_tool_call` exists only in source. The stream has no model field and no
 USD cost. exec defaults to a read-only sandbox with approvals set to never, and exits 1 outside
 a git repository unless `--skip-git-repo-check` or `--yolo` is passed. `CODEX_HOME` holds user
-config, auth, hook trust and history. UNVERIFIED: exact `--version` output, background
+config, auth, hook trust and history. UNVERIFIED (as of 2026-11-02; `--version` output was
+verified 2026-11-03, see the amendment): exact `--version` output, background
 self-update, exec behaviour for a project with no trust entry, whether trust gates AGENTS.md,
 whether hooks fire under exec, `item.id == tool_use_id`, rollout file path/format.
 `SetupProfile` has one `permission_mode` string; Codex has several permission flags.
@@ -68,8 +69,9 @@ Option 2.
    `agent_message`, `reasoning`, `todo_list` and `error` items are not tool calls. Any other item
    type keeps the whole item as input under name `unknown` (never dropped). `turn.completed.usage`
    is summed in the parse state (five documented token fields); `cost_usd` stays undefined.
-   `turn.failed`, `error` events and `error` items become warnings verbatim; exit 0 without
-   `turn.completed` is a warning. stdout is decoded with a streaming UTF-8 decoder.
+   `turn.failed`, `error` events and `error` items become warnings verbatim, except transient
+   `Reconnecting... n/max (...)` error events, which are counted into one warning (amendment
+   2026-11-03); exit 0 without `turn.completed` is a warning. stdout is decoded with a streaming UTF-8 decoder.
 6. Hooks: not installed, `hook` not declared, until a recorded run (ADR-0015) shows hooks firing
    under exec and settles the trust path. A profile token `bypass-hook-trust` is passed through
    with a warning that it changes what is measured.
@@ -83,7 +85,8 @@ Option 2.
    text names the Claude Code flag and `strict_mcp_config:false`; for Codex read it as "no
    strict MCP isolation exists" (the runner is not edited here).
 9. Observe, do not steer: nothing is written into the workdir. Warnings record a workdir with
-   no `.git` entry (exec exits 1 unless the git check is skipped) and a present project
+   no `.git` entry (exec exits 1 unless the git check is skipped; or, when an ancestor is a git
+   repository, that the git check passes and the project root lies above the workdir) and a present project
    `.codex/` layer (load behaviour without a trust entry is UNVERIFIED). `--bare` is ignored
    with a warning.
 10. Binary: constructor `bin` > env `AAB_CODEX_BIN` > `codex` on PATH. Tests use an offline stub
@@ -109,3 +112,42 @@ Option 2.
   project `.env` naming `CODEX_HOME` (the CVE-2025-61260 path) may be masked by it, because
   whether the project `.env` overrides an already-set variable is UNVERIFIED. Such a scenario
   should run with `isolateCodexHome: false` or a recorded check.
+
+## Amendment 2026-11-03: checked against the installed binary
+Checked on this host against `codex-cli 0.166.0` (`codex --version` prints `codex-cli 0.166.0`,
+`codex exec --version` prints `codex-cli-exec 0.166.0`), its `codex --help` / `codex exec
+--help` and runs without credentials. Facts in NOTES section Codex CLI ("Verified on the installed
+binary").
+- Every flag the adapter emits (`exec`, `--json`, `-C`, `-m`, `--sandbox
+  read-only|workspace-write|danger-full-access`, `--approve-for-me`,
+  `--dangerously-bypass-approvals-and-sandbox`, `--skip-git-repo-check`,
+  `--dangerously-bypass-hook-trust`) is listed in `codex exec --help` with the same values.
+  `-a, --ask-for-approval` is listed for the top-level (TUI) command only, not for `exec`,
+  which confirms the refusal of an `approval=` token. No mismatch; the grammar is unchanged.
+- `--` ends option parsing for exec (`codex exec "--bogus-flag"` -> `error: unexpected
+  argument`; `codex exec -- "--bogus-flag"` starts a thread). The adapter still refuses a task
+  starting with `-` (behaviour kept).
+- `CODEX_HOME` must exist: a missing directory fails before any JSON with `Error finding codex
+  home: CODEX_HOME points to "<path>", but that path does not exist` (exit 1). The adapter
+  already creates `<runDir>/codex-home` before the spawn; the binary fills it (sqlite state,
+  sessions, `installation_id`). It is under runDir and is never published (ADR-0017 copies
+  evidence only).
+- Without credentials the stream is `thread.started`, `turn.started`, four `error` events
+  `Reconnecting... 2/5..5/5 (unexpected status 401 Unauthorized: Missing bearer or basic
+  authentication in header, url: wss://...)`, an `error` item "Falling back from WebSockets to
+  HTTPS transport...", five more `Reconnecting... 1/5..5/5` over https, a final `error` event
+  and `turn.failed` with the same 401 text; exit 1 after about 27 to 55 s (a model id
+  unknown to the local metadata, e.g. `o3`, adds one more `error` item before `turn.started`). Decision: the retry
+  events are collapsed into one warning (count plus last message); any 401 adds the warning
+  `agent authentication failed: the model API answered 401 Unauthorized (...)`; a non-zero exit
+  with no failure in the stream adds a stderr excerpt (`agent exited N; stderr: ...`). The run
+  is scored `inconclusive(adapter_error)` (evidence-spec s3.1 rule 2).
+- The 401 messages name `api.openai.com`, so `lurekit publish` refuses such a run unless the
+  operator passes `--allow-host api.openai.com` (the gate works as designed; the warning text is
+  kept verbatim rather than rewritten).
+- Git check: a workdir without `.git` nested inside a git repository (the default
+  `<results>/<run>/...` layout inside a checkout) passes the git check without
+  `--skip-git-repo-check`, because the root is found upward. The adapter now warns with the
+  ancestor path instead of claiming exec will exit 1.
+- The evidence record now carries `observation.agent_version_reported` (evidence-spec s4.4b).
+

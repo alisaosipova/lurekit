@@ -123,6 +123,7 @@ export interface EvidenceRecord {
     effective_permission_mode?: string;
     mcp_servers?: McpServerStatus[]; // the agent's own init report (name/status/source), §4.3
     agent_flags?: string[]; // §4.3: option names actually passed to the agent (values omitted)
+    agent_version_reported?: string; // s4.3: the agent's raw `--version` output for this repetition
     attempts?: ToolAttempt[]; // §4.2: denied/failed tool uses (input digest only)
     fixtures?: FixtureDelivery[]; // s3.1 content_fetched delivery facts (HTTP fixtures only)
     warnings?: string[];

@@ -6,6 +6,7 @@
 import { createHash } from 'node:crypto';
 
 import type { AgentId } from '../scenario/types.js';
+import { findSecretShape } from '../fixtures/fixture.js';
 
 export interface SetupProfile {
   agent: AgentId;
@@ -74,6 +75,28 @@ export function requireWorkdir(profile: Pick<SetupProfile, 'workdir'>, who: stri
     throw new Error(`${who}: profile.workdir is required (the runner provisions a per-run workdir)`);
   }
   return profile.workdir;
+}
+
+/** Upper bound for a stderr excerpt carried into a warning (the full stderr stays in the run
+ *  dir verbatim). */
+export const STDERR_EXCERPT_MAX = 300;
+
+/** A short, single-line excerpt of an agent's stderr for a warning: the first line that starts
+ *  with "Error"/"error" (the CLIs observed print their fatal message that way, NOTES), else the
+ *  last non-empty line; whitespace collapsed, capped at STDERR_EXCERPT_MAX chars. Undefined for
+ *  an empty stderr. An excerpt that matches a live-credential shape (findSecretShape, the same
+ *  list the publish gate uses) is withheld: only the pattern family is named, never the value
+ *  (CLAUDE.md secrets rule). Pure; exported for tests. */
+export function stderrExcerpt(stderr: string): string | undefined {
+  const lines = stderr
+    .split(/\r?\n/)
+    .map((l) => l.replace(/\s+/g, ' ').trim())
+    .filter((l) => l.length > 0);
+  if (lines.length === 0) return undefined;
+  const line = lines.find((l) => /^error\b/i.test(l)) ?? lines[lines.length - 1];
+  const secret = findSecretShape(line);
+  if (secret !== undefined) return `(stderr excerpt withheld: matches ${secret}, value redacted)`;
+  return line.length > STDERR_EXCERPT_MAX ? `${line.slice(0, STDERR_EXCERPT_MAX)}...` : line;
 }
 
 /** Declared requirements of one repetition (evidence-spec §3.1 "Run requirements", §4.3).

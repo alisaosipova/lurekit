@@ -723,6 +723,8 @@ export class BenchmarkRunner implements Runner {
             effective_permission_mode: observation.effective_permission_mode,
             mcp_servers: observation.mcp_servers,
             agent_flags: observation.agent_flags,
+            // s4.3 "Recorded": the `--version` output of this repetition, as the adapter read it.
+            agent_version_reported: observation.agent_version_reported,
             attempts: observation.attempts ?? [],
             // s3.1 content_fetched delivery facts, only when a fixture declared the precondition.
             ...(mcp.fixtures && mcp.fixtures.length > 0 ? { fixtures: mcp.fixtures } : {}),

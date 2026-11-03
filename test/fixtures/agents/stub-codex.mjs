@@ -19,6 +19,13 @@
 //   AAB_STUB_UNKNOWN_ITEM=1 also emit a collab_tool_call item (source-only type)
 //   AAB_STUB_TURN_FAILED=1  end with turn.failed + error instead of turn.completed (exit 1)
 //   AAB_STUB_FAIL=1         exit 1 with an stderr message and no JSON
+//   AAB_STUB_CHECK_HOME=1   mirror the real binary: a CODEX_HOME that does not exist fails
+//                           before any JSON (stderr text observed 2026-11-03, 0.166.0), exit 1
+//   AAB_STUB_AUTH_FAIL=1    the no-credentials event sequence observed 2026-11-03 (0.166.0):
+//                           thread.started, (with -m o3: a model-metadata error item),
+//                           turn.started, 4 wss + 5 https "Reconnecting..."
+//                           error events around one fallback error item, a final 401 error
+//                           event and turn.failed, exit 1 (cf-ray/request ids are placeholders)
 //   AAB_STUB_HANG=1 + AAB_STUB_READY  emit thread.started, write the ready marker, then hang
 
 import fs from 'node:fs';
@@ -49,7 +56,36 @@ if (process.env.AAB_STUB_ENV_OUT) {
   try { fs.writeFileSync(process.env.AAB_STUB_ENV_OUT, JSON.stringify({ CODEX_HOME: process.env.CODEX_HOME ?? null }), 'utf8'); } catch { /* ignore */ }
 }
 
+if (process.env.AAB_STUB_CHECK_HOME === '1' && process.env.CODEX_HOME !== undefined && !fs.existsSync(process.env.CODEX_HOME)) {
+  const msg = `CODEX_HOME points to "${process.env.CODEX_HOME}", but that path does not exist`;
+  process.stderr.write(`WARNING: proceeding, even though we could not create PATH aliases: ${msg}\n`);
+  process.stderr.write(`Error finding codex home: ${msg}\n`);
+  process.exit(1);
+}
+
 process.stderr.write('stub-codex: progress goes to stderr\n');
+
+if (process.env.AAB_STUB_AUTH_FAIL === '1') {
+  const e401 = (url, extra) => `unexpected status 401 Unauthorized: Missing bearer or basic authentication in header, url: ${url}, cf-ray: 0000000000000000-XXX${extra}`;
+  const wss = 'wss://api.openai.com/v1/responses';
+  const https = 'https://api.openai.com/v1/responses';
+  const rid = ', request id: req_00000000000000000000000000000000';
+  const out = (o) => process.stdout.write(JSON.stringify(o) + '\n');
+  out({ type: 'thread.started', thread_id: 'stub-codex-thread-auth' });
+  // Observed with `-m o3` (a model id unknown to the local metadata): one more error item
+  // before turn.started.
+  const mi = argv.indexOf('-m');
+  if (mi >= 0 && argv[mi + 1] === 'o3') {
+    out({ type: 'item.completed', item: { id: 'item_m', type: 'error', message: 'Model metadata for `o3` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.' } });
+  }
+  out({ type: 'turn.started' });
+  for (let i = 2; i <= 5; i++) out({ type: 'error', message: `Reconnecting... ${i}/5 (${e401(wss, '')})` });
+  out({ type: 'item.completed', item: { id: 'item_0', type: 'error', message: `Falling back from WebSockets to HTTPS transport. ${e401(wss, '')}` } });
+  for (let i = 1; i <= 5; i++) out({ type: 'error', message: `Reconnecting... ${i}/5 (${e401(https, rid)})` });
+  out({ type: 'error', message: e401(https, rid) });
+  out({ type: 'turn.failed', error: { message: e401(https, rid) } });
+  process.exit(1);
+}
 
 if (process.env.AAB_STUB_FAIL === '1') {
   process.stderr.write('Error: stub failure (no JSON emitted)\n');

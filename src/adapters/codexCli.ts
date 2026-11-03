@@ -23,7 +23,7 @@ import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 
 import type { Adapter, ObservationSource, RunObservation, RunOptions, SetupProfile, ToolCall } from './adapter.js';
-import { requireWorkdir } from './adapter.js';
+import { requireWorkdir, stderrExcerpt } from './adapter.js';
 import type { AgentId } from '../scenario/types.js';
 
 export const CODEX_STREAM_FILE = 'codex-stream.jsonl';
@@ -199,8 +199,17 @@ export class CodexCliAdapter implements Adapter {
     if (options.bare === true) {
       warnings.push('--bare is a Claude Code option; codex-cli has no equivalent and it was not applied');
     }
-    if (!flags.skipGitRepoCheck && !flags.bypassApprovalsAndSandbox && !(await exists(path.join(workdir, '.git')))) {
-      warnings.push('workdir has no .git entry; codex exec exits 1 outside a git repository unless skip-git-repo-check is requested');
+    if (!(await exists(path.join(workdir, '.git')))) {
+      const ancestor = await ancestorGitRoot(workdir);
+      if (ancestor !== undefined) {
+        // Observed 2026-11-03 (codex-cli 0.166.0): exec in a .git-less workdir nested in a repo
+        // passes the git check, because the git root is found upward (NOTES, Codex CLI section).
+        warnings.push(
+          `workdir has no .git entry but an ancestor is a git repository (${ancestor}); codex exec treats that as the project root, so the git check passes and project-root discovery (AGENTS.md, .codex/) may start above the workdir`,
+        );
+      } else if (!flags.skipGitRepoCheck && !flags.bypassApprovalsAndSandbox) {
+        warnings.push('workdir has no .git entry; codex exec exits 1 outside a git repository unless skip-git-repo-check is requested');
+      }
     }
     if (await exists(path.join(workdir, '.codex'))) {
       warnings.push('workdir has a project .codex/ layer; Codex loads it only for a trusted project and exec behaviour for a project with no trust entry is UNVERIFIED');
@@ -267,7 +276,8 @@ export class CodexCliAdapter implements Adapter {
 
     const rawPath = path.join(runDir, CODEX_STREAM_FILE);
     await writeFile(rawPath, Buffer.concat(stdoutChunks));
-    await writeFile(path.join(runDir, CODEX_STDERR_FILE), Buffer.concat(stderrChunks));
+    const stderrBuf = Buffer.concat(stderrChunks);
+    await writeFile(path.join(runDir, CODEX_STDERR_FILE), stderrBuf);
 
     const versionAfter = probeVersion(bin, env);
     if (versionBefore && versionAfter && versionAfter !== versionBefore) {
@@ -281,6 +291,7 @@ export class CodexCliAdapter implements Adapter {
       endedAt,
       agentVersionReported: versionBefore,
       agentFlags: codexFlagNames(argv),
+      stderr: stderrBuf.toString('utf8'),
       warnings,
     });
   }
@@ -303,6 +314,10 @@ export interface CodexStreamState {
   usage: CodexUsage;
   sawTurnCompleted: boolean;
   failures: string[]; // turn.failed / error event / error item messages, verbatim
+  /** `error` events of the form "Reconnecting... N/M (...)": counted, not listed one by one
+   *  (an unauthenticated run emits nine of them, observed 2026-11-03; the raw file keeps all). */
+  retries: number;
+  lastRetry?: string;
 }
 
 export function newCodexStreamState(): CodexStreamState {
@@ -312,6 +327,7 @@ export function newCodexStreamState(): CodexStreamState {
     usage: { input_tokens: 0, cached_input_tokens: 0, cache_write_input_tokens: 0, output_tokens: 0, reasoning_output_tokens: 0 },
     sawTurnCompleted: false,
     failures: [],
+    retries: 0,
   };
 }
 
@@ -364,7 +380,13 @@ export function parseCodexStreamLine(line: string, at: number, state: CodexStrea
     const err = evt.error as Record<string, unknown> | undefined;
     state.failures.push(`turn.failed: ${typeof err?.message === 'string' ? err.message : 'no message'}`);
   } else if (type === 'error') {
-    state.failures.push(`error event: ${typeof evt.message === 'string' ? evt.message : 'no message'}`);
+    const message = typeof evt.message === 'string' ? evt.message : 'no message';
+    if (CODEX_RETRY_RE.test(message)) {
+      state.retries += 1;
+      state.lastRetry = message;
+    } else {
+      state.failures.push(`error event: ${message}`);
+    }
   } else if (type === 'item.started' || type === 'item.updated' || type === 'item.completed') {
     const item = evt.item as Record<string, unknown> | undefined;
     if (!item || typeof item !== 'object' || Array.isArray(item)) return;
@@ -388,6 +410,13 @@ export function parseCodexStreamLine(line: string, at: number, state: CodexStrea
   }
 }
 
+/** A transient-retry `error` event (observed 2026-11-03, codex-cli 0.166.0): the message starts
+ *  "Reconnecting... <n>/<max> (". */
+export const CODEX_RETRY_RE = /^Reconnecting\.\.\. \d+\/\d+ \(/;
+/** The model API rejected the request for missing/invalid credentials (observed 2026-11-03:
+ *  "unexpected status 401 Unauthorized: Missing bearer or basic authentication in header"). */
+export const CODEX_AUTH_ERROR_RE = /\b401 Unauthorized\b/;
+
 export interface CodexObservationMeta {
   rawEventsPath: string;
   exitCode: number;
@@ -395,6 +424,9 @@ export interface CodexObservationMeta {
   endedAt: number;
   agentVersionReported?: string;
   agentFlags?: string[];
+  /** The run's stderr text; on a non-zero exit with no failure in the stream, an excerpt of it
+   *  becomes a warning (e.g. "Error finding codex home: ..." before any JSON is printed). */
+  stderr?: string;
   warnings?: string[];
 }
 
@@ -402,7 +434,18 @@ export function assembleCodexObservation(state: CodexStreamState, meta: CodexObs
   const warnings = [...(meta.warnings ?? [])];
   // NOTES: the --json stream carries no model field; the pin is applied on input (-m) only.
   warnings.push('codex --json stream reports no model; effective_model is unreported (pin applied on input only)');
+  if (state.retries > 0) {
+    warnings.push(`error event: ${state.retries} reconnect attempt(s) reported ("Reconnecting... n/max"), last: ${state.lastRetry ?? 'no message'}`);
+  }
   for (const f of state.failures) warnings.push(f);
+  if ([...state.failures, state.lastRetry ?? ''].some((f) => CODEX_AUTH_ERROR_RE.test(f))) {
+    // Names only, never values (CLAUDE.md secrets rule).
+    warnings.push('agent authentication failed: the model API answered 401 Unauthorized (no usable CODEX_API_KEY or saved auth in CODEX_HOME for this run)');
+  }
+  if (meta.exitCode !== 0 && state.failures.length === 0 && state.retries === 0) {
+    const excerpt = meta.stderr !== undefined ? stderrExcerpt(meta.stderr) : undefined;
+    warnings.push(excerpt !== undefined ? `agent exited ${meta.exitCode}; stderr: ${excerpt}` : `agent exited ${meta.exitCode} with no error in the stream`);
+  }
   if (meta.exitCode === 0 && !state.sawTurnCompleted && state.failures.length === 0) {
     warnings.push('stream ended without a turn.completed event');
   }
@@ -465,6 +508,17 @@ async function exists(p: string): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+/** The nearest ancestor of `dir` (exclusive) holding a `.git` entry, or undefined. */
+async function ancestorGitRoot(dir: string): Promise<string | undefined> {
+  let cur = path.dirname(path.resolve(dir));
+  for (;;) {
+    if (await exists(path.join(cur, '.git'))) return cur;
+    const parent = path.dirname(cur);
+    if (parent === cur) return undefined;
+    cur = parent;
   }
 }
 

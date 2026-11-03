@@ -37,14 +37,16 @@ Option 2.
    looser than the profile intends). The adapter adds none of these flags itself (§4.1 inv. 1).
    `-p` is a boolean flag and the prompt is positional (NOTES), so a task starting with `-`
    would be read as an option (for example `--force`); the adapter throws on such a task
-   instead of relying on `--`, whose handling is UNVERIFIED.
+   instead of relying on `--`. (Verified 2026-11-03 on 2026.10.22-27dcf5f: `--` does end option
+   parsing; the refusal is kept because the CLI auto-updates. See the amendment below.)
 2. `capabilities()` = `{headless:true, observes:['stream'], can_pin_version:false,
    can_pin_model:true}`.
 3. Version: `<bin> --version` before and after the run, each probe bounded by a 15 s timeout. A mismatch with a non-`unpinned`
    `agent_version`, and drift between the two probes, are non-fatal warnings.
    `--disable-auto-update` is passed only when the adapter is constructed with
-   `disableAutoUpdate: true` (to be set after confirming it in the live `--help`); otherwise a
-   warning records that auto-update was not disabled.
+   `disableAutoUpdate: true`; otherwise a warning records that auto-update was not disabled.
+   (2026-11-03: the flag is a hidden option, accepted by the parser but absent from `--help`;
+   it stays opt-in. See the amendment below.)
 4. Model: the pin is applied on input; `effective_model` is the `system/init` `model` verbatim;
    a value different from the requested id is a warning (display name; exact echo UNVERIFIED).
 5. Stream parsing: `tool_call` started/completed merge into one `ToolCall` per `call_id`
@@ -73,3 +75,25 @@ Option 2.
   shapes, token fields, hooks under `-p` and `tool_use_id == call_id`; then a follow-up ADR may
   add the `hook` layer. Whether `--replay` should accept Cursor recordings is also open.
 - `BOOTSTRAP.md` and `architecture.md` ADR index should list ADR-0016 (not edited here).
+
+## Amendment 2026-11-03: checked against the installed binary
+Checked on this host against `agent` 2026.10.22-27dcf5f (`agent --version` prints
+`2026.10.22-27dcf5f`), its `agent --help` and runs without credentials. Facts in NOTES section Cursor
+CLI ("Verified on the installed binary").
+- Every flag the adapter emits (`-p`, `--output-format stream-json`, `--workspace`, `--model`,
+  `--mode plan|ask`, `--sandbox enabled|disabled`, `--force`, `--trust`, `--approve-mcps`) is
+  listed in `--help` with the same value sets. No mismatch; the token grammar is unchanged.
+- `--disable-auto-update` is not in `--help`, but the parser accepts it (an unknown option
+  fails with `error: unknown option '...'`); the bundle declares it with `.hideHelp()`. It
+  stays opt-in (default off, warning text updated).
+- Without credentials `agent -p` prints `Error: Authentication required. Please run 'agent
+  login' first, or set CURSOR_API_KEY environment variable.` on stderr, nothing on stdout, and
+  exits 1. The adapter now adds a warning on every non-zero exit carrying a single-line stderr
+  excerpt (`agent authentication failed (exit N): <excerpt>` when the text matches, else
+  `agent exited N; stderr: <excerpt>`), so the reason is in evidence and not only in
+  `cursor-stderr.log`. The runner scores such a run `inconclusive(adapter_error)` (evidence-spec
+  s3.1 rule 2), or `precondition_failed` when a fixture declared an MCP-server expectation
+  (rule 0 outranks rule 2; the agent never reported its server list).
+- The evidence record now carries `observation.agent_version_reported` (all adapters; the
+  runner previously dropped it; evidence-spec s4.4b).
+

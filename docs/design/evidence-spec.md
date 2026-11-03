@@ -453,6 +453,13 @@ Implementing the adapter required additive, backward-compatible changes to
 - Added with the setting-sources recording change (§2.2, §2.3, §4.3):
   `ProfileSummary.setting_sources?` (optional in `schemas/evidence.schema.json` and
   `schemas/manifest.schema.json`; written only when the profile sets it).
+- Added with the installed-binary check of the Cursor and Codex adapters (2026-11-03, ADR-0016
+  and ADR-0018 amendments): the evidence record's optional `observation.agent_version_reported`
+  (the adapter's raw `--version` output for the repetition, already named "Recorded" in s4.3 but
+  previously not written by the runner; optional in `schemas/evidence.schema.json`, so older
+  records stay valid), and the shared pure helper `stderrExcerpt()` in `src/adapters/adapter.ts`
+  that the Cursor and Codex adapters use to put a one-line stderr excerpt into a warning on a
+  non-zero exit.
 
 **`profilePatch` merging note (runner, ADR-0002 step 2).** `mergeProfilePatch()` shallow-merges a
 fixture patch, with key-by-key merges for `env` and `mcp.mcpServers`, and never loosens the
