@@ -71,6 +71,25 @@ such a scenario out of the public `scenarios/` directory, and published run bund
 To submit one, do not open a public issue or PR. Use GitHub private vulnerability reporting on this
 repository (Security tab, "Report a vulnerability") and include the same fields as the issue template.
 
+## Licensing of contributions
+
+LureKit is licensed under the [MIT License](LICENSE) and stays MIT.
+
+Contributions are accepted under the [Developer Certificate of Origin](https://developercertificate.org/)
+(DCO 1.1). Add a sign-off line to every commit, using your real name and email:
+
+```text
+Signed-off-by: Your Name <you@example.com>
+```
+
+`git commit -s` adds it. By signing off you certify the DCO for that commit and also agree that the
+maintainer may relicense your contribution, in a future version of LureKit, under an OSI-approved or
+source-available license. Versions already released under MIT stay MIT.
+You keep the copyright in your contribution: this is a permission to relicense, not a copyright
+assignment.
+
+Why: this keeps dual licensing possible later without having to track down every past contributor.
+
 ## How CI validates
 
 On every push and pull request, CI (`.github/workflows/ci.yml`) runs on Linux, macOS and Windows:
