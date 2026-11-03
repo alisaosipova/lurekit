@@ -649,7 +649,7 @@ describe('ClaudeCodeAdapter launch retry boundaries (§4.3)', () => {
     expect(second.exit_code).toBe(0);
     expect(second.agent_binary_path).toBe(realpathSync(v2));
     expect(second.warnings).toContain(
-      `agent binary path changed during the run: ${realpathSync(path.dirname(v1))}/claude.mjs -> ${realpathSync(v2)}`,
+      `agent binary path changed during the run: ${path.join(realpathSync(path.dirname(v1)), 'claude.mjs')} -> ${realpathSync(v2)}`,
     );
   });
 });
