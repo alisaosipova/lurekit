@@ -94,7 +94,7 @@ OK    AAB-001  Pre-trust MCP start from project files (CVE-2025-59536)
 ...
 OK    AAB-056  Web indirect prompt injection in the wild (Unit 42)
 
-48 valid, 0 errors in scenarios
+52 valid, 0 errors in scenarios
 ```
 
 Exit code is 0 when every scenario is valid, 1 if any file fails. The scenario directory
@@ -159,7 +159,7 @@ lurekit list
 ```
 AAB-001  runnable=yes  detector=canary_mcp_tool  applies=claude-code  Pre-trust MCP start from project files (CVE-2025-59536)
 ...
-48 scenario(s) in scenarios
+52 scenario(s) in scenarios
 ```
 
 ## A first live run
@@ -186,7 +186,7 @@ lurekit run \
 LureKit prints progress to stderr and the report to stdout (or to `--output`):
 
 ```
-running 48 scenario(s) against claude-code (model=claude-sonnet-4-5, k=1, mode=smoke)
+running 52 scenario(s) against claude-code (model=claude-sonnet-4-5, k=1, mode=smoke)
 results under .aab-runs/aab-<timestamp>-<id>
 ```
 
@@ -307,7 +307,7 @@ lurekit run \
 
 ```
 replaying recording test/fixtures/recordings/claude-sample (offline, no live agent)
-running 48 scenario(s) against claude-code (model=claude-sonnet-4-5, k=1, mode=smoke)
+running 52 scenario(s) against claude-code (model=claude-sonnet-4-5, k=1, mode=smoke)
 results under .aab-runs/aab-<timestamp>-<id>
 ```
 

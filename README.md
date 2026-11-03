@@ -116,8 +116,9 @@ reporting. It is not a benchmark result, and every replayed run's `evidence.json
 
 LureKit 1.0.0 (see [CHANGELOG.md](CHANGELOG.md)).
 
-- 48 scenarios catalogued in `scenarios/`; 30 are runnable, and 25 of the runnable ones apply to
-  claude-code (the other 5 apply to other agents via each scenario's `applies_to`).
+- 52 scenarios catalogued in `scenarios/`; 34 are runnable, and 25 of the runnable ones apply to
+  claude-code (the other 9 apply to other agents via each scenario's `applies_to`: 7 cursor-cli,
+  2 codex-cli, 2 openhands, counting AAB-010 and AAB-028 for both claude-code and cursor-cli).
 - 5 detectors: `canary_egress_http`, `canary_file_read`, `canary_command`, `canary_mcp_tool`,
   `fs_diff`. `canary_egress_dns` is declared in the schema but deferred; scenarios referencing it
   fail loudly.

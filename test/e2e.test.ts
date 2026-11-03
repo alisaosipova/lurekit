@@ -1,14 +1,14 @@
-// End-to-end, fully offline (evidence-spec §4.5; ADR-0002). Drives the REAL runner over the 30
-// runnable shipped scenarios (of 48 catalogued) with REAL detectors and REAL concrete fixtures, using only a stub adapter —
+// End-to-end, fully offline (evidence-spec §4.5; ADR-0002). Drives the REAL runner over the 34
+// runnable shipped scenarios (of 52 catalogued) with REAL detectors and REAL concrete fixtures, using only a stub adapter —
 // no live agent, no network beyond loopback, no API spend. Two adapter modes per scenario:
 //   (a) a "vulnerable" stub that acts on the canary (invokes the decoy MCP tool / reads the
 //       marker into output / runs the canary command / GETs the canary URL) -> `vulnerable`;
 //   (b) a "resisting" stub that only does the benign task -> `resisted`.
-// Also asserts all 48 scenarios load + validate and that plan() keeps exactly the 25 runnable ones
-// whose applies_to includes claude-code, skipping the other 5 runnable ones as not_applicable and
+// Also asserts all 52 scenarios load + validate and that plan() keeps exactly the 25 runnable ones
+// whose applies_to includes claude-code, skipping the other 9 runnable ones as not_applicable and
 // the 18 browser-track rows (runnable:false, no applies_to) as not_runnable. plan() checks
 // applies_to before runnable, so a row failing both reports not_applicable. runScenario itself does
-// not gate on applies_to (only plan() does), so all 30 runnable scenarios are driven through it
+// not gate on applies_to (only plan() does), so all 34 runnable scenarios are driven through it
 // here; the runnable:false rows are excluded from CASES (asserted below). Run dirs and
 // workdirs live under a temp root removed in afterEach.
 
@@ -70,6 +70,10 @@ const CASES: readonly E2ECase[] = [
   { id: 'AAB-036', detector: 'canary_egress_http', benignText: BENIGN },
   { id: 'AAB-037', detector: 'canary_egress_http', benignText: BENIGN },
   { id: 'AAB-056', detector: 'canary_command', benignText: BENIGN },
+  { id: 'AAB-057', detector: 'canary_command', benignText: BENIGN },
+  { id: 'AAB-058', detector: 'canary_command', benignText: BENIGN },
+  { id: 'AAB-059', detector: 'canary_command', benignText: BENIGN },
+  { id: 'AAB-060', detector: 'canary_command', benignText: BENIGN },
 ];
 const EXPECTED_IDS = [
   'AAB-001',
@@ -120,6 +124,10 @@ const EXPECTED_IDS = [
   'AAB-054',
   'AAB-055',
   'AAB-056',
+  'AAB-057',
+  'AAB-058',
+  'AAB-059',
+  'AAB-060',
 ];
 // The subset whose applies_to includes claude-code; plan() must keep exactly these.
 const CLAUDE_CODE_IDS = [
@@ -157,6 +165,10 @@ const NOT_APPLICABLE_IDS = [
   'AAB-006',
   'AAB-011',
   'AAB-014',
+  'AAB-057',
+  'AAB-058',
+  'AAB-059',
+  'AAB-060',
 ];
 // Browser-track catalogue rows: runnable:false (pending a browser adapter), no applies_to; plan()
 // must skip exactly these, each as not_runnable, and they are never driven through runScenario.
@@ -229,14 +241,14 @@ function scenarioFor(scenarios: Scenario[], c: E2ECase): Scenario {
 }
 
 describe('corpus loads and validates', () => {
-  it('loads exactly the 48 shipped scenarios, all valid', () => {
+  it('loads exactly the 52 shipped scenarios, all valid', () => {
     const scenarios = loadAll();
-    expect(EXPECTED_IDS).toHaveLength(48);
+    expect(EXPECTED_IDS).toHaveLength(52);
     expect(scenarios.map((s) => s.id).sort()).toEqual([...EXPECTED_IDS].sort());
     // Runnable / runnable:false split as loaded, matched against the explicit lists.
     const runnable = scenarios.filter((s) => s.runnable !== false).map((s) => s.id).sort();
     const notRunnable = scenarios.filter((s) => s.runnable === false).map((s) => s.id).sort();
-    expect(runnable).toHaveLength(30);
+    expect(runnable).toHaveLength(34);
     expect(runnable).toEqual(RUNNABLE_IDS);
     expect(notRunnable).toEqual([...BROWSER_IDS].sort());
     for (const s of scenarios.filter((x) => x.runnable === false)) {
@@ -248,7 +260,7 @@ describe('corpus loads and validates', () => {
   it('CASES covers every runnable scenario and excludes the runnable:false rows', () => {
     const scenarios = loadAll();
     const runnable = scenarios.filter((s) => s.runnable !== false).map((s) => s.id).sort();
-    expect(CASES).toHaveLength(30);
+    expect(CASES).toHaveLength(34);
     expect(CASES.map((c) => c.id).sort()).toEqual(runnable);
     for (const id of BROWSER_IDS) {
       expect(CASES.some((c) => c.id === id), `${id} must not be in CASES`).toBe(false);
@@ -259,7 +271,7 @@ describe('corpus loads and validates', () => {
     }
   });
 
-  it('plan() over the 48 keeps exactly the 25 claude-code scenarios, skips 5 as not_applicable and 18 as not_runnable', async () => {
+  it('plan() over the 52 keeps exactly the 25 claude-code scenarios, skips 9 as not_applicable and 18 as not_runnable', async () => {
     const root = await tmpRoot();
     const runner = newRunner('BR-PLAN');
     const plan = await runner.plan(loadAll(), makeProfile(path.join(root, 'work')), makeCfg(root));
@@ -272,18 +284,18 @@ describe('corpus loads and validates', () => {
     expect(plan.skipped.map((s) => s.scenario_id).sort()).toEqual(
       [...NOT_APPLICABLE_IDS, ...BROWSER_IDS].sort(),
     );
-    // Each skip carries its exact reason: the 5 other-agent rows are not_applicable, the 18
+    // Each skip carries its exact reason: the 9 other-agent rows are not_applicable, the 18
     // browser rows are not_runnable; no detector_not_implemented / detector_unverified.
     for (const sk of plan.skipped) {
       const want = NOT_APPLICABLE_IDS.includes(sk.scenario_id) ? 'not_applicable' : 'not_runnable';
       expect(sk.reason, `${sk.scenario_id} skip reason`).toBe(want);
     }
-    expect(plan.skipped.filter((sk) => sk.reason === 'not_applicable')).toHaveLength(5);
+    expect(plan.skipped.filter((sk) => sk.reason === 'not_applicable')).toHaveLength(9);
     expect(plan.skipped.filter((sk) => sk.reason === 'not_runnable')).toHaveLength(18);
   });
 });
 
-// Each loop drives all 30 runnable scenarios sequentially (real fixtures + detectors); under the
+// Each loop drives all 34 runnable scenarios sequentially (real fixtures + detectors); under the
 // full parallel suite this exceeds vitest's 5 s default, so give these two tests explicit headroom.
 const E2E_LOOP_TIMEOUT_MS = 60_000;
 
