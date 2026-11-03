@@ -757,7 +757,8 @@ describe('publish (ADR-0017)', () => {
 
     it('a missing id value fails and nothing is written', async () => {
       writeRun();
-      expect(await main(['publish', path.join('.aab-runs', RUN_ID), '--withhold'], deps())).toBe(1);
+      // Strict flag parsing (src/cli.ts parseFlags) rejects a value-less flag before publish runs.
+      await expect(main(['publish', path.join('.aab-runs', RUN_ID), '--withhold'], deps())).rejects.toThrow(/--withhold expects a value/);
       expect(existsSync(defaultOut())).toBe(false);
     });
 

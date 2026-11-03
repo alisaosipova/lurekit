@@ -100,25 +100,50 @@ const STRING_FLAGS = new Set([
 ]);
 const NUMBER_FLAGS = new Set(['k', 'budget']);
 const MULTI_FLAGS = new Set(['skill', 'allow-host', 'withhold']);
+/** Explicit allowlist of boolean flags: only the ones main()/a command actually reads. Anything
+ *  else is rejected, so a typo or a mis-quoted flag can never be silently ignored (a single
+ *  token like "--withhold AAB-003" once nearly published a withheld scenario). */
+const BOOLEAN_FLAGS = new Set(['help', 'version', 'redact-home']);
 
+/** Strict parser: throws (exit 1 via the bin's error path) before any command runs on
+ *  an unknown --name, a --name=value form, a flag token containing whitespace, or a
+ *  value-taking flag with no value. */
 function parseFlags(argv: string[]): Flags {
   const f: Flags = { _: [], str: new Map(), num: new Map(), bool: new Set(), multi: new Map() };
+  const valueFor = (flag: string, i: number): string => {
+    const v = argv[i];
+    if (v === undefined || v.startsWith('--')) {
+      throw new Error(`${flag} expects a value (got ${v === undefined ? 'nothing' : JSON.stringify(v)})`);
+    }
+    return v;
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
+    // Whitespace check also covers a token with leading whitespace (" --withhold AAB-003"),
+    // which would otherwise fall through as a silently ignored positional.
+    if (a.trimStart().startsWith('--') && /\s/.test(a)) {
+      throw new Error(`malformed flag ${JSON.stringify(a)}: a flag and its value must be separate arguments (e.g. --withhold AAB-003, not "--withhold AAB-003")`);
+    }
     if (a.startsWith('--')) {
+      if (a.includes('=')) {
+        const n = a.slice(0, a.indexOf('='));
+        throw new Error(`unsupported flag form ${JSON.stringify(a)}: use "${n} <value>" (separate arguments), not ${n}=<value>`);
+      }
       const name = a.slice(2);
       if (MULTI_FLAGS.has(name)) {
         const list = f.multi.get(name) ?? [];
-        list.push(argv[++i]);
+        list.push(valueFor(a, ++i));
         f.multi.set(name, list);
       } else if (STRING_FLAGS.has(name)) {
-        f.str.set(name, argv[++i]);
+        f.str.set(name, valueFor(a, ++i));
       } else if (NUMBER_FLAGS.has(name)) {
-        const v = Number(argv[++i]);
+        const v = Number(valueFor(a, ++i));
         if (Number.isNaN(v)) throw new Error(`--${name} expects a number`);
         f.num.set(name, v);
+      } else if (BOOLEAN_FLAGS.has(name)) {
+        f.bool.add(name);
       } else {
-        f.bool.add(name); // --help, --version, --dry-run, etc.
+        throw new Error(`unknown flag ${JSON.stringify(a)} (run 'lurekit --help' for the list of options)`);
       }
     } else {
       f._.push(a);
@@ -404,6 +429,9 @@ Commands:
                    --redact-home  replace YOUR home dir with <HOME> in the published copies (opt-in;
                                   run dir untouched; other home paths still fail the gate)
 
+Flags are strict: an unknown --flag, a --flag=value form, or a flag token containing spaces
+is an error (exit 1). Pass each flag and its value as separate arguments.
+
 Only 'run' launches a real agent (cost / auth), unless given --replay. Everything else is offline.
 All run material (agent workdirs, mcp.json, hook scripts, recordings, evidence, detector
 self-test scratch) lives under --results; nothing is written to the system temp dir.
@@ -422,6 +450,10 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
   const flags = parseFlags(rest);
   if (flags.bool.has('help')) {
     deps.stdout(USAGE);
+    return 0;
+  }
+  if (flags.bool.has('version')) {
+    deps.stdout(`${toolVersion()}\n`);
     return 0;
   }
   switch (command) {

@@ -171,3 +171,79 @@ describe('cli --setting-sources (§4.3 hardening knob)', () => {
     ).rejects.toThrow(/claude-code flag/);
   });
 });
+
+describe('cli strict flag parsing', () => {
+  // Every case must throw from main() before any command runs: the stub adapter is never
+  // invoked and nothing is written under the temp cwd.
+  async function expectRejected(argv: string[], msg: RegExp): Promise<void> {
+    const stub = new StubAdapter({});
+    await expect(main(argv, deps(() => stub))).rejects.toThrow(msg);
+    expect(stub.runCount).toBe(0);
+    expect(out.join('')).toBe('');
+  }
+
+  it.each([['--dry-run'], ['--bare'], ['--frobnicate'], ['--']])('rejects unknown flag %j', async (flag) => {
+    await expectRejected(['plan', realScenarios, '--model', 'm', flag], new RegExp(`unknown flag "${flag}"`));
+  });
+
+  it.each([['--setting-sources=user'], ['--model=m'], ['--redact-home=1'], ['--withhold=AAB-003']])(
+    'rejects --name=value form %j',
+    async (tok) => {
+      await expectRejected(['plan', realScenarios, '--model', 'm', tok], /unsupported flag form/);
+      await expectRejected(['plan', realScenarios, '--model', 'm', tok], new RegExp(JSON.stringify(tok).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    },
+  );
+
+  it.each([['--model test-model'], ['--redact-home '], ['--k\t3']])('rejects a flag token containing whitespace %j', async (tok) => {
+    await expectRejected(['plan', realScenarios, tok], /malformed flag/);
+  });
+
+  it.each([['--model'], ['--k'], ['--setting-sources'], ['--withhold'], ['--skill']])(
+    'rejects a value-taking flag %j given last with no value',
+    async (flag) => {
+      await expectRejected(['plan', realScenarios, flag], new RegExp(`${flag} expects a value`));
+    },
+  );
+
+  it('rejects a value-taking flag whose value is another flag', async () => {
+    await expectRejected(['plan', realScenarios, '--model', '--help'], /--model expects a value/);
+  });
+
+  it('still rejects a non-numeric --k', async () => {
+    await expectRejected(['plan', realScenarios, '--model', 'm', '--k', 'three'], /--k expects a number/);
+  });
+
+  it('accepts allowlisted booleans: --help and --version after a command', async () => {
+    expect(await main(['plan', '--help'], deps())).toBe(0);
+    expect(out.join('')).toContain('Usage: lurekit <command>');
+    expect(await main(['plan', '--version'], deps())).toBe(0);
+    expect(out.join('')).toMatch(/^\d+\.\d+\.\d+/);
+  });
+
+  describe('regression: --withhold must never be silently dropped', () => {
+    it('"--withhold AAB-003" as ONE token fails before publish runs', async () => {
+      await expectRejected(['publish', 'some-run', '--withhold AAB-003'], /malformed flag "--withhold AAB-003"/);
+    });
+
+    it.each([[' --withhold AAB-003'], ['\t--withhold AAB-003'], ['--withhold AAB-003 ']])(
+      'a whitespace-padded joined token %j fails instead of becoming an ignored positional',
+      async (tok) => {
+        await expectRejected(['publish', 'some-run', tok], /malformed flag/);
+      },
+    );
+
+    it('a value containing spaces is still accepted as a separate argument', async () => {
+      const code = await main(['publish', 'some run dir', '--out', 'site/a b'], deps());
+      expect(code).toBe(1);
+      expect(err.join('')).toContain('no manifest.json in some run dir');
+    });
+
+    it('"--withhold", "AAB-003" as two tokens parses (publish proceeds to its own checks)', async () => {
+      // No run dir here, so publish reaches its manifest check and returns 1 - proving the
+      // parser accepted the flag rather than throwing.
+      const code = await main(['publish', 'some-run', '--withhold', 'AAB-003'], deps());
+      expect(code).toBe(1);
+      expect(err.join('')).toContain('no manifest.json in some-run');
+    });
+  });
+});
