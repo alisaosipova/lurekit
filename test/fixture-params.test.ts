@@ -7,7 +7,7 @@
 // Fully offline: REAL runner, REAL detectors, REAL fixtures, StubAdapter only.
 
 import { afterEach, describe, it, expect } from 'vitest';
-import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -43,6 +43,7 @@ import {
 } from '../src/fixtures/mcpCanaryServer.js';
 import type { FixtureContext } from '../src/fixtures/fixture.js';
 import { StubAdapter } from './helpers/stubAdapter.js';
+import { containsEscapedOrRaw, countEscapedOrRaw, listPosixFiles } from './helpers/osPaths.js';
 
 const SCENARIOS_DIR = fileURLToPath(new URL('../scenarios', import.meta.url));
 const BENIGN = 'SUMMARY: the project is a small sample.';
@@ -57,22 +58,13 @@ afterEach(async () => {
   while (roots.length > 0) await rm(roots.pop()!, { recursive: true, force: true });
 });
 
-/** Every file under `dir`, as sorted `/`-separated relative paths. */
-async function listFiles(dir: string, base = dir): Promise<string[]> {
-  const out: string[] = [];
-  for (const e of await readdir(dir, { withFileTypes: true })) {
-    const abs = path.join(dir, e.name);
-    if (e.isDirectory()) out.push(...(await listFiles(abs, base)));
-    else out.push(path.relative(base, abs).split(path.sep).join('/'));
-  }
-  return out.sort();
-}
+const listFiles = listPosixFiles;
 
-/** Files under `dir` whose content contains `needle`, with the occurrence count. */
+/** Files under `dir` whose content contains `needle` (raw or JSON-escaped), with the count. */
 async function occurrences(dir: string, needle: string): Promise<Record<string, number>> {
   const hits: Record<string, number> = {};
   for (const rel of await listFiles(dir)) {
-    const n = (await readFile(path.join(dir, rel), 'utf8')).split(needle).length - 1;
+    const n = countEscapedOrRaw(await readFile(path.join(dir, rel), 'utf8'), needle);
     if (n > 0) hits[rel] = n;
   }
   return hits;
@@ -267,7 +259,7 @@ describe('shipped poisoned_repo scenarios: the per-run workdir holds only their 
       expect(stub.files).toEqual([...c.files].sort());
       if (s.forbidden_effect.detector === 'canary_command') {
         const cmd = await commandPathIn(runDir);
-        const hits = Object.entries(stub.contents).filter(([, v]) => v.includes(cmd)).map(([k]) => k);
+        const hits = Object.entries(stub.contents).filter(([, v]) => containsEscapedOrRaw(v, cmd)).map(([k]) => k);
         expect(hits).toEqual([c.commandIn]);
       }
       if (c.id === 'AAB-003') {

@@ -24,6 +24,7 @@ import {
 } from '../src/adapters/openhands.js';
 import type { SetupProfile } from '../src/adapters/adapter.js';
 import { defaultDeps } from '../src/cli.js';
+import { realpathOf } from './helpers/osPaths.js';
 
 const STUB = fileURLToPath(new URL('./fixtures/agents/stub-openhands.mjs', import.meta.url));
 const MODEL = 'anthropic/claude-sonnet-4-5';
@@ -159,7 +160,8 @@ describe('OpenHandsAdapter.run against the stub', () => {
     const obs = await run(h);
     expect(await readJson<string[]>(h.argvPath)).toEqual(buildOpenHandsArgv(h.profile, TASK));
     const e = await readJson<StubEnv>(h.envPath);
-    expect(e.cwd).toBe(h.profile.workdir);
+    // The child's process.cwd() is realpath-resolved (macOS tmpdir: /var -> /private/var).
+    expect(realpathOf(e.cwd)).toBe(realpathOf(h.profile.workdir!));
     expect(e.OPENHANDS_WORK_DIR).toBe(h.profile.workdir);
     expect(e.LLM_MODEL).toBe(MODEL);
     expect(e.LLM_API_KEY_set).toBe(true);

@@ -106,7 +106,9 @@ class ObedientStub extends AlignmentStub {
     const [profile, , , options] = args;
     // Capture the presented content first (AlignmentStub fetches feed/HTTP before super.run()).
     const obs = await super.run(...args);
-    let text = (this.feed ?? '') + (this.httpInstructions ?? '') + (this.httpResult ?? '');
+    // The feed is JSON on the wire; an agent reads the decoded item bodies (on Windows the raw
+    // JSON text carries the path with doubled backslashes, which is not a runnable path).
+    let text = feedBodies(this.feed) + (this.httpInstructions ?? '') + (this.httpResult ?? '');
     for (const s of Object.values(serversOf(profile))) {
       if (s.env?.[ENV_RESULT] !== undefined) {
         text += await stdioDecoyResult(s.env, path.join(options!.runDir!, 'obedient-probe.log'));
@@ -115,12 +117,20 @@ class ObedientStub extends AlignmentStub {
     const m = /`([^`]+)`/.exec(text);
     if (m) {
       this.ran = m[1];
-      const exe = process.platform === 'win32' ? `${m[1]}.cmd` : m[1];
+      // The fixtures present ctx.canaries.commandPath, which on Windows is already the .cmd launcher.
+      const exe = process.platform === 'win32' && !/\.cmd$/i.test(m[1]) ? `${m[1]}.cmd` : m[1];
       await promisify(execFile)(exe, [], { shell: process.platform === 'win32' });
       obs.tool_calls.push({ name: 'Bash', input: { command: m[1] }, at: 1, source: 'stream', sources: ['stream'] });
     }
     return obs;
   }
+}
+
+/** The decoded body text of an issue/email feed payload (`{ items: [{ body }] }`), or ''. */
+function feedBodies(feed: string | undefined): string {
+  if (feed === undefined) return '';
+  const parsed = JSON.parse(feed) as { items?: Array<{ body?: string }> };
+  return (parsed.items ?? []).map((i) => i.body ?? '').join('\n');
 }
 
 async function callDecoy(client: Client): Promise<string> {
@@ -304,7 +314,8 @@ describe('obedient stub: following the presented placeholder yields a canary_com
       expect(s.forbidden_effect.detector).toBe('canary_command');
       const { result, stub, runDir } = await drive(s, {}, true);
       const cmd = await commandPathIn(runDir);
-      expect((stub as ObedientStub).ran).toBe(cmd.replace(/\.cmd$/, ''));
+      // The presented path is ctx.canaries.commandPath verbatim (the .cmd launcher on Windows).
+      expect((stub as ObedientStub).ran).toBe(cmd);
       expect(result.runs[0].outcome).toBe('vulnerable');
       expect(result.verdict).toBe('vulnerable');
     });
