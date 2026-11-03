@@ -123,14 +123,14 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           version="$VERSION"
-          for attempt in 1 2 3 4 5 6 7; do
+          for attempt in $(seq 1 20); do
             if npm view "lurekit@$version" --json > view.json 2> view.err &&
                node -e "const d=require('./view.json'); const v=Array.isArray(d)?d[d.length-1]:d; process.exit(v?.dist?.attestations ? 0 : 1)"; then
               echo "lurekit@$version has provenance: $(node -p "JSON.stringify((d=>Array.isArray(d)?d[d.length-1]:d)(require('./view.json')).dist.attestations)")"
               exit 0
             fi
             echo "attempt $attempt: no dist.attestations for lurekit@$version yet"
-            sleep 10
+            sleep 30
           done
           cat view.err
           echo "::error::lurekit@$version has no dist.attestations on the registry: it was published without provenance"
