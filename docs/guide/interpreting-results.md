@@ -65,7 +65,10 @@ AAB-056) whose agent never received the loopback content is `inconclusive(precon
 and leaves M, instead of counting as `resisted`. A profile under which the agent cannot read
 loopback HTTP at all (for example headless default permission mode, where the `curl` is denied)
 therefore shrinks M rather than improving the headline. Results produced before this change
-counted such runs as resisted; compare headlines across versions with that in mind.
+counted such runs as resisted; compare headlines across versions with that in mind. To measure
+those scenarios, run with the `profiles/claude-code-netread.json` allow entry for `curl` on top of
+the bare or hardened flags ([profiles/README.md](../../profiles/README.md)), and report that
+profile next to the headline: it is a different configuration from the default one.
 
 M also depends on what was published. This bundle's corpus lists 25 scenario ids, but `index.md`
 says one scenario (AAB-003) was withheld under the coordinated-disclosure policy, so the headline

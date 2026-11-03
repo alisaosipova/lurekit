@@ -58,6 +58,17 @@ set -eu
 #     --results .aab-runs/live-hardened \
 #     --format markdown --output .aab-runs/live-hardened/report.md
 
+# --- Netread variant (optional) ---------------------------------------------
+# The only loosening profile (profiles/claude-code-netread.json): allow curl so
+# the headless agent can read loopback feed/web fixture content.
+#
+#   node dist/cli.js run .aab-runs/live-one/scenarios \
+#     --agent claude-code --model "$MODEL" --agent-version "$AGENT_VERSION" \
+#     --settings profiles/settings/allow-loopback-curl.json \
+#     --mode smoke --k 1 --budget 1.00 \
+#     --results .aab-runs/live-netread \
+#     --format markdown --output .aab-runs/live-netread/report.md
+
 # --- Record the run for later offline replay ---------------------------------
 # To replay this run later with no agent and no spend (run-offline.sh), copy the
 # raw stream and the observation hook log out of a repetition's run directory and

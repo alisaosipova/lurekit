@@ -6,8 +6,10 @@ no `--profile` flag: pass the flags shown below. `--model` (and ideally `--agent
 always required on top and are not part of these files, so the same profile can be measured
 against any pinned model.
 
-Both profiles are hardening-only: neither loosens anything the adapter does by default
-(evidence-spec §4.1, §4.3).
+`claude-code-bare.json` and `claude-code-hardened.json` are hardening-only: neither loosens
+anything the adapter does by default (evidence-spec sections 4.1, 4.3). `claude-code-netread.json` is
+the one exception: it adds a permissions allow entry for `curl` so the agent can read loopback
+fixture content in headless mode (see below).
 
 ## `claude-code-bare.json` — no overrides
 
@@ -55,6 +57,51 @@ lurekit run scenarios --agent claude-code \
 Accepted `--setting-sources` values, from `claude --help` (2.1.316): `user`, `project`, `local`,
 comma-separated. The benchmark rejects anything else, an empty list and duplicates before any
 agent process is spawned. The flag is claude-code only; the CLI rejects it for other agents.
+
+## `claude-code-netread.json` - allow loopback curl (the only loosening profile)
+
+The profile forwards `profiles/settings/allow-loopback-curl.json` with `--settings` (ADR-0020):
+
+```json
+{ "permissions": { "allow": ["Bash(curl:*)", "WebFetch(domain:127.0.0.1)"] } }
+```
+
+It is meant to be layered on top of either of the other two profiles.
+
+bare + netread:
+
+```sh
+lurekit run scenarios --agent claude-code \
+  --model <model-id> --agent-version <pinned-version> \
+  --settings profiles/settings/allow-loopback-curl.json
+```
+
+hardened + netread:
+
+```sh
+lurekit run scenarios --agent claude-code \
+  --model <model-id> --agent-version <pinned-version> \
+  --setting-sources user --permission-mode manual \
+  --settings profiles/settings/allow-loopback-curl.json
+```
+
+- What it loosens: Bash commands with the `curl` prefix (any URL, not only loopback) run without
+  an approval prompt, and a WebFetch allow rule for `127.0.0.1` is added (its effect is
+  UNVERIFIED, see below). Everything else is unchanged: the permission mode, setting sources
+  and MCP isolation are those of the profile it is layered on.
+- Why it exists: content delivery is a precondition (evidence-spec section 3.1). In headless
+  `-p` mode nobody can approve the agent's `curl http://127.0.0.1:<port>/...`, so it is denied,
+  the agent reports that WebFetch does not work for localhost, the `issue_feed` / `email_feed` /
+  `web_server` content is never fetched, and those scenarios are
+  `inconclusive(precondition_failed)`. See
+  [troubleshooting](../docs/guide/troubleshooting.md#all-my-feed-or-web-scenarios-are-inconclusive-precondition_failed).
+- Verified live on Claude Code 2.1.317 (`-p`, model `sonnet`): with this file forwarded, the
+  agent's `curl -s -m 15 http://127.0.0.1:<port>/` ran with no permission denial and the
+  `web_server` fixture recorded `content_fetched: true`. It also works together with
+  `--setting-sources user`. UNVERIFIED: whether the `WebFetch(domain:127.0.0.1)` rule has any
+  effect (the agent used `curl`). See `docs/design/NOTES-verified-facts.md`.
+- A verdict from a netread run measures the netread configuration, not the default one. Report
+  the profile next to the verdict. The forwarded body loads at command-line precedence.
 
 ## Settings-based setups (`--settings` / `--hooks`)
 

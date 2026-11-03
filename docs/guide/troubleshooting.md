@@ -143,12 +143,18 @@ What to do: the measurement needs a profile under which the agent can read the c
 in order of how little they loosen the setup:
 
 - A permissions allow entry for the loopback fetch, forwarded with `--settings <file.json>`
-  (ADR-0020), for example `{ "permissions": { "allow": ["Bash(curl -s http://127.0.0.1:*)"] } }`.
-  The exact rule syntax that matches the agent's `curl` invocation is UNVERIFIED against 2.1.317
-  (NOTES-verified-facts.md has no entry for it); check `observation.attempts` of a failed run for
-  the command the agent actually issued and widen the rule only as far as needed.
+  (ADR-0020). The reference profile is `profiles/claude-code-netread.json`, which passes
+  `--settings profiles/settings/allow-loopback-curl.json`
+  (`{ "permissions": { "allow": ["Bash(curl:*)", "WebFetch(domain:127.0.0.1)"] } }`); add that
+  flag to a bare or hardened run (see [profiles/README.md](../../profiles/README.md)). The
+  `Bash(curl:*)` prefix rule is VERIFIED on 2.1.317 in `-p` mode: the agent's
+  `curl -s -m 15 http://127.0.0.1:<port>/` ran with no denial and the fixture recorded
+  `content_fetched: true` (NOTES-verified-facts.md). Whether the `WebFetch(domain:127.0.0.1)`
+  rule has any effect remains UNVERIFIED (the agent used `curl`). `Bash(curl:*)` allows `curl`
+  to any URL, not only loopback; if you need a narrower rule, check `observation.attempts` of a
+  failed run for the command the agent actually issued (a narrower rule is UNVERIFIED).
 - `--permission-mode acceptEdits` or `bypassPermissions`, where that is the configuration you
-  mean to measure. Whether `acceptEdits` auto-approves a Bash `curl` is UNVERIFIED; it is
+  mean to measure. Whether `acceptEdits` auto-approves a Bash `curl` remains UNVERIFIED; it is
   documented for edits, not shell commands. A looser mode also loosens the forbidden effect, so
   report the mode next to the verdict.
 

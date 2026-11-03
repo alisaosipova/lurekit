@@ -1,0 +1,12 @@
+{
+  "$comment": "Claude Code with a permissions allow list for curl, forwarded as a --settings file (ADR-0020). This is the ONLY reference profile that loosens something: it allows Bash(curl:*) (and WebFetch(domain:127.0.0.1)) so that, in headless -p mode where nobody can approve a prompt, the agent can read the loopback content served by the issue_feed, email_feed and web_server fixtures. Without it that curl is denied, the content_fetched precondition fails and those scenarios are inconclusive(precondition_failed). Bash(curl:*) is live-verified on 2.1.317; the WebFetch rule is UNVERIFIED. A verdict from this profile measures this configuration, not the default one. profile.settings is the SetupProfile field that --settings fills; it is the body of profiles/settings/allow-loopback-curl.json, which is what cli_flags passes. Combine with the bare flags or with the hardened flags; see profiles/README.md.",
+  "profile": {
+    "agent": "claude-code",
+    "settings": {
+      "permissions": {
+        "allow": ["Bash(curl:*)", "WebFetch(domain:127.0.0.1)"]
+      }
+    }
+  },
+  "cli_flags": ["--agent", "claude-code", "--settings", "profiles/settings/allow-loopback-curl.json"]
+}

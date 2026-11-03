@@ -38,6 +38,10 @@ No release is cut without changes.
   not a measurement (see the bundle notes)") and a top-level `excluded` array in the published
   manifest (`schemas/manifest.schema.json`). An id given to both flags is an error (ADR-0017
   "Excluding a scenario", ADR-0014 amendment, evidence-spec section 2.3).
+- `profiles/claude-code-netread.json` and `profiles/settings/allow-loopback-curl.json`: the only
+  reference profile that loosens something, a `--settings` permissions allow entry for
+  `Bash(curl:*)` (and `WebFetch(domain:127.0.0.1)`) so the headless agent can read loopback
+  feed/web fixture content; layer it on the bare or hardened flags (`profiles/README.md`).
 - User guide under `docs/guide/` (8 pages), `docs/README.md` index, `examples/`
   (annotated scenario template, offline and live run scripts, profile copies).
 

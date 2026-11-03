@@ -351,7 +351,10 @@ before any agent is spawned. The flag is claude-code only.
 
 See [`profiles/README.md`](../../profiles/README.md) for the full description, including the
 `--settings` / `--hooks` forwarding path (claude-code only), and the measured bare-vs-hardened
-comparison.
+comparison. Under both profiles the headless agent cannot `curl` loopback, so feed and web
+scenarios end `inconclusive(precondition_failed)`; the `claude-code-netread.json` profile
+(add `--settings profiles/settings/allow-loopback-curl.json`) is the one profile that loosens a
+permission to measure them, see [troubleshooting](troubleshooting.md#all-my-feed-or-web-scenarios-are-inconclusive-precondition_failed).
 
 ## Running other agents
 
