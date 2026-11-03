@@ -18,8 +18,8 @@
 // Determinism (§4.5): given the same profile, task and recorded stream, the adapter produces
 // the same RunObservation. Tests drive a stub agent binary; no live agent, network or spend.
 
-import { spawn, spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { accessSync, constants as fsConstants, existsSync, realpathSync, statSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { constants as osConstants } from 'node:os';
 import { performance } from 'node:perf_hooks';
@@ -50,9 +50,17 @@ export const MCP_CONFIG_FILE = 'mcp.json';
 /** Env var that overrides the `claude` binary path (so tests point at a stub). */
 export const CLAUDE_BIN_ENV = 'AAB_CLAUDE_BIN';
 
+/** Backoff between launch attempts (evidence-spec §4.3 "Binary resolution and launch
+ *  retry"): 1 initial attempt + one retry per entry, so 4 attempts in all. */
+export const LAUNCH_RETRY_DELAYS_MS: readonly number[] = [1000, 2000, 4000];
+
 export interface ClaudeCodeAdapterOptions {
   bin?: string;      // explicit binary path; else env override; else 'claude' on PATH
   runDir?: string;   // default run dir if run() is not given one
+  /** Backoff schedule for launch retries (default LAUNCH_RETRY_DELAYS_MS). Tests shorten it. */
+  retryDelaysMs?: readonly number[];
+  /** Sleep used between retries (default setTimeout). Tests inject a deterministic one. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export interface HookEntry {
@@ -66,12 +74,21 @@ export interface HookEntry {
 
 export class ClaudeCodeAdapter implements Adapter {
   readonly id: AgentId = 'claude-code';
-  private readonly binOverride?: string;
+  /** What to resolve: constructor arg > env override > 'claude' on PATH (fixed at construction). */
+  private readonly binSpec: string;
   private readonly defaultRunDir?: string;
+  private readonly retryDelaysMs: readonly number[];
+  private readonly sleep: (ms: number) => Promise<void>;
+  /** Absolute real path resolved once per instance (§4.3); re-resolved only if it vanishes. */
+  private resolvedBin?: string;
+  /** First version this instance observed; later repetitions are compared to it (§4.3). */
+  private baselineVersion?: string;
 
   constructor(opts: ClaudeCodeAdapterOptions = {}) {
-    this.binOverride = opts.bin;
+    this.binSpec = opts.bin ?? process.env[CLAUDE_BIN_ENV] ?? 'claude';
     this.defaultRunDir = opts.runDir;
+    this.retryDelaysMs = opts.retryDelaysMs ?? LAUNCH_RETRY_DELAYS_MS;
+    this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   }
 
   capabilities(): {
@@ -89,9 +106,21 @@ export class ClaudeCodeAdapter implements Adapter {
     };
   }
 
-  /** Resolve the binary: constructor arg > env override > 'claude' on PATH. */
-  private bin(): string {
-    return this.binOverride ?? process.env[CLAUDE_BIN_ENV] ?? 'claude';
+  /** The cached absolute real path when it is still launchable; otherwise resolve again from
+   *  the spec (PATH lookup or explicit path, then realpath). A changed path is warned about. */
+  private currentBin(warnings: string[]): LaunchAttempt<string> {
+    if (this.resolvedBin !== undefined && launchable(this.resolvedBin)) {
+      return { ok: true, value: this.resolvedBin };
+    }
+    const found = resolveAgentBinary(this.binSpec);
+    if (!found) {
+      return { ok: false, retryable: true, reason: `agent binary "${this.binSpec}" not found or not executable` };
+    }
+    if (this.resolvedBin !== undefined && this.resolvedBin !== found) {
+      warnings.push(`agent binary path changed during the run: ${this.resolvedBin} -> ${found}`);
+    }
+    this.resolvedBin = found;
+    return { ok: true, value: found };
   }
 
   async run(
@@ -114,16 +143,36 @@ export class ClaudeCodeAdapter implements Adapter {
     await mkdir(workdir, { recursive: true });
 
     const warnings: string[] = [];
-    const bin = this.bin();
+    const retry = { delaysMs: this.retryDelaysMs, sleep: this.sleep, signal, warnings };
 
-    // Version assertion (§4.4): record the running version, warn (non-fatal) on mismatch.
-    const agentVersionReported = this.probeVersion(bin);
+    // Binary resolution + version probe (§4.3/§4.4), retried with backoff: an agent that
+    // auto-updates replaces its binary in place, leaving a short window where it is absent
+    // (ENOENT) or not yet executable (EACCES). Exhausting the retries throws (adapter error).
+    const probed = await retryLaunch('version probe', retry, () => {
+      const b = this.currentBin(warnings);
+      if (!b.ok) return b;
+      const p = probeVersion(b.value);
+      if (!p.ok) return p;
+      return { ok: true, value: { bin: b.value, version: p.value } };
+    });
+    let bin = probed.bin;
+    const agentVersionReported = probed.version;
     if (agentVersionReported && !versionMatches(profile.agent_version, agentVersionReported)) {
       warnings.push(
         `agent version mismatch: profile pins ${profile.agent_version}, binary reports ${agentVersionReported}`,
       );
     } else if (!agentVersionReported) {
       warnings.push('could not read agent version from `--version`');
+    }
+    // Version drift (§4.3): compare with the first version this adapter instance observed.
+    if (agentVersionReported) {
+      if (this.baselineVersion === undefined) {
+        this.baselineVersion = agentVersionReported;
+      } else if (semverOf(this.baselineVersion) !== semverOf(agentVersionReported)) {
+        warnings.push(
+          `agent updated during the run: first observed ${this.baselineVersion}, this repetition reports ${agentVersionReported} (${bin})`,
+        );
+      }
     }
 
     // Observation hook (§4.2): written to a harness-only settings file in the run dir and
@@ -192,15 +241,18 @@ export class ClaudeCodeAdapter implements Adapter {
       parseStreamLine(line, performance.now() - perfStart, state);
     };
 
-    const isNodeScript = /\.(mjs|cjs|js)$/i.test(bin);
-    const cmd = isNodeScript ? process.execPath : bin;
-    const spawnArgs = isNodeScript ? [bin, ...argv] : argv;
-
-    const child = spawn(cmd, spawnArgs, {
-      cwd: workdir,
-      env,
-      windowsHide: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
+    // Spawn (§4.3), retried on ENOENT/EACCES with the same backoff. A failed spawn emits no
+    // output, so a retry cannot duplicate stream events.
+    const child = await retryLaunch('spawn', retry, async () => {
+      const b = this.currentBin(warnings);
+      if (!b.ok) return b;
+      bin = b.value;
+      const { cmd, args } = commandFor(bin, argv);
+      const c = spawn(cmd, args, { cwd: workdir, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      const err = await spawnOutcome(c);
+      if (!err) return { ok: true, value: c };
+      const reason = `failed to spawn agent binary "${bin}": ${err.code ?? err.message}`;
+      return { ok: false, retryable: isRetryableLaunchError(err), reason };
     });
 
     const onAbort = (): void => {
@@ -223,8 +275,8 @@ export class ClaudeCodeAdapter implements Adapter {
       });
       // Drain stderr so the pipe never blocks; contents are not evidence.
       child.stderr.on('data', () => {});
-      child.on('error', () => {
-        warnings.push(`failed to spawn agent binary "${bin}"`);
+      child.on('error', (err) => {
+        warnings.push(`agent process error (${bin}): ${err.message}`);
         resolve(-1);
       });
       child.on('close', (code, sig) => {
@@ -252,24 +304,10 @@ export class ClaudeCodeAdapter implements Adapter {
       endedAt,
       usedBare,
       agentVersionReported,
+      agentBinaryPath: bin,
       warnings,
       agentFlags,
     });
-  }
-
-  /** Run `<bin> --version` synchronously; return the reported version string or undefined. */
-  private probeVersion(bin: string): string | undefined {
-    const isNodeScript = /\.(mjs|cjs|js)$/i.test(bin);
-    const cmd = isNodeScript ? process.execPath : bin;
-    const args = isNodeScript ? [bin, '--version'] : ['--version'];
-    try {
-      const res = spawnSync(cmd, args, { encoding: 'utf8', windowsHide: true });
-      if (res.error || typeof res.stdout !== 'string') return undefined;
-      const out = res.stdout.trim();
-      return out.length > 0 ? out : undefined;
-    } catch {
-      return undefined;
-    }
   }
 }
 
@@ -433,6 +471,7 @@ export interface ObservationMeta {
   endedAt: number;
   usedBare: boolean;
   agentVersionReported?: string;
+  agentBinaryPath?: string; // §4.3: absolute real path actually spawned (live adapter only)
   warnings?: string[];
   agentFlags?: string[]; // §4.3: option names actually passed (live adapter only)
 }
@@ -459,6 +498,7 @@ export function assembleObservation(
     mcp_servers: state.mcpServers,
     used_bare: meta.usedBare,
     agent_version_reported: meta.agentVersionReported,
+    ...(meta.agentBinaryPath !== undefined ? { agent_binary_path: meta.agentBinaryPath } : {}),
     warnings: warnings.length > 0 ? warnings : undefined,
     ...(meta.agentFlags ? { agent_flags: [...meta.agentFlags] } : {}),
     attempts: attemptsFrom(state, toolCalls),
@@ -625,4 +665,130 @@ function semverOf(s: string): string | undefined {
 function signalNumber(sig: NodeJS.Signals): number | undefined {
   const n = (osConstants.signals as Record<string, number>)[sig];
   return typeof n === 'number' ? n : undefined;
+}
+
+// --- binary resolution and launch retry (evidence-spec §4.3) -----------------------------
+
+/** One launch attempt's result. A retryable failure (binary absent / not executable, i.e. an
+ *  ENOENT/EACCES window while an auto-update replaces it) is retried with backoff. */
+export type LaunchAttempt<T> = { ok: true; value: T } | { ok: false; retryable: boolean; reason: string };
+
+export interface RetryContext {
+  delaysMs: readonly number[];
+  sleep: (ms: number) => Promise<void>;
+  signal?: AbortSignal;
+  /** Each retry is recorded here: `launch retry <n>/<max> (<label>) in <ms>ms: <reason>`. */
+  warnings: string[];
+}
+
+/** Run `attempt` up to `delaysMs.length + 1` times, sleeping `delaysMs[i]` before retry i+1.
+ *  Throws once the retries are exhausted, on a non-retryable failure, or when `signal` is
+ *  aborted between attempts; the message carries the attempt count and the last reason. */
+export async function retryLaunch<T>(
+  label: string,
+  ctx: RetryContext,
+  attempt: () => LaunchAttempt<T> | Promise<LaunchAttempt<T>>,
+): Promise<T> {
+  for (let i = 0; ; i++) {
+    const r = await attempt();
+    if (r.ok) return r.value;
+    if (!r.retryable || i >= ctx.delaysMs.length) {
+      throw new Error(`${label} failed after ${i + 1} attempt(s): ${r.reason}`);
+    }
+    if (ctx.signal?.aborted) throw new Error(`${label} aborted during launch retry: ${r.reason}`);
+    const delay = ctx.delaysMs[i]!;
+    ctx.warnings.push(`launch retry ${i + 1}/${ctx.delaysMs.length} (${label}) in ${delay}ms: ${r.reason}`);
+    await ctx.sleep(delay);
+    if (ctx.signal?.aborted) throw new Error(`${label} aborted during launch retry: ${r.reason}`);
+  }
+}
+
+/** ENOENT (binary absent) and EACCES (present but not executable yet) are the replace-in-place
+ *  window of an updating binary; anything else is not retried. */
+export function isRetryableLaunchError(err: { code?: unknown } | undefined): boolean {
+  return err?.code === 'ENOENT' || err?.code === 'EACCES';
+}
+
+function isNodeScript(bin: string): boolean {
+  return /\.(mjs|cjs|js)$/i.test(bin);
+}
+
+/** argv for launching `bin`: a .js/.mjs/.cjs script runs under the current node. */
+function commandFor(bin: string, args: string[]): { cmd: string; args: string[] } {
+  return isNodeScript(bin) ? { cmd: process.execPath, args: [bin, ...args] } : { cmd: bin, args };
+}
+
+/** Whether `file` is a regular file the adapter can launch now (readable for a node script,
+ *  executable otherwise). */
+function launchable(file: string): boolean {
+  try {
+    const mode = isNodeScript(file) || process.platform === 'win32' ? fsConstants.R_OK : fsConstants.X_OK;
+    accessSync(file, mode);
+    return statSync(file).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** Resolve a binary spec to an absolute real path (§4.3): a spec with a path separator is
+ *  taken as a path (relative to cwd); a bare name is looked up on PATH. The result is
+ *  `realpathSync` of the first launchable candidate, or undefined when none is found. */
+export function resolveAgentBinary(spec: string, envPath: string | undefined = process.env.PATH): string | undefined {
+  const candidates: string[] = [];
+  if (spec.includes('/') || spec.includes(path.sep) || path.isAbsolute(spec)) {
+    candidates.push(path.resolve(spec));
+  } else {
+    const exts =
+      process.platform === 'win32' ? ['', ...(process.env.PATHEXT ?? '.EXE;.CMD;.BAT').split(';')] : [''];
+    for (const dir of (envPath ?? '').split(path.delimiter)) {
+      if (!dir) continue;
+      for (const ext of exts) candidates.push(path.resolve(dir, spec + ext));
+    }
+  }
+  for (const c of candidates) {
+    if (!launchable(c)) continue;
+    try {
+      const real = realpathSync(c);
+      if (launchable(real)) return real;
+    } catch {
+      /* vanished between the checks: try the next candidate */
+    }
+  }
+  return undefined;
+}
+
+/** Run `<bin> --version` synchronously. ENOENT/EACCES is a retryable failure; a binary that
+ *  runs but reports nothing yields `{ ok: true, value: undefined }` (warned by the caller). */
+function probeVersion(bin: string): LaunchAttempt<string | undefined> {
+  const { cmd, args } = commandFor(bin, ['--version']);
+  try {
+    const res = spawnSync(cmd, args, { encoding: 'utf8', windowsHide: true });
+    if (res.error) {
+      const err = res.error as NodeJS.ErrnoException;
+      if (isRetryableLaunchError(err)) {
+        return { ok: false, retryable: true, reason: `\`--version\` probe of "${bin}" failed: ${err.code}` };
+      }
+      return { ok: true, value: undefined };
+    }
+    const out = typeof res.stdout === 'string' ? res.stdout.trim() : '';
+    return { ok: true, value: out.length > 0 ? out : undefined };
+  } catch {
+    return { ok: true, value: undefined };
+  }
+}
+
+/** Resolve once the child has either spawned (undefined) or failed to spawn (the error). */
+function spawnOutcome(child: ChildProcess): Promise<NodeJS.ErrnoException | undefined> {
+  return new Promise((resolve) => {
+    const onSpawn = (): void => {
+      child.off('error', onError);
+      resolve(undefined);
+    };
+    const onError = (err: NodeJS.ErrnoException): void => {
+      child.off('spawn', onSpawn);
+      resolve(err);
+    };
+    child.once('spawn', onSpawn);
+    child.once('error', onError);
+  });
 }

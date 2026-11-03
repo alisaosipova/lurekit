@@ -6,13 +6,22 @@
 // cost, effective model/mode from system/init, and that the AbortSignal kills the child.
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdir, mkdtemp, readdir, rm, readFile, stat, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, mkdtemp, readdir, rm, readFile, stat, symlink, writeFile } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
-import { ClaudeCodeAdapter, HOOK_SETTINGS_FILE, flagNames } from '../src/adapters/claudeCode.js';
+import {
+  ClaudeCodeAdapter,
+  HOOK_SETTINGS_FILE,
+  LAUNCH_RETRY_DELAYS_MS,
+  flagNames,
+  isRetryableLaunchError,
+  resolveAgentBinary,
+  retryLaunch,
+} from '../src/adapters/claudeCode.js';
 import type { RunObservation, SetupProfile } from '../src/adapters/adapter.js';
 
 const STUB = fileURLToPath(new URL('./fixtures/agents/stub-claude.mjs', import.meta.url));
@@ -384,5 +393,258 @@ describe('ClaudeCodeAdapter --setting-sources hardening knob (§4.3)', () => {
     );
     // The stub writes its argv on spawn; no argv file means nothing was spawned.
     await expect(stat(argvPath)).rejects.toThrow();
+  });
+});
+
+// §4.3 "Binary resolution and launch retry": the binary is resolved once per adapter instance
+// to an absolute real path; a launch that hits ENOENT/EACCES (an auto-update replacing the
+// binary in place) is retried with backoff; the spawned path and per-repetition version are
+// recorded and a version change within one adapter instance is warned about. The sleep is
+// injected, so no test waits on the real 1s/2s/4s schedule.
+describe('ClaudeCodeAdapter binary resolution and launch retry (§4.3)', () => {
+  async function binDir(): Promise<string> {
+    const d = await mkdtemp(path.join(tmpdir(), 'aab-cc-bin-'));
+    tmpDirs.push(d);
+    return d;
+  }
+
+  /** A wrapper bin that reports the version in <dir>/version.txt and otherwise runs the stub. */
+  async function versionedStub(dir: string, version: string): Promise<{ bin: string; setVersion: (v: string) => Promise<void> }> {
+    const bin = path.join(dir, 'claude-wrapper.mjs');
+    const versionFile = path.join(dir, 'version.txt');
+    await writeFile(
+      bin,
+      [
+        "import fs from 'node:fs';",
+        "if (process.argv.includes('--version')) {",
+        `  process.stdout.write(fs.readFileSync(${JSON.stringify(versionFile)}, 'utf8'));`,
+        '  process.exit(0);',
+        '}',
+        `await import(${JSON.stringify(new URL('./fixtures/agents/stub-claude.mjs', import.meta.url).href)});`,
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const setVersion = (v: string): Promise<void> => writeFile(versionFile, `${v} (Claude Code)\n`, 'utf8');
+    await setVersion(version);
+    return { bin, setVersion };
+  }
+
+  it('uses the documented default backoff of 1s/2s/4s', () => {
+    expect([...LAUNCH_RETRY_DELAYS_MS]).toEqual([1000, 2000, 4000]);
+  });
+
+  it('records the absolute real path of the spawned binary (symlink resolved)', async () => {
+    const dir = await binDir();
+    const link = path.join(dir, 'claude-link.mjs');
+    await symlink(STUB, link);
+    const { profile, runDir } = await harness();
+    const obs = await new ClaudeCodeAdapter({ bin: link }).run(profile, TASK, new AbortController().signal, { runDir });
+    expect(obs.exit_code).toBe(0);
+    expect(obs.agent_binary_path).toBe(realpathSync(STUB));
+    expect(path.isAbsolute(obs.agent_binary_path!)).toBe(true);
+    expect(obs.agent_version_reported).toBe('2.1.309 (Claude Code)');
+  });
+
+  it('resolves a bare name on PATH to its real path', async () => {
+    const dir = await binDir();
+    const target = path.join(dir, 'real-claude.mjs');
+    await copyFile(STUB, target);
+    await chmod(target, 0o755);
+    await symlink(target, path.join(dir, 'claude'));
+    expect(resolveAgentBinary('claude', dir)).toBe(realpathSync(target));
+    expect(resolveAgentBinary('claude', path.join(dir, 'nope'))).toBeUndefined();
+  });
+
+  it('retries while the binary is absent, then succeeds, recording each retry', async () => {
+    const dir = await binDir();
+    const bin = path.join(dir, 'claude-late.mjs');
+    const slept: number[] = [];
+    const sleep = async (ms: number): Promise<void> => {
+      slept.push(ms);
+      // The binary appears after the second backoff (absent for the first 2 attempts).
+      if (slept.length === 2) await copyFile(STUB, bin);
+    };
+    const { profile, runDir, argvPath } = await harness();
+    const obs = await new ClaudeCodeAdapter({ bin, sleep }).run(profile, TASK, new AbortController().signal, { runDir });
+
+    expect(slept).toEqual([1000, 2000]);
+    expect(obs.exit_code).toBe(0);
+    expect(obs.tool_calls.length).toBeGreaterThan(0);
+    expect(await readArgv(argvPath)).toContain('-p');
+    expect(obs.agent_binary_path).toBe(realpathSync(bin));
+    const retries = (obs.warnings ?? []).filter((w) => w.startsWith('launch retry '));
+    expect(retries).toHaveLength(2);
+    expect(retries[0]).toMatch(/^launch retry 1\/3 \(version probe\) in 1000ms: agent binary ".*claude-late\.mjs" not found/);
+    expect(retries[1]).toMatch(/^launch retry 2\/3 \(version probe\) in 2000ms/);
+  });
+
+  it('gives up with an adapter error after the retries are exhausted (binary never appears)', async () => {
+    const dir = await binDir();
+    const slept: number[] = [];
+    const sleep = async (ms: number): Promise<void> => {
+      slept.push(ms);
+    };
+    const { profile, runDir, argvPath } = await harness();
+    const a = new ClaudeCodeAdapter({ bin: path.join(dir, 'missing-claude'), sleep });
+    await expect(a.run(profile, TASK, new AbortController().signal, { runDir })).rejects.toThrow(
+      /version probe failed after 4 attempt\(s\): agent binary ".*missing-claude" not found or not executable/,
+    );
+    expect(slept).toEqual([1000, 2000, 4000]); // 3 retries after the first attempt
+    await expect(stat(argvPath)).rejects.toThrow(); // nothing was ever spawned
+  });
+
+  it('stops retrying when the run is aborted during the backoff', async () => {
+    const dir = await binDir();
+    const ac = new AbortController();
+    const sleep = async (): Promise<void> => {
+      ac.abort();
+    };
+    const { profile, runDir } = await harness();
+    const a = new ClaudeCodeAdapter({ bin: path.join(dir, 'missing-claude'), sleep });
+    await expect(a.run(profile, TASK, ac.signal, { runDir })).rejects.toThrow(/aborted during launch retry/);
+  });
+
+  it('warns "agent updated during the run" when a later repetition reports another version', async () => {
+    const dir = await binDir();
+    const { bin, setVersion } = await versionedStub(dir, '2.1.316');
+    const a = new ClaudeCodeAdapter({ bin });
+
+    const h1 = await harness({ agent_version: '2.1.316' });
+    const first = await a.run(h1.profile, TASK, new AbortController().signal, { runDir: h1.runDir });
+    expect(first.agent_version_reported).toBe('2.1.316 (Claude Code)');
+    expect((first.warnings ?? []).some((w) => w.startsWith('agent updated during the run'))).toBe(false);
+
+    await setVersion('2.1.317'); // background auto-update between repetitions
+    const h2 = await harness({ agent_version: '2.1.316' });
+    const second = await a.run(h2.profile, TASK, new AbortController().signal, { runDir: h2.runDir });
+    expect(second.agent_version_reported).toBe('2.1.317 (Claude Code)');
+    expect(second.agent_binary_path).toBe(realpathSync(bin));
+    expect(second.warnings).toContain(
+      `agent updated during the run: first observed 2.1.316 (Claude Code), this repetition reports 2.1.317 (Claude Code) (${realpathSync(bin)})`,
+    );
+    // The pinned-version mismatch warning is still recorded independently (§4.4).
+    expect((second.warnings ?? []).some((w) => w.startsWith('agent version mismatch'))).toBe(true);
+  });
+});
+
+describe('retryLaunch (§4.3)', () => {
+  it('retries a spawn ENOENT/EACCES and records each retry; does not retry other errors', async () => {
+    expect(isRetryableLaunchError({ code: 'ENOENT' })).toBe(true);
+    expect(isRetryableLaunchError({ code: 'EACCES' })).toBe(true);
+    expect(isRetryableLaunchError({ code: 'E2BIG' })).toBe(false);
+    expect(isRetryableLaunchError(undefined)).toBe(false);
+
+    const warnings: string[] = [];
+    let n = 0;
+    const v = await retryLaunch('spawn', { delaysMs: [1, 2, 4], sleep: async () => {}, warnings }, () =>
+      ++n < 3 ? { ok: false, retryable: true, reason: `ENOENT #${n}` } : { ok: true, value: 'child' },
+    );
+    expect(v).toBe('child');
+    expect(warnings).toEqual(['launch retry 1/3 (spawn) in 1ms: ENOENT #1', 'launch retry 2/3 (spawn) in 2ms: ENOENT #2']);
+
+    const w2: string[] = [];
+    await expect(
+      retryLaunch('spawn', { delaysMs: [1, 2, 4], sleep: async () => {}, warnings: w2 }, () => ({
+        ok: false,
+        retryable: false,
+        reason: 'E2BIG',
+      })),
+    ).rejects.toThrow('spawn failed after 1 attempt(s): E2BIG');
+    expect(w2).toEqual([]);
+  });
+});
+
+// Review additions (§4.3): an agent that ran and exited non-zero is a normal observation and is
+// never retried; EACCES (present but not yet executable) is retried; a re-resolved path that
+// differs from the cached one is warned about.
+describe('ClaudeCodeAdapter launch retry boundaries (§4.3)', () => {
+  async function binDir(): Promise<string> {
+    const d = await mkdtemp(path.join(tmpdir(), 'aab-cc-bin-'));
+    tmpDirs.push(d);
+    return d;
+  }
+  const noSleep = (log: number[]) => async (ms: number): Promise<void> => {
+    log.push(ms);
+  };
+
+  it('does not retry an agent that ran and exited non-zero (normal observation)', async () => {
+    const dir = await binDir();
+    const bin = path.join(dir, 'claude-fails.mjs');
+    const ranMarker = path.join(dir, 'runs.log');
+    await writeFile(
+      bin,
+      [
+        "import fs from 'node:fs';",
+        "if (process.argv.includes('--version')) { process.stdout.write('2.1.309 (Claude Code)\\n'); process.exit(0); }",
+        `fs.appendFileSync(${JSON.stringify(ranMarker)}, 'run\\n');`,
+        'process.exit(3);',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const slept: number[] = [];
+    const { profile, runDir } = await harness();
+    const obs = await new ClaudeCodeAdapter({ bin, sleep: noSleep(slept) }).run(
+      profile,
+      TASK,
+      new AbortController().signal,
+      { runDir },
+    );
+    expect(obs.exit_code).toBe(3);
+    expect(slept).toEqual([]);
+    expect((obs.warnings ?? []).some((w) => w.startsWith('launch retry '))).toBe(false);
+    expect(await readFile(ranMarker, 'utf8')).toBe('run\n'); // spawned exactly once
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'retries while the binary is present but not executable (EACCES window), then succeeds',
+    async () => {
+      const dir = await binDir();
+      const bin = path.join(dir, 'claude-sh');
+      await writeFile(bin, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(STUB)} "$@"\n`, 'utf8');
+      await chmod(bin, 0o644);
+      const slept: number[] = [];
+      const sleep = async (ms: number): Promise<void> => {
+        slept.push(ms);
+        if (slept.length === 1) await chmod(bin, 0o755);
+      };
+      const { profile, runDir } = await harness();
+      const obs = await new ClaudeCodeAdapter({ bin, sleep }).run(profile, TASK, new AbortController().signal, {
+        runDir,
+      });
+      expect(slept).toEqual([1000]);
+      expect(obs.exit_code).toBe(0);
+      expect(obs.agent_binary_path).toBe(realpathSync(bin));
+      expect((obs.warnings ?? []).filter((w) => w.startsWith('launch retry '))).toHaveLength(1);
+    },
+  );
+
+  it('re-resolves when the cached real path vanishes and warns about the changed path', async () => {
+    const dir = await binDir();
+    const v1 = path.join(dir, 'v1', 'claude.mjs');
+    const v2 = path.join(dir, 'v2', 'claude.mjs');
+    await mkdir(path.dirname(v1), { recursive: true });
+    await mkdir(path.dirname(v2), { recursive: true });
+    await copyFile(STUB, v1);
+    await copyFile(STUB, v2);
+    const link = path.join(dir, 'claude.mjs');
+    await symlink(v1, link);
+    const a = new ClaudeCodeAdapter({ bin: link, sleep: noSleep([]) });
+
+    const h1 = await harness();
+    const first = await a.run(h1.profile, TASK, new AbortController().signal, { runDir: h1.runDir });
+    expect(first.agent_binary_path).toBe(realpathSync(v1));
+
+    await rm(v1);
+    await rm(link);
+    await symlink(v2, link); // an update re-created the PATH symlink to a new location
+    const h2 = await harness();
+    const second = await a.run(h2.profile, TASK, new AbortController().signal, { runDir: h2.runDir });
+    expect(second.exit_code).toBe(0);
+    expect(second.agent_binary_path).toBe(realpathSync(v2));
+    expect(second.warnings).toContain(
+      `agent binary path changed during the run: ${realpathSync(path.dirname(v1))}/claude.mjs -> ${realpathSync(v2)}`,
+    );
   });
 });

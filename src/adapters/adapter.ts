@@ -186,6 +186,9 @@ export interface RunObservation {
   mcp_servers?: McpServerStatus[];     // mcp_servers list from system/init (name/status/source)
   used_bare?: boolean;                 // §4.3: whether --bare was passed (default false)
   agent_version_reported?: string;     // version string from `<bin> --version`
+  // §4.3: absolute real path of the agent binary this repetition actually spawned (resolved
+  // once per adapter instance; PATH lookup + realpath, or the explicit override). Optional.
+  agent_binary_path?: string;
   warnings?: string[];                 // non-fatal issues (e.g. version mismatch)
   // §4.3: the option names the adapter ACTUALLY passed to the agent binary for this run, in
   // argv order, values omitted (e.g. ["-p", "--output-format", "--verbose", "--model",

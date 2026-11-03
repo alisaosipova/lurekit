@@ -366,6 +366,31 @@ denial record (ADR-0016), so it reports none rather than guess.
   entries without a name are dropped; a later init without a list does not erase an earlier
   one). The runner copies it into the evidence record's `observation.mcp_servers`; §3.1
   preconditions are checked against it.
+- **Binary resolution and launch retry.** The adapter resolves the agent binary **once per
+  adapter instance** (the CLI builds one instance per batch) to an absolute real path:
+  constructor `bin` > `AAB_CLAUDE_BIN` > `claude` on `PATH`, then `realpathSync`
+  (`resolveAgentBinary()`, `src/adapters/claudeCode.ts`); a spec with a path separator is a
+  path, a bare name is looked up on `PATH`. Every repetition launches that path; it is
+  re-resolved only when it is no longer launchable, and a changed path is warned about
+  (`agent binary path changed during the run: <old> -> <new>`). The `--version` probe and the
+  spawn are each retried on ENOENT/EACCES (binary absent, or present but not yet executable —
+  the window while an auto-update replaces it in place) with a 1s/2s/4s backoff
+  (`LAUNCH_RETRY_DELAYS_MS`: 1 attempt + 3 retries). Each retry is recorded as a warning
+  `launch retry <n>/3 (<version probe|spawn>) in <ms>ms: <reason>`. When the retries are
+  exhausted, on a non-retryable spawn error, or on an abort during the backoff, `run()` throws, so
+  the runner records `inconclusive(adapter_error)` (§3.1) with the attempt count in the message.
+  A failed spawn emits no output, so a retry cannot duplicate stream events. Only a launch
+  failure is retried: an agent that spawned and then exited non-zero is a normal observation
+  (its `exit_code` is recorded) and is never re-run. (Origin: a k=3 live
+  batch in which Claude Code auto-updated 2.1.316 -> 2.1.317 mid-run; every later spawn failed
+  with ENOENT and 62 of 75 repetitions were lost as adapter errors.)
+  **Recorded:** `observation.agent_binary_path` (the real path spawned) and
+  `observation.agent_version_reported` (the `--version` output of that repetition). When the
+  reported version differs (by `x.y.z`) from the first version this adapter instance observed,
+  the warning `agent updated during the run: first observed <v0>, this repetition reports <v>
+  (<path>)` is recorded, independent of the §4.4 pin-mismatch warning. Limit: the version is
+  probed before the spawn only, so an update during a repetition is seen at the next one.
+  Operator mitigation: NOTES ("Claude Code auto-update").
 - WebSearch runs on Anthropic's backend, so a local fixture page cannot enter WebSearch
   results. Source: https://code.claude.com/docs/en/tools-reference.md. Scenarios needing the
   agent to fetch fixture web content must use a fetch/MCP tool pointed at the loopback fixture,
