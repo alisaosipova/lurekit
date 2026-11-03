@@ -19,6 +19,32 @@ No release is cut without changes.
 ## [Unreleased]
 
 ### Changed
+- Newcomer path (ADR-0022 amendment, block 5): `run`, `plan`, `validate`, `list` and `doctor`
+  resolve the scenario directory the same way: the `[dir]` argument, else `./scenarios` when it
+  exists, else the corpus shipped with the package; `plan` and `run` print
+  `corpus: <path> (shipped with the package)` (or where else it came from). `npx lurekit run
+  --model sonnet` now works from an empty directory; the docs no longer mention
+  `node_modules/lurekit/scenarios`.
+- `run` validates `--format`, the `--output` directory, `--results` and `--budget` (> 0) before
+  the plan, the `Launch? [y/N]` prompt and any agent spawn; a bad value no longer surfaces after a
+  paid run. A finished run prints `Next: lurekit report <runDir> --format markdown|json|sarif` and
+  `lurekit publish <runDir> --redact-home`.
+- **Breaking for scripts:** `publish` without `--out` writes to
+  `<results>/<benchmark_run_id>/bundle` (default `.aab-runs/<id>/bundle`) instead of
+  `reports/<benchmark_run_id>` in the cwd. Pass `--out reports/<id>` for the old location.
+- Every refusal ends with a `next: <command>` line: missing values, `--model`, `--mode`,
+  `--vulnerable-if`, `doctor`/`demo` flag errors, an unknown agent, a failed bundle write, and an
+  unknown command (which suggests the closest command within edit distance 2). `report` and
+  `publish` without a `manifest.json` list the run directories under `--results`, newest first.
+  A missing demo asset is a clear exit-1 message. The adapter error no longer says "0.1".
+- `doctor`: the final `Next:` line and the `model`/`corpus` fix lines carry the resolved corpus,
+  `--agent` and `--model`; logged out with `ANTHROPIC_API_KEY` set is a `warn` ("UNVERIFIED whether
+  -p honours it on this version"), not a `fail`.
+- Report "What to change" (ADR-0021 amendment): the re-measure command reuses the run's corpus
+  path, agent, model, k and vulnerable_if, adds `--budget` (the run's cap or the published-run
+  estimate) and reminds you to add your own `--settings`/`--mcp`/`--hooks`/`--skill` flags; the
+  version line compares the leading x.y.z, so `2.1.317` and `2.1.317 (Claude Code)` no longer
+  count as a mismatch.
 - Tests: `testTimeout` and `hookTimeout` are 30 s (one constant in `test/helpers/deadline.ts`);
   the stub ready-file polls in the claude/cursor/codex/openhands adapter tests use the shared
   `pollUntil` with a deadline derived from, and below, the test timeout. Fixes spurious 5 s
@@ -30,7 +56,7 @@ No release is cut without changes.
   warning; the outside-any-repository branch is no longer exercised by the suite.
 - `package.json` gains `"prepack": "npm run build"`: `npm pack` / `npm publish` cannot ship a stale
   `dist/`.
-- CI (ADR-0012): the package job runs `doctor --format json`, `demo` and `list` with the
+- CI (ADR-0012): the package job runs `doctor --format json`, `demo`, and `list`/`validate`/`plan` without an argument, with the
   installed bin from an empty directory and checks the pack lists `dist/`; a new hygiene job
   rejects `tmpdir()` scratch in `src/` and `test/`.
 - `examples/profiles/` is a README pointer to `profiles/` (ADR-0011, one profiles directory); the

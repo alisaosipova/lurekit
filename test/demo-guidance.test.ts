@@ -10,7 +10,7 @@ import { describe, it, expect } from 'vitest';
 
 import { main, demoBundleDir, DEMO_RUN_ID, type CliDeps } from '../src/cli.js';
 import {
-  report, buildScore, renderMarkdown, HARDENING_KNOBS, NO_VERIFIED_FIX, type SurfaceLookup, type EvidenceLookup,
+  report, buildScore, renderMarkdown, HARDENING_KNOBS, NO_VERIFIED_FIX, leadingSemver, sameAgentVersion, type SurfaceLookup, type EvidenceLookup,
 } from '../src/report/index.js';
 import { loadScenarioDir } from '../src/scenario/load.js';
 import type { EvidenceRecord, RunManifest } from '../src/runner/types.js';
@@ -195,6 +195,36 @@ describe('no hard-coded numbers', () => {
     expect(withoutCitation).not.toMatch(/\b(21|17|24)\b/);
   });
 
+  it('re-measure: caller corpus, the run\'s cap or the estimate as --budget, and the own-flags note (ADR-0021 amendment)', () => {
+    const m = synthetic([row('AAB-002', 'vulnerable', '1/1 vulnerable')]);
+    const withCtx = renderMarkdown(m, buildScore(m), undefined, { surfaceOf, reMeasure: { corpus: 'my-corpus', budgetEstimateUsd: 0.061 } });
+    expect(withCtx).toContain(
+      '- re-measure: `lurekit run my-corpus --agent claude-code --model m-x --agent-version 9.9.9 --setting-sources user ' +
+        '--permission-mode manual --mode smoke --k 1 --vulnerable-if any --budget 0.07` ' +
+        '(add your own --settings/--mcp/--hooks/--skill flags; the manifest does not record their file paths)',
+    );
+    m.config.budget_usd = 4;
+    expect(renderMarkdown(m, buildScore(m), undefined, { surfaceOf, reMeasure: { corpus: 'c', budgetEstimateUsd: 1 } })).toContain('--vulnerable-if any --budget 4`');
+    m.config.budget_usd = null;
+    const bare = md(m);
+    expect(bare).toContain('- re-measure: `lurekit run <scenario-dir> --agent claude-code');
+    expect(bare).toContain('--budget <usd>`');
+  });
+
+  it('version comparison normalises to the leading x.y.z; equal versions do not warn', () => {
+    expect(leadingSemver('2.1.317 (Claude Code)')).toBe('2.1.317');
+    expect(leadingSemver('unpinned')).toBe('unpinned');
+    expect(sameAgentVersion('2.1.317', '2.1.317 (Claude Code)')).toBe(true);
+    expect(sameAgentVersion('2.1.318 (Claude Code)', '2.1.317 (Claude Code)')).toBe(false);
+    const m = synthetic([row('AAB-002', 'vulnerable', '1/1 vulnerable')]);
+    for (const v of ['2.1.317', '2.1.317 (Claude Code)']) {
+      m.profile.agent_version = v;
+      expect(md(m)).not.toContain('- version:');
+    }
+    m.profile.agent_version = '2.1.318 (Claude Code)';
+    expect(md(m)).toContain('- version: this run is `2.1.318 (Claude Code)`');
+  });
+
   it('inconclusive only: nothing to change plus the pointer to the inconclusive reasons table', () => {
     const m = synthetic([row('X-1', 'inconclusive', '0/2 vulnerable, 2 inconclusive'), row('X-2', 'inconclusive', '0/2 vulnerable, 2 inconclusive')], 2);
     const text = md(m, synthSurfaces);
@@ -253,6 +283,11 @@ describe('lurekit demo (CLI)', () => {
     expect(text).toContain('| id | name | verdict | confidence | source |');
     expect(text).toContain('## What to change');
     expect(text).toContain('--setting-sources user');
+    // The re-measure line uses the shipped corpus and the run's own budget cap; the versions are
+    // equal once normalised, so no version warning.
+    expect(text).toContain('- re-measure: `lurekit run scenarios --agent claude-code --model sonnet');
+    expect(text).toMatch(/--vulnerable-if majority --budget \d/);
+    expect(text).not.toContain('- version: this run is');
   });
 
   it('--format json prints the published report.json exactly, banner on stderr', async () => {

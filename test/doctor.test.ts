@@ -133,6 +133,16 @@ describe('doctor checks (pure, fake probe)', () => {
     expect(out.status).toBe('fail');
     expect(out.fix).toMatch(/^claude auth login/);
 
+    // ADR-0022 amendment: logged out but ANTHROPIC_API_KEY set -> warn, not fail (NOTES: whether
+    // -p honours the key in that state is UNVERIFIED). The key's value is never echoed.
+    const keyed = checkAuth(AGENTS['claude-code'], bin, fakeProbe({
+      env: { ANTHROPIC_API_KEY: 'sk-ant-placeholder-value' },
+      exec: { [`${GLOBAL_CLAUDE} auth status --json`]: { status: 1, stdout: '{"loggedIn":false,"authMethod":"none"}', stderr: '' } },
+    }));
+    expect(keyed.status).toBe('warn');
+    expect(keyed.summary).toBe('not logged in; ANTHROPIC_API_KEY is set (UNVERIFIED whether -p honours it on this version)');
+    expect(JSON.stringify(keyed)).not.toContain('placeholder-value');
+
     // An older binary without the subcommand: say "not checked", never guess.
     const unknown = checkAuth(AGENTS['claude-code'], bin, fakeProbe({ exec: { [`${GLOBAL_CLAUDE} auth status --json`]: { status: 1, stdout: 'error: unknown command', stderr: '' } } }));
     expect(unknown.status).toBe('warn');
@@ -278,6 +288,21 @@ describe('lurekit doctor (main, fake probe)', () => {
     const code = await main(['doctor', path.join(work, 'nope')], deps(healthyClaude()));
     expect(code).toBe(1);
     expect(out.join('')).toMatch(/^fail  corpus .*does not exist/m);
+  });
+
+  it('the Next line and the fix lines carry the resolved corpus, agent and model (ADR-0022 amendment)', async () => {
+    expect(await main(['doctor', '--model', 'sonnet'], deps(healthyClaude()))).toBe(0);
+    // cwd = repository root, which has ./scenarios: the resolved corpus is "scenarios".
+    expect(out.join('')).toContain('Next: lurekit run scenarios --agent claude-code --model sonnet (asks before it spends).');
+    expect(await main(['doctor'], deps(healthyClaude()))).toBe(0);
+    expect(out.join('')).toContain('Next: lurekit run scenarios --agent claude-code --model <id> (asks before it spends).');
+    await main(['doctor', '--model', 'gpt-4o'], deps(healthyClaude()));
+    expect(out.join('')).toContain('fix: lurekit run scenarios --agent claude-code --model sonnet');
+    expect(out.join('')).not.toContain('<dir>');
+    const code = await main(['doctor', path.join(work, 'nope'), '--agent', 'claude-code'], deps(healthyClaude()));
+    expect(code).toBe(1);
+    expect(out.join('')).toContain('fix: lurekit doctor --agent claude-code   (no directory argument: ./scenarios if it exists, else the corpus shipped with lurekit)');
+    expect(out.join('')).toContain('Fix the fail lines before a live run. Then: lurekit run <dir> --agent claude-code --model <id>');
   });
 
   it('rejects unknown agents, other flags and a bad --format', async () => {

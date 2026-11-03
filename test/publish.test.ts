@@ -123,10 +123,11 @@ afterEach(() => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
-const defaultOut = (): string => path.join(tmp, 'reports', RUN_ID);
+// ADR-0022 amendment: the default bundle goes next to the run, <results>/<id>/bundle.
+const defaultOut = (): string => path.join(tmp, '.aab-runs', RUN_ID, 'bundle');
 
 describe('publish (ADR-0017)', () => {
-  it('happy path: writes manifest, evidence, renders and index to reports/<run id>', async () => {
+  it('happy path: writes manifest, evidence, renders and index to <results>/<run id>/bundle', async () => {
     writeRun();
     const code = await main(['publish', path.join('.aab-runs', RUN_ID)], deps());
     expect(err.join('')).toBe('');
@@ -167,6 +168,21 @@ describe('publish (ADR-0017)', () => {
     expect(existsSync(defaultOut())).toBe(false);
   });
 
+  it('the default bundle is keyed on the run directory, never on --results, and no reports/ appears', async () => {
+    writeRun();
+    expect(existsSync(path.join(tmp, 'reports'))).toBe(false);
+    // A run outside the cwd's results root: the bundle goes inside that run, not under ./.aab-runs.
+    const elsewhere = path.join(tmp, 'elsewhere');
+    mkdirSync(elsewhere);
+    const code = await main(['publish', path.join('..', '.aab-runs', RUN_ID)], { ...deps(), cwd: () => elsewhere });
+    expect(err.join('')).toBe('');
+    expect(code).toBe(0);
+    expect(existsSync(path.join(defaultOut(), 'index.md'))).toBe(true);
+    expect(existsSync(path.join(elsewhere, '.aab-runs'))).toBe(false);
+    expect(existsSync(path.join(elsewhere, 'reports'))).toBe(false);
+    expect(existsSync(path.join(tmp, 'reports'))).toBe(false);
+  });
+
   it('a token-shaped string fails the gate, is not echoed, and nothing is written', async () => {
     const secret = 'ghp_' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8';
     writeRun({ env: secret });
@@ -176,7 +192,7 @@ describe('publish (ADR-0017)', () => {
     expect(e).toMatch(/redaction gate failed/);
     expect(e).toMatch(/AAB-002\/1\/evidence\.json: token: GitHub token/);
     expect(e).not.toContain(secret);
-    expect(existsSync(path.join(tmp, 'reports'))).toBe(false);
+    expect(existsSync(defaultOut())).toBe(false);
   });
 
   it('a non-allowlisted URL fails; scenario source hosts and loopback pass', async () => {
@@ -186,7 +202,7 @@ describe('publish (ADR-0017)', () => {
     const e = err.join('');
     expect(e).toContain('url: non-allowlisted host "attacker.example.net"');
     expect(e).not.toMatch(/127\.0\.0\.1|::1|disclosure\.example\.org|github\.com/);
-    expect(existsSync(path.join(tmp, 'reports'))).toBe(false);
+    expect(existsSync(defaultOut())).toBe(false);
   });
 
   it('--allow-host permits a deliberate URL exception', async () => {
@@ -207,7 +223,7 @@ describe('publish (ADR-0017)', () => {
     const code = await main(['publish', path.join('.aab-runs', RUN_ID)], deps());
     expect(code).toBe(1);
     expect(err.join('')).toContain(`home_path: absolute home path "${FAKE_HOME}"`);
-    expect(existsSync(path.join(tmp, 'reports'))).toBe(false);
+    expect(existsSync(defaultOut())).toBe(false);
   });
 
   it('a conventional /home/<user> path fails even when it is not the injected home', async () => {
@@ -215,7 +231,7 @@ describe('publish (ADR-0017)', () => {
     const code = await main(['publish', path.join('.aab-runs', RUN_ID)], deps());
     expect(code).toBe(1);
     expect(err.join('')).toContain('home_path');
-    expect(existsSync(path.join(tmp, 'reports'))).toBe(false);
+    expect(existsSync(defaultOut())).toBe(false);
   });
 
   // A value right after a JSON-escaped newline sits next to the letter `n` in evidence.json, so
@@ -231,7 +247,7 @@ describe('publish (ADR-0017)', () => {
     const code = await main(['publish', path.join('.aab-runs', RUN_ID)], deps());
     expect(code).toBe(1);
     expect(err.join('')).toContain(msg);
-    expect(existsSync(path.join(tmp, 'reports'))).toBe(false);
+    expect(existsSync(defaultOut())).toBe(false);
   });
 
   it('an allowlisted host after `@` in the path does not allow the real host', async () => {
@@ -239,7 +255,7 @@ describe('publish (ADR-0017)', () => {
     const code = await main(['publish', path.join('.aab-runs', RUN_ID)], deps());
     expect(code).toBe(1);
     expect(err.join('')).toContain('url: non-allowlisted host "attacker.example.net"');
-    expect(existsSync(path.join(tmp, 'reports'))).toBe(false);
+    expect(existsSync(defaultOut())).toBe(false);
   });
 
   // --redact-home (ADR-0017 "Operator home redaction"). The sample mirrors a real live run: the
@@ -251,6 +267,9 @@ describe('publish (ADR-0017)', () => {
     /** sha256 of every file under the run dir, keyed by relative path. */
     function hashTree(dir: string, base = dir, acc = new Map<string, string>()): Map<string, string> {
       for (const e of readdirSync(dir, { withFileTypes: true })) {
+        // The default bundle is written into <run>/bundle (ADR-0022 amendment); "source
+        // untouched" means every file the run itself wrote is byte-identical.
+        if (dir === base && e.name === 'bundle') continue;
         const p = path.join(dir, e.name);
         if (e.isDirectory()) hashTree(p, base, acc);
         else acc.set(path.relative(base, p), createHash('sha256').update(readFileSync(p)).digest('hex'));
@@ -271,7 +290,7 @@ describe('publish (ADR-0017)', () => {
       expect(await main(['publish', path.join('.aab-runs', RUN_ID)], deps())).toBe(1);
       expect(err.join('')).toContain(`home_path: absolute home path "${FAKE_HOME}"`);
       expect(err.join('')).toContain('--redact-home');
-      expect(existsSync(path.join(tmp, 'reports'))).toBe(false);
+      expect(existsSync(defaultOut())).toBe(false);
 
       const code = await main(['publish', path.join('.aab-runs', RUN_ID), '--redact-home'], deps());
       expect(err.join('')).toBe('');
@@ -323,7 +342,7 @@ describe('publish (ADR-0017)', () => {
       const before = hashTree(runDir);
       expect(await main(['publish', path.join('.aab-runs', RUN_ID), '--redact-home'], deps())).toBe(1);
       expect(err.join('')).toContain(msg);
-      expect(existsSync(path.join(tmp, 'reports'))).toBe(false);
+      expect(existsSync(defaultOut())).toBe(false);
       expect(hashTree(runDir)).toEqual(before);
     });
 
@@ -335,7 +354,7 @@ describe('publish (ADR-0017)', () => {
       expect(e).toContain('token: GitHub token');
       expect(e).toContain('url: non-allowlisted host "attacker.example.net"');
       expect(e).not.toContain(secret);
-      expect(existsSync(path.join(tmp, 'reports'))).toBe(false);
+      expect(existsSync(defaultOut())).toBe(false);
     });
 
     it.each(['/home/op@old/x', '/home/op+bak/x', '/home/op\u00fc/x', '/home/op~/x', '/home/op,x/y'])(
@@ -346,7 +365,7 @@ describe('publish (ADR-0017)', () => {
         const d = { ...deps(), homeDir: () => '/home/op' };
         expect(await main(['publish', path.join('.aab-runs', RUN_ID), '--redact-home'], d)).toBe(1);
         expect(err.join('')).toContain('home_path: absolute home path "/home/op');
-        expect(existsSync(path.join(tmp, 'reports'))).toBe(false);
+        expect(existsSync(defaultOut())).toBe(false);
         expect(hashTree(runDir)).toEqual(before);
       },
     );
@@ -384,7 +403,7 @@ describe('publish (ADR-0017)', () => {
       writeRun({ command: `grep -n '^diff --git' ${SLUG_PATH}`, file_path: SLUG_PATH });
       expect(await run([])).toBe(1);
       expect(err.join('')).toContain('AAB-002/1/evidence.json: home_path: home directory slug "-home-opuser"');
-      expect(existsSync(path.join(tmp, 'reports'))).toBe(false);
+      expect(existsSync(defaultOut())).toBe(false);
 
       expect(await run(['--redact-home'])).toBe(0);
       expect(err.join('')).toBe('');
@@ -411,7 +430,7 @@ describe('publish (ADR-0017)', () => {
         writeRun({ url: `http://127.0.0.1:8080/open?path=${enc}${enc.slice(0, 3)}notes.txt&x=1` });
         expect(await run([])).toBe(1);
         expect(err.join('')).toContain(`home_path: percent-encoded home path "${enc}"`);
-        expect(existsSync(path.join(tmp, 'reports'))).toBe(false);
+        expect(existsSync(defaultOut())).toBe(false);
 
         expect(await run(['--redact-home'])).toBe(0);
         expect((published().observation?.tool_calls[0].input as Record<string, unknown>).url).toBe(
@@ -424,13 +443,13 @@ describe('publish (ADR-0017)', () => {
     it('a bare username token left after --redact-home fails, naming the file but not the value', async () => {
       writeRun({ note: 'owner=opuser;' });
       expect(await run([])).toBe(0); // no home path: the username check is part of --redact-home
-      rmSync(path.join(tmp, 'reports'), { recursive: true, force: true });
+      rmSync(defaultOut(), { recursive: true, force: true });
 
       expect(await run(['--redact-home'])).toBe(1);
       const e = err.join('');
       expect(e).toContain('AAB-002/1/evidence.json: home_user: operator username still present after --redact-home (value redacted)');
       expect(e).not.toContain('opuser');
-      expect(existsSync(path.join(tmp, 'reports'))).toBe(false);
+      expect(existsSync(defaultOut())).toBe(false);
     });
 
     it('a run with slug, percent and bare-username forms: each fails without the flag; the flag rewrites two, the username still fails; source untouched', async () => {
@@ -440,13 +459,13 @@ describe('publish (ADR-0017)', () => {
         err.length = 0;
         expect(await run([]), k).toBe(1);
         expect(err.join(''), k).toContain('AAB-002/1/evidence.json: home_path:');
-        expect(existsSync(path.join(tmp, 'reports')), k).toBe(false);
+        expect(existsSync(defaultOut()), k).toBe(false);
       }
       // All three together fail without the flag (on the encoded forms); the bare username
       // alone is checked only under --redact-home (ADR-0017), see the next test above.
       writeRun(plant);
       expect(await run([])).toBe(1);
-      expect(existsSync(path.join(tmp, 'reports'))).toBe(false);
+      expect(existsSync(defaultOut())).toBe(false);
       err.length = 0;
       const runDir = writeRun(plant);
       const src = path.join(runDir, 'AAB-002', '1', 'evidence.json');
@@ -477,7 +496,7 @@ describe('publish (ADR-0017)', () => {
       expect(await main(['publish', path.join('.aab-runs', RUN_ID)], homeRoot())).toBe(0);
       // Known limitation (ADR-0017 Consequences): under --redact-home the blunt username check
       // still fails on the word itself.
-      rmSync(path.join(tmp, 'reports'), { recursive: true, force: true });
+      rmSync(defaultOut(), { recursive: true, force: true });
       expect(await main(['publish', path.join('.aab-runs', RUN_ID), '--redact-home'], homeRoot())).toBe(1);
       expect(err.join('')).toContain('home_user');
     });
@@ -512,6 +531,9 @@ describe('publish (ADR-0017)', () => {
 
     function hashTree(dir: string, base = dir, acc = new Map<string, string>()): Map<string, string> {
       for (const e of readdirSync(dir, { withFileTypes: true })) {
+        // The default bundle is written into <run>/bundle (ADR-0022 amendment); "source
+        // untouched" means every file the run itself wrote is byte-identical.
+        if (dir === base && e.name === 'bundle') continue;
         const p = path.join(dir, e.name);
         if (e.isDirectory()) hashTree(p, base, acc);
         else acc.set(path.relative(base, p), createHash('sha256').update(readFileSync(p)).digest('hex'));
@@ -660,6 +682,9 @@ describe('publish (ADR-0017)', () => {
   describe('--withhold (ADR-0014)', () => {
     function hashTree(dir: string, base = dir, acc = new Map<string, string>()): Map<string, string> {
       for (const e of readdirSync(dir, { withFileTypes: true })) {
+        // The default bundle is written into <run>/bundle (ADR-0022 amendment); "source
+        // untouched" means every file the run itself wrote is byte-identical.
+        if (dir === base && e.name === 'bundle') continue;
         const p = path.join(dir, e.name);
         if (e.isDirectory()) hashTree(p, base, acc);
         else acc.set(path.relative(base, p), createHash('sha256').update(readFileSync(p)).digest('hex'));
@@ -804,6 +829,9 @@ describe('publish (ADR-0017)', () => {
   describe('--exclude (ADR-0017 "Excluding a scenario")', () => {
     function hashTree(dir: string, base = dir, acc = new Map<string, string>()): Map<string, string> {
       for (const e of readdirSync(dir, { withFileTypes: true })) {
+        // The default bundle is written into <run>/bundle (ADR-0022 amendment); "source
+        // untouched" means every file the run itself wrote is byte-identical.
+        if (dir === base && e.name === 'bundle') continue;
         const p = path.join(dir, e.name);
         if (e.isDirectory()) hashTree(p, base, acc);
         else acc.set(path.relative(base, p), createHash('sha256').update(readFileSync(p)).digest('hex'));
@@ -971,6 +999,9 @@ describe('publish (ADR-0017)', () => {
 
     function hashTree(dir: string, base = dir, acc = new Map<string, string>()): Map<string, string> {
       for (const e of readdirSync(dir, { withFileTypes: true })) {
+        // The default bundle is written into <run>/bundle (ADR-0022 amendment); "source
+        // untouched" means every file the run itself wrote is byte-identical.
+        if (dir === base && e.name === 'bundle') continue;
         const p = path.join(dir, e.name);
         if (e.isDirectory()) hashTree(p, base, acc);
         else acc.set(path.relative(base, p), createHash('sha256').update(readFileSync(p)).digest('hex'));

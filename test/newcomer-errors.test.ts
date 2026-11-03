@@ -4,11 +4,12 @@
 // Scratch lives under the repository's ignored .aab-test-work/ (never os.tmpdir()).
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { main, type CliDeps } from '../src/cli.js';
+import { main, closestCommand, defaultDeps, type CliDeps } from '../src/cli.js';
+import type { AgentId } from '../src/scenario/types.js';
 import type { AgentProbe, ExecResult } from '../src/doctor.js';
 import type { Adapter } from '../src/adapters/adapter.js';
 import { ClaudeCodeAdapter } from '../src/adapters/claudeCode.js';
@@ -271,5 +272,193 @@ describe('run: newcomer error paths say what happened and the next command', () 
     expect(code).toBe(1);
     expect(stub.runCount).toBe(0);
     expect(errText()).toContain(`refusing to run: cannot write results under ${path.join(ro, 'sub')} (EACCES). Next: pass --results <a directory you can write>, e.g. --results ./lurekit-runs`);
+  });
+});
+
+// --- ADR-0022 amendments (block 5): corpus resolution, pre-spend validation, next commands ---
+
+describe('corpus resolution: argument -> ./scenarios -> the shipped corpus', () => {
+  it('plan and list without an argument in an empty directory use the shipped corpus and say so', async () => {
+    expect(await main(['plan', '--model', 'sonnet'], deps())).toBe(0);
+    expect(out.join('')).toMatch(/^corpus: .*scenarios \(shipped with the package\)$/m);
+    expect(out.join('')).toMatch(/plan: \d+ would run/);
+    expect(await main(['list'], deps())).toBe(0);
+    expect(out.join('')).toMatch(/\n\d+ scenario\(s\) in .*scenarios\n$/);
+    expect(await main(['validate'], deps())).toBe(0);
+  });
+
+  it('./scenarios in the cwd wins over the shipped corpus; an argument wins over both', async () => {
+    const local = path.join(work, 'scenarios');
+    mkdirSync(local);
+    copyFileSync(path.join(realScenarios, 'AAB-003.yaml'), path.join(local, 'AAB-003.yaml'));
+    expect(await main(['plan', '--model', 'sonnet'], deps())).toBe(0);
+    expect(out.join('')).toContain('corpus: scenarios (./scenarios in the current directory)');
+    expect(out.join('')).toContain('plan: 1 would run');
+    const given = corpus('AAB-005');
+    expect(await main(['plan', given, '--model', 'sonnet'], deps())).toBe(0);
+    expect(out.join('')).toContain(`corpus: ${given} (given on the command line)`);
+  });
+
+  it('run prints the corpus line before it asks', async () => {
+    const stub = new StubAdapter({});
+    expect(await main(['run', corpus('AAB-003'), '--model', 'sonnet'], deps({ adapter: () => stub }))).toBe(1);
+    expect(errText()).toMatch(/corpus: .*c-AAB-003 \(given on the command line\)/);
+  });
+});
+
+describe('run: pre-spend validation happens before the prompt and before any launch', () => {
+  it.each([
+    [['--format', 'html'], /refusing to run: --format must be json\|markdown\|sarif \(got "html"\)\.\nnext: lurekit run .* --model sonnet --format markdown/],
+    [['--output', 'no-such-dir/report.md'], /refusing to run: cannot write --output no-such-dir\/report\.md: its directory .*no-such-dir is not writable \(ENOENT\)\.\nnext: /],
+    [['--output', '.'], /refusing to run: --output \. is a directory; it must name a file\.\nnext: /],
+    [['--budget', '0'], /refusing to run: --budget must be a number of USD greater than 0 \(got 0\)\.\nnext: .*--budget 5/],
+    [['--budget', '-2'], /--budget must be a number of USD greater than 0 \(got -2\)/],
+  ])('%j: exit 1, nothing asked, nothing launched', async (extra, msg) => {
+    const stub = new StubAdapter({});
+    const code = await main(['run', corpus('AAB-003'), '--model', 'sonnet', ...extra], deps({ adapter: () => stub, interactive: true, answer: 'y' }));
+    expect(code).toBe(1);
+    expect(stub.runCount).toBe(0);
+    expect(asked).toEqual([]);
+    expect(errText()).toMatch(msg);
+    expect(errText()).not.toMatch(/Launch\?|plan: 1 scenario/);
+  });
+
+  it('--replay is validated the same way and otherwise still runs offline', async () => {
+    const results = path.join(work, 'runs');
+    const bad = await main(['run', corpus('AAB-030'), '--model', 'ci-replay', '--replay', RECORDING, '--results', results, '--format', 'xml'], deps());
+    expect(bad).toBe(1);
+    expect(errText()).toContain('refusing to run: --format must be');
+    const okCode = await main(['run', corpus('AAB-030'), '--model', 'ci-replay', '--replay', RECORDING, '--results', results, '--format', 'json', '--output', 'r.json'], deps());
+    expect(okCode, errText()).toBe(0);
+  });
+
+  it('a finished run names report and publish as the next commands', async () => {
+    const stub = new StubAdapter({ benignText: 'SUMMARY: ok' });
+    const code = await main(['run', corpus('AAB-003'), '--model', 'sonnet', '--yes', '--results', 'runs'], deps({ adapter: () => stub }));
+    expect(code, errText()).toBe(0);
+    expect(errText()).toContain('Next: lurekit report runs/aab-test-newcomer --format markdown|json|sarif\n');
+    expect(errText()).toContain('      lurekit publish runs/aab-test-newcomer --redact-home\n');
+  });
+});
+
+describe('report/publish without a manifest list the run directories found under --results', () => {
+  function fakeRun(name: string, mtimeSec: number): void {
+    const d = path.join(work, '.aab-runs', name);
+    mkdirSync(d, { recursive: true });
+    writeFileSync(path.join(d, 'manifest.json'), '{}');
+    utimesSync(path.join(d, 'manifest.json'), mtimeSec, mtimeSec);
+  }
+
+  it('newest first, with the next command for the newest', async () => {
+    fakeRun('aab-old', 1_000_000);
+    fakeRun('aab-new', 2_000_000);
+    mkdirSync(path.join(work, '.aab-runs', 'not-a-run'));
+    expect(await main(['report', 'nope'], deps())).toBe(1);
+    const e = errText();
+    expect(e).toContain('no manifest.json in nope (not a completed run directory)');
+    expect(e).toContain('run directories under .aab-runs (newest first):\n  .aab-runs/aab-new\n  .aab-runs/aab-old\n');
+    expect(e).not.toContain('not-a-run');
+    expect(e).toContain('next: lurekit report .aab-runs/aab-new --format markdown');
+    expect(await main(['publish'], deps())).toBe(1);
+    expect(errText()).toContain('publish: a benchmark run directory is required');
+    expect(errText()).toContain('next: lurekit publish .aab-runs/aab-new --redact-home');
+  });
+
+  it('no runs at all: says so and names lurekit run and --results', async () => {
+    expect(await main(['report', 'nope', '--results', 'elsewhere'], deps())).toBe(1);
+    expect(errText()).toContain('no run directories with a manifest.json under elsewhere');
+    expect(errText()).toContain('next: lurekit run --model <id>');
+  });
+});
+
+describe('every refusal names the next command (ADR-0022 amendment)', () => {
+  // [label, argv, deps options] - each must exit non-zero or reject, with "next:" in the message.
+  const cases: Array<[string, () => string[], DepOpts?]> = [
+    ['flag without a value (cli.ts valueFor)', () => ['plan', '--model']],
+    ['non-numeric number flag', () => ['plan', '--model', 'm', '--k', 'three']],
+    ['run without --model', () => ['run', corpus('AAB-003')]],
+    ['plan without --model', () => ['plan', corpus('AAB-003')]],
+    ['bad --mode', () => ['plan', corpus('AAB-003'), '--model', 'm', '--mode', 'fast']],
+    ['bad --vulnerable-if', () => ['plan', corpus('AAB-003'), '--model', 'm', '--vulnerable-if', 'all']],
+    ['report without a run dir', () => ['report']],
+    ['report without a manifest', () => ['report', 'nope']],
+    ['report with a bad --format', () => ['report', fakeManifestDir(), '--format', 'html']],
+    ['publish without a run dir', () => ['publish']],
+    ['publish without a manifest', () => ['publish', 'nope']],
+    ['doctor with a run flag', () => ['doctor', '--k', '3'], { probe: probe() }],
+    ['doctor with two directories', () => ['doctor', 'a', 'b'], { probe: probe() }],
+    ['doctor with a bad --format', () => ['doctor', '--format', 'sarif'], { probe: probe() }],
+    ['doctor with an unknown agent', () => ['doctor', '--agent', 'codex'], { probe: probe() }],
+    ['demo with a positional', () => ['demo', 'reports']],
+    ['demo with another command\'s flag', () => ['demo', '--k', '3']],
+    ['demo with a bad --format', () => ['demo', '--format', 'html']],
+    ['unknown command', () => ['frobnicate']],
+    ['mistyped command', () => ['plna']],
+  ];
+
+  function fakeManifestDir(): string {
+    const d = path.join(work, 'fake-run');
+    mkdirSync(d, { recursive: true });
+    writeFileSync(path.join(d, 'manifest.json'), '{}');
+    return d;
+  }
+
+  it.each(cases)('%s', async (_label, argv, o) => {
+    let message = '';
+    let code = 0;
+    try {
+      code = await main(argv(), deps(o ?? {}));
+      message = errText();
+    } catch (e) {
+      code = 1;
+      message = (e as Error).message;
+    }
+    expect(code).not.toBe(0);
+    expect(message).toContain('next:');
+  });
+
+  it('a missing demo asset is a clear refusal (exit 1), not a stack trace', async () => {
+    const d = { ...deps(), demoBundleDir: () => path.join(work, 'no-demo') };
+    expect(await main(['demo'], d)).toBe(1);
+    expect(errText()).toContain('demo: the published run that ships with lurekit is missing or unreadable in this install');
+    expect(errText()).toMatch(/next: npm install lurekit@\d+\.\d+\.\d+/);
+  });
+
+  it('the adapter factory names the next command for an agent without an adapter', () => {
+    expect(() => defaultDeps().adapterFor('nope' as AgentId)).toThrow(/^no adapter for agent "nope" \(implemented: [^)]*\)\nnext: lurekit doctor --agent claude-code$/);
+  });
+
+  it('a failed bundle write names the next command', async () => {
+    const results = path.join(work, 'runs');
+    const stub = new StubAdapter({ benignText: 'SUMMARY: ok' });
+    expect(await main(['run', corpus('AAB-003'), '--model', 'sonnet', '--yes', '--results', results], deps({ adapter: () => stub }))).toBe(0);
+    const outDir = path.join(work, 'full');
+    mkdirSync(outDir);
+    writeFileSync(path.join(outDir, 'stale.txt'), 'x');
+    const d = { ...deps(), homeDir: () => path.join(work, 'no-such-home') };
+    const code = await main(['publish', path.join(results, 'aab-test-newcomer'), '--out', outDir], d);
+    expect(code, errText()).toBe(1);
+    expect(errText()).toMatch(/is not empty; nothing written\nnext: lurekit publish .* --out <an empty directory you can write>/);
+  });
+
+  it('unknown commands suggest the closest command within edit distance 2', async () => {
+    expect(closestCommand('plna')).toBe('plan');
+    expect(closestCommand('reprot')).toBe('report');
+    expect(closestCommand('doctr')).toBe('doctor');
+    expect(closestCommand('frobnicate')).toBeUndefined();
+    expect(await main(['raport'], deps())).toBe(2);
+    expect(errText()).toMatch(/^unknown command: raport\nnext: lurekit report {3}\(did you mean "report"\?\)\n/);
+    expect(await main(['frobnicate'], deps())).toBe(2);
+    expect(errText()).toMatch(/^unknown command: frobnicate\nnext: lurekit --help\n/);
+  });
+});
+
+describe('plan leaves no trace in the cwd', () => {
+  it('an absent results root is not left behind as an empty directory', async () => {
+    expect(await main(['plan', corpus('AAB-003'), '--model', 'sonnet'], deps())).toBe(0);
+    expect(existsSync(path.join(work, '.aab-runs'))).toBe(false);
+    mkdirSync(path.join(work, '.aab-runs'));
+    expect(await main(['plan', corpus('AAB-003'), '--model', 'sonnet'], deps())).toBe(0);
+    expect(existsSync(path.join(work, '.aab-runs'))).toBe(true); // an existing root is kept
   });
 });

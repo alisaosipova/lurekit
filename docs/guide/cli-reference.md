@@ -22,6 +22,22 @@ as a flag after a command (`lurekit run --help`).
 
 ## Subcommands
 
+### Scenario directory resolution
+
+`run`, `plan`, `validate`, `list` and `doctor` take an optional `[dir]` and resolve the corpus
+the same way (ADR-0022 amendment): the `[dir]` argument when given; else `./scenarios` when the
+current directory has one; else the corpus shipped with the package (so `npx lurekit plan
+--model sonnet` works from an empty directory). `plan` and `run` print the result first, e.g.
+`corpus: <installed package>/scenarios (shipped with the package)`, or
+`(./scenarios in the current directory)` / `(given on the command line)`.
+
+### Refusals name the next command
+
+Every refusal ends with a `next:` (or `Next:`) line holding one command that moves you forward,
+for example `next: lurekit run --model sonnet` for a missing `--model`, or, for an unknown
+command within edit distance 2 of a real one, `next: lurekit plan   (did you mean "plan"?)`.
+A thrown error without its own next command gets `next: lurekit --help`.
+
 Only `run` launches a real agent (cost / auth), and only unless it is given `--replay`.
 Everything else is fully offline: no agent, no network, no spend. `doctor` only asks the local agent binary for
 its version and login status (no session, no spend).
@@ -33,7 +49,8 @@ lurekit run [dir] --model <id> [options]
 ```
 
 Run the benchmark against a live agent, write a run directory and a manifest, and print a
-report. `[dir]` is the scenario directory (default `./scenarios`). `--model` is required.
+report. `[dir]` is the scenario directory (see [Scenario directory resolution](#scenario-directory-resolution)).
+`--model` is required.
 With `--replay <dir>` it re-drives a recorded Claude Code run offline instead of launching an
 agent. Accepts all profile, config, output and replay flags below.
 
@@ -41,6 +58,7 @@ Without `--mode` a run is smoke (`k=1`). Before a live run (no `--replay`) launc
 prints its plan to stderr (ADR-0022):
 
 ```
+corpus: <installed package>/scenarios (shipped with the package)
 plan: 25 scenario(s) will run, 27 skipped; k=1 (smoke), 25 launch(es) of claude-code (model=sonnet)
 estimated cost: about 1.52 USD (25 scenario(s) x k=1 x 0.061 USD) on sonnet, from a published run; other models differ
 budget cap: none (add --budget <usd> to stop before a repetition that could exceed it)
@@ -56,12 +74,25 @@ cost). The estimate comes from the published run shipped as the demo (claude-cod
 only); other agents print "no published run yet, no estimate". A binary that cannot be found is
 refused before the prompt with the install or `AAB_*_BIN` fix.
 
+Pre-spend validation (ADR-0022 amendment): before the plan, the prompt and any agent spawn,
+`run` checks `--format` (json, markdown or sarif), that the directory of `--output` exists and is
+writable (and that `--output` is not a directory), that `--results` can be created and written,
+and that `--budget`, when given, is a number greater than 0. A failure exits 1 with
+`refusing to run: ...` and a `next:` command; nothing is launched or spent. `--replay` runs are
+checked the same way.
+
 While it runs, `run` prints `[i/N] <scenario id> <name>` per scenario. After the report it prints
 a `what went wrong:` block for repetitions that did not measure anything (binary, auth, network,
 model, budget, adapter), each with the recorded warning, the evidence path and the next command.
+A run that measured something ends with:
+
+```
+Next: lurekit report .aab-runs/<benchmark_run_id> --format markdown|json|sarif
+      lurekit publish .aab-runs/<benchmark_run_id> --redact-home
+```
 
 Exit 0 on completion; 1 if `[dir]` is missing, holds no scenarios or a scenario fails to load,
-if `--results` cannot be written, if the launch is declined or refused, if nothing was measured
+if `--results` cannot be written or another pre-spend check fails, if the launch is declined or refused, if nothing was measured
 because of a setup failure (binary, auth, network, model, adapter), or if a flag/value is
 invalid.
 
@@ -71,7 +102,7 @@ invalid.
 lurekit validate [dir]
 ```
 
-Schema-validate every scenario in `[dir]` (default `./scenarios`). Prints `OK <id> <name>`
+Schema-validate every scenario in `[dir]` (resolved as in [Scenario directory resolution](#scenario-directory-resolution)). Prints `OK <id> <name>`
 per valid scenario and `FAIL <file> <message>` per error. Exit 0 when all valid, 1 on any
 error. Offline.
 
@@ -81,7 +112,8 @@ error. Offline.
 lurekit list [dir]
 ```
 
-List scenarios as `<id> runnable=<yes|no> detector=<detector> applies=<csv|all> <name>`.
+List scenarios as `<id> runnable=<yes|no> detector=<detector> applies=<csv|all> <name>`
+(`[dir]` resolved as in [Scenario directory resolution](#scenario-directory-resolution)).
 Exit 0, or 1 if some scenario files failed to load. Offline.
 
 ### plan
@@ -91,8 +123,9 @@ lurekit plan [dir] --model <id> [profile/config options]
 ```
 
 Show which scenarios would run for a profile, without launching an agent. Prints `KEEP <id>
-<detector> <name>` and `SKIP <id> <reason>: <detail>`, then a summary line. `--model` is
-required. Exit 0. Offline.
+<detector> <name>` and `SKIP <id> <reason>: <detail>`, then a summary line, after a first
+`corpus: <path> (...)` line naming the resolved scenario directory. `--model` is required.
+Exit 0. Offline.
 
 ### selftest
 
@@ -112,7 +145,13 @@ lurekit report <runDir> [--format <fmt>] [--output <file>]
 
 Render a report from a completed run directory. `<runDir>` is required and must contain a
 `manifest.json`. `--format` defaults to `json` (note: `run` defaults to `markdown`). Writes to
-`--output <file>` or stdout. Exit 0, or 1 if `<runDir>` has no `manifest.json`. Offline.
+`--output <file>` or stdout. Exit 0, or 1 if `<runDir>` is missing or has no `manifest.json`;
+then the run directories found under `--results` (default `.aab-runs`) are listed, newest first,
+up to 10, with `next: lurekit report <newest> --format markdown`. In Markdown, the "What to
+change" re-measure command reuses the run's agent, model, version, mode, k and vulnerable_if, the
+scenario directory a bare `lurekit run` would resolve from your cwd, and `--budget` (the run's
+own cap, else the published-run estimate for the same scenarios and k), and reminds you to add
+your own `--settings`/`--mcp`/`--hooks`/`--skill` flags (ADR-0021 amendment). Offline.
 
 ### publish
 
@@ -122,7 +161,10 @@ lurekit publish <runDir> [--out <dir>] [--allow-host <host>]... [--withhold <id>
 
 Run the redaction gate and write a shareable bundle (manifest, each scenario's
 `evidence.json`, `report.md`/`.json`/`.sarif`, `index.md`); no raw transcripts. `<runDir>` is
-required and must contain a `manifest.json`. Default output is `reports/<benchmark_run_id>`.
+required and must contain a `manifest.json` (when it does not, the run directories under
+`--results` are listed as for `report`). Default output is `<results>/<benchmark_run_id>/bundle`
+(`--results` defaults to `.aab-runs`), next to the run and never in the cwd; `--out <dir>`
+overrides it. The run's own files are untouched.
 Exit 0 on a clean gate + successful write; 1 if the manifest is missing, a `--withhold` or
 `--exclude` value is not a scenario id, an id is given to both flags, the gate fails, or the write fails (nothing is written on any failure).
 Offline.
@@ -145,15 +187,23 @@ and a `fix:` command under each warn/fail line:
   `authMethod` are kept; asked only when `--version` reports Claude Code >= 2.1.317, else
   `not checked`); cursor-cli: `CURSOR_API_KEY` present, else `agent status --format json`;
   codex-cli: `CODEX_API_KEY` present (the run-scoped `CODEX_HOME` hides `codex login`);
-  openhands: `LLM_API_KEY` present. Key values are never read.
+  openhands: `LLM_API_KEY` present. Key values are never read. claude-code logged out while
+  `ANTHROPIC_API_KEY` is set is a `warn` ("UNVERIFIED whether -p honours it on this version"),
+  not a `fail`.
 - `model`: what the agent does with `--model` (no adapter validates it offline).
 - `permission` (openhands only): headless needs `--permission-mode always-approve`.
 - `isolation`: `--isolation` is an evidence label in the manifest; no container runtime is
   started, required or checked.
-- `corpus`: `[dir]` (default: the corpus shipped with lurekit) validates, and how many scenarios
-  would run for the agent; `selftest`: every detector's positive/negative control passes.
+- `corpus`: `[dir]` (resolved as in [Scenario directory resolution](#scenario-directory-resolution))
+  validates, and how many scenarios would run for the agent; `selftest`: every detector's
+  positive/negative control passes.
 - `cost`: "about X USD for smoke (k=1), about Y USD for full (k=3) on sonnet, from a published
   run; other models differ" for claude-code; "no published run yet, no estimate" otherwise.
+
+The last line is `Next: lurekit run <corpus> --agent <agent> --model <model> (asks before it
+spends).` with the resolved corpus, `--agent` and `--model` filled in; only a value doctor cannot
+know (no `--model` given, a missing directory) stays as `<id>` / `<dir>`. The `fix:` lines of the
+`model` and `corpus` checks are built the same way.
 
 `--format json` prints `{agent, model, checks: [{id, status, summary, fix?}], estimate, fail,
 warn}`. Exit 0 when no line is `fail`, 1 otherwise. Starts no agent session and spends nothing.
@@ -172,7 +222,8 @@ the agent, version, model and date of that run and how to measure your own setup
 `sarif` the banner goes to stderr so stdout stays machine-readable (`--format json` prints the
 published `report.json` exactly). Evidence files are not shipped, so the per-scenario detector
 and tool-call lines are absent. Accepts only `--format` and `--output`; any other flag or a
-positional argument is an error (exit 1). Exit 0. Offline.
+positional argument is an error (exit 1). If the shipped demo files are missing from the
+install, it exits 1 with a message naming the reinstall command. Exit 0. Offline.
 
 ## Flags
 
@@ -203,8 +254,8 @@ the body would be digested into evidence yet never reach the agent.
 | `--k <n>` | number | `1` (smoke) / `3` (full) | positive integer |
 | `--vulnerable-if <v>` | string | `any` | `any`, `majority` |
 | `--isolation <m>` | string | `container` | `container`, `container+netns` |
-| `--budget <usd>` | number | *(none)* | a number |
-| `--results <dir>` | string | `.aab-runs` | a path |
+| `--budget <usd>` | number | *(none)* | a number greater than 0 (`run` refuses 0 or less before launching) |
+| `--results <dir>` | string | `.aab-runs` | a path; `report`/`publish` also read it to list run directories, and `publish` writes its default bundle under it |
 | `--yes` | boolean | off | `run` only: launch a live run without the `Launch? [y/N]` prompt (required when stdin is not a terminal) |
 
 ### Output flags (run, report, demo)
@@ -224,7 +275,7 @@ the body would be digested into evidence yet never reach the agent.
 
 | Flag | Type | Default | Notes |
 |------|------|---------|-------|
-| `--out <dir>` | string | `reports/<benchmark_run_id>` | bundle destination |
+| `--out <dir>` | string | `<runDir>/bundle` (`<results>/<benchmark_run_id>/bundle`) | bundle destination |
 | `--allow-host <host>` | string (repeatable) | *(none)* | whitelist a host for the gate |
 | `--withhold <scenario-id>` | string (repeatable) | *(none)* | leave a scenario out of the bundle; totals recomputed |
 | `--exclude <scenario-id>` | string (repeatable) | *(none)* | leave out a scenario whose result is not a measurement (own `index.md` note, manifest `excluded`); same handling as `--withhold`; an id may not be given to both |
@@ -259,10 +310,12 @@ typo or a mis-quoted flag can never be silently ignored or run the agent looser 
   another `--flag`):
   ```
   error: --model expects a value (got nothing)
+  next: pass the value as the next argument (--model <value>); lurekit --help lists every flag
   ```
 - **A numeric flag (`--k`, `--budget`) with a non-number value is rejected:**
   ```
   error: --k expects a number
+  next: pass a number, e.g. --k 3
   ```
 - **Positionals** (anything not starting with `--`) are collected in order. The first
   positional is `[dir]` for `run`/`validate`/`list`/`plan` and `<runDir>` for
@@ -279,7 +332,7 @@ non-claude agent, and `--replay` with a non-claude agent.
 |------|---------|
 | `0` | Success. For `validate`/`list`/`selftest` this also means no errors/failures. |
 | `1` | A handled failure or a thrown error: a `doctor` fail line; a live `run` declined at the prompt, refused without `--yes` off a terminal, refused by the preflight (binary, results dir, openhands permission), or one that measured nothing because of a setup failure; invalid scenarios (`validate`, or `run` refusing to start), a failed detector self-test, a missing `manifest.json` (`report`, `publish`), a publish gate or write failure, a bad `--withhold` or `--exclude`, or any parsing/validation error (unknown flag, `--flag=value`, whitespace token, missing value, missing `--model`, a bad enum value, an agent-flag mismatch, `--replay` on a non-claude agent). |
-| `2` | Unknown command (usage is printed to stderr). |
+| `2` | Unknown command (a `next:` line with the closest command name, edit distance <= 2, or `lurekit --help`; then usage, on stderr). |
 
 ## Environment variables
 

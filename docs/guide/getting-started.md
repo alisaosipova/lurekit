@@ -35,8 +35,14 @@ As a dev dependency of a project:
 
 ```bash
 npm install --save-dev lurekit
-npx lurekit validate node_modules/lurekit/scenarios
+npx lurekit validate
 ```
+
+With no scenario directory argument, `run`, `plan`, `validate`, `list` and `doctor` use
+`./scenarios` when the current directory has one, else the corpus shipped with the package; you
+never need to know where npm or npx put it. `plan` and `run` print the one they use, e.g.
+`corpus: <installed package>/scenarios (shipped with the package)`. (On
+1.2.0 and older, pass the directory explicitly.)
 
 From a checkout (contributors):
 
@@ -117,9 +123,9 @@ OK    AAB-056  Web indirect prompt injection in the wild (Unit 42)
 52 valid, 0 errors in scenarios
 ```
 
-Exit code is 0 when every scenario is valid, 1 if any file fails. The scenario directory
-defaults to `./scenarios`; pass another as the positional argument
-(`lurekit validate node_modules/lurekit/scenarios`).
+Exit code is 0 when every scenario is valid, 1 if any file fails. Without an argument the
+scenario directory is `./scenarios` when it exists, else the corpus shipped with lurekit; pass
+another as the positional argument (`lurekit validate path/to/my-scenarios`).
 
 ### selftest -- prove each detector can see its own signal
 
@@ -151,6 +157,7 @@ lurekit plan --model claude-opus-4-1
 ```
 
 ```
+corpus: <installed package>/scenarios (shipped with the package)
 KEEP  AAB-001  canary_mcp_tool  Pre-trust MCP start from project files (CVE-2025-59536)
 KEEP  AAB-002  canary_command  Hooks run after an ambiguous trust prompt (GHSA-ph6w-f82w-28w6)
 ...
@@ -185,7 +192,9 @@ AAB-001  runnable=yes  detector=canary_mcp_tool  applies=claude-code  Pre-trust 
 ## A first live run
 
 A live `run` is the only subcommand that launches a real agent, so it costs money and uses
-the agent's own auth. Pin the model and cap the spend:
+the agent's own auth. You do not need a scenario directory: from any directory without
+`./scenarios` (an empty one is fine) the run uses the corpus shipped with the package. Pin the
+model and cap the spend:
 
 ```bash
 lurekit run \
@@ -200,6 +209,11 @@ Before it launches anything, `run` prints the plan (scenarios kept, k, estimated
 cap, and the binary and login lines from `doctor`) and asks `Launch? [y/N]`. Only `y` launches.
 In a script or CI job (stdin not a terminal) it refuses unless you pass `--yes`, so a pipeline
 never spends by accident. `--replay` runs never ask: they cost nothing.
+
+The report flags are checked before the plan is even printed: a bad `--format`, an `--output`
+whose directory does not exist or is not writable, a `--results` that cannot be created, or a
+`--budget` of 0 or less is refused with `refusing to run: ...` and a `next:` command, before
+anything is launched or spent.
 
 Isolation is reduced. `--isolation` is only a label written to the manifest: LureKit starts no
 container and needs no docker or podman, so the agent runs as you, on your host. Your own
@@ -219,6 +233,7 @@ inside your own container or VM ([roadmap, no-container decision](../plan/roadma
 LureKit prints progress to stderr and the report to stdout (or to `--output`):
 
 ```
+corpus: <installed package>/scenarios (shipped with the package)
 running 25 scenario(s) against claude-code (model=claude-sonnet-4-5, k=1, mode=smoke)
 results under .aab-runs/aab-<timestamp>-<id>
 [1/25] AAB-001  Pre-trust MCP start from project files (CVE-2025-59536)
@@ -227,7 +242,16 @@ results under .aab-runs/aab-<timestamp>-<id>
 
 If repetitions fail for a setup reason (binary, login, network, model, budget), a
 `what went wrong:` block after the report names each one with the recorded warning, the evidence
-file and the next command; a run that measured nothing for such a reason exits 1.
+file and the next command; a run that measured nothing for such a reason exits 1. A run that
+measured something ends with the two commands to use next:
+
+```
+Next: lurekit report .aab-runs/aab-<timestamp>-<id> --format markdown|json|sarif
+      lurekit publish .aab-runs/aab-<timestamp>-<id> --redact-home
+```
+
+If you pass `report` or `publish` a directory without a `manifest.json`, they list the run
+directories under `--results` (newest first, up to 10) and name the command for the newest.
 
 ### Where results land
 
@@ -296,7 +320,8 @@ are `json`, `markdown` and `sarif`. The SARIF output is a standard 2.1.0 documen
 
 `publish` runs a redaction gate (no raw transcripts leave the run dir) and writes a bundle you
 can share: the manifest, each scenario's `evidence.json`, `report.md`/`.json`/`.sarif`, and an
-`index.md`. The default destination is `reports/<benchmark_run_id>`.
+`index.md`. The default destination is `<results>/<benchmark_run_id>/bundle` (next to the run,
+with `--results` defaulting to `.aab-runs`); `--out <dir>` writes elsewhere.
 
 ```bash
 lurekit publish .aab-runs/<benchmark_run_id> --redact-home
@@ -309,7 +334,7 @@ wrote report.sarif
 wrote index.md
 redaction applied: home directory -> <HOME> (0 replacements)
 
-published 30 file(s) to .../reports/<benchmark_run_id>
+published 30 file(s) to .../.aab-runs/<benchmark_run_id>/bundle
 ```
 
 - `--redact-home` is opt-in; it replaces *your* home directory with `<HOME>` in the published

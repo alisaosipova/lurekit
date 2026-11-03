@@ -953,6 +953,14 @@ export function readRunDir(runDir: string): RunDirContents {
   return { manifestText, evidence, canaryMeta };
 }
 
+/** ADR-0022 amendment: publish's default output directory, inside the run directory it
+ *  publishes (<results>/<benchmark_run_id>/bundle for a run under --results) instead of
+ *  reports/<id> in the cwd. Keyed on the run directory, not --results, so publishing a run
+ *  that lives elsewhere never creates a results tree in the cwd. */
+export function defaultBundleDir(runDir: string): string {
+  return path.join(runDir, 'bundle');
+}
+
 /** Write a gated bundle. Refuses a non-empty out dir so stale, unscanned files cannot ride along. */
 export function writeBundle(outDir: string, files: BundleFile[]): void {
   if (existsSync(outDir) && readdirSync(outDir).length > 0) {

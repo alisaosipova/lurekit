@@ -117,3 +117,51 @@ test stubs. No Claude Code `-p` run was made.
   blocks the run; the real Claude Code texts for "not logged in", "unknown model" and "offline" in
   `-p` mode are UNVERIFIED (no live run was made), so the stub texts and the diagnosis patterns for
   them are placeholders until a recording exists.
+
+## Amendment (2026-11-03, block 5): corpus resolution, next commands, pre-spend validation, publish output
+
+Status: Accepted. Driven by a newcomer review: after `npx lurekit demo` the documented next command
+pointed at a `scenarios` directory inside the local `node_modules` install, which `npx` never creates; `run`/`plan`/`validate`/`list`
+defaulted to `./scenarios` while `doctor` fell back to the shipped corpus; `--format`/`--output` were
+validated only after a paid run; and a dozen refusals did not say what to type next.
+
+1. **Corpus resolution order.** `run`, `plan`, `validate`, `list` and `doctor` share one
+   resolution (`resolveScenarioDir` in `src/cli.ts`): (a) the explicit `[dir]` argument; else
+   (b) `./scenarios` in the current directory when it is a directory; else (c) the `scenarios/`
+   directory shipped next to the package. `plan` (stdout) and `run` (stderr) print
+   `corpus: <path> (shipped with the package | ./scenarios in the current directory | given on
+   the command line)`. The CI package job runs `list`, `validate` and `plan --model sonnet` with
+   no argument from a directory without `./scenarios`.
+2. **Every refusal names the next command.** Each refusal and each thrown validation error ends
+   with a line `next: <command>` (older sites keep `Next:`), built from the values lurekit
+   already has (resolved corpus, `--agent`, `--model`, run directories); a value lurekit cannot
+   know stays as `<...>`. An unknown command suggests the closest command name when it is within
+   edit distance 2 (`next: lurekit plan   (did you mean "plan"?)`), else `next: lurekit --help`.
+   The bin's catch-all appends `next: lurekit --help` to an error that carries no next line.
+   `doctor`'s last line (`Next: lurekit run <corpus> --agent <agent> --model <model>`) and the
+   `model`/`corpus` fix lines use the resolved values. `report`/`publish` without a
+   `manifest.json` list the run directories under `--results` (newest manifest first, up to 10)
+   and name the command for the newest. A missing demo asset is an exit-1 refusal with the
+   reinstall command, not a stack trace. A finished `run` that measured something prints
+   `Next: lurekit report <runDir> --format markdown|json|sarif` and `lurekit publish <runDir>
+   --redact-home`. Covered by the table-driven test in `test/newcomer-errors.test.ts`.
+3. **Pre-spend validation.** Before the plan text, the `Launch? [y/N]` prompt and any adapter
+   spawn, `run` checks `--format` (json|markdown|sarif), that `--output` is not a directory and
+   its parent directory exists and is writable, that `--results` can be created and written
+   (unchanged), and that `--budget`, when given, is a finite number > 0. A failure is
+   `refusing to run: ...` plus a `next:` line, exit 1, nothing launched. `--replay` runs are
+   checked the same way and otherwise behave as before.
+4. **Publish default output.** Without `--out`, `publish` writes to `<runDir>/bundle`, i.e.
+   `<results>/<benchmark_run_id>/bundle` for a run under `--results` (default `.aab-runs`),
+   instead of `reports/<benchmark_run_id>` in the cwd, so a newcomer's working directory gets no
+   new top-level folder. The default is keyed on the run directory given, not on `--results`, so
+   publishing a run that lives elsewhere never creates a results tree in the cwd. The run's own files stay byte-identical; `readRunDir` reads only
+   the manifest's `<scenario>/<rep>/` directories, so a later publish ignores `bundle/`. The
+   repository's `reports/` bundles are written with an explicit `--out reports/<id>`. This
+   amends ADR-0017's "Default output dir".
+5. **Auth: API key with a logged-out status.** When `claude auth status` reports `loggedIn:false`
+   and `ANTHROPIC_API_KEY` is set (presence only, value never read), the auth line is
+   `warn: not logged in; ANTHROPIC_API_KEY is set (UNVERIFIED whether -p honours it on this
+   version)` instead of `fail`. Source: NOTES-verified-facts.md, "Auth status without a
+   session" (with only the key set, 2.1.318 answered `loggedIn: true`, `authMethod: api_key`;
+   no `-p` run with a logged-out status and a set key was made).

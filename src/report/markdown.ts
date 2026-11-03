@@ -8,7 +8,7 @@
 import type { EvidenceRecord } from '../runner/types.js';
 import type { RunManifest } from '../runner/types.js';
 import type { Report } from './score.js';
-import { plainLanguageSummary, replayWarning, whatToChange, type SurfaceLookup } from './guidance.js';
+import { plainLanguageSummary, replayWarning, whatToChange, type ReMeasureContext, type SurfaceLookup } from './guidance.js';
 
 /** Resolve the evidence record for a scenario (the CLI reads it from disk). Pure data in. */
 export type EvidenceLookup = (scenarioId: string) => EvidenceRecord | undefined;
@@ -42,6 +42,8 @@ function verdictCell(verdict: string, isolation: string | undefined, resistedKin
 export interface MarkdownOptions {
   /** Scenario id -> attack surface, from the scenario corpus; absent -> surface "unknown". */
   surfaceOf?: SurfaceLookup;
+  /** ADR-0021 amendment: corpus path and budget estimate for the re-measure command. */
+  reMeasure?: ReMeasureContext;
 }
 
 export function renderMarkdown(
@@ -110,6 +112,6 @@ export function renderMarkdown(
 
   out.push(`_${cell(report.scoring_notes)}_`, '');
   // ADR-0021: the prescriptive layer goes after every audit table.
-  out.push(...whatToChange(manifest, report, opts.surfaceOf));
+  out.push(...whatToChange(manifest, report, opts.surfaceOf, opts.reMeasure));
   return out.join('\n');
 }

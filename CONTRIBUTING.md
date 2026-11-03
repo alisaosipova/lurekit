@@ -125,7 +125,8 @@ mkdir -p .aab-runs/one && cp scenarios/AAB-NNN.yaml .aab-runs/one/
 node dist/cli.js run .aab-runs/one --model <model-id> --replay test/fixtures/recordings/claude-sample
 
 # Bundle a run for sharing (redaction gate)
-node dist/cli.js publish .aab-runs/<run_id> --redact-home
+node dist/cli.js publish .aab-runs/<run_id> --redact-home   # bundle in .aab-runs/<run_id>/bundle
+# For the repository's reports/ directory: add --out reports/<run_id>
 ```
 
 `run` without `--replay` launches the real agent, costs money and needs the agent's own auth. See

@@ -213,8 +213,56 @@ function shq(s: string): string {
   return /^[A-Za-z0-9._:/@+-]+$/.test(s) ? s : `'${s.replace(/'/g, "'\\''")}'`;
 }
 
+/** ADR-0021 amendment (re-measure composition): what the caller knows that the manifest does not.
+ *  `corpus` is the scenario directory as the reader should type it (the CLI's resolved corpus;
+ *  for `demo` the shipped one); `budgetEstimateUsd` is the doctor-style cost estimate, used for
+ *  --budget when the run itself had no cap. Both optional: an unknown value stays a placeholder. */
+export interface ReMeasureContext {
+  corpus?: string;
+  budgetEstimateUsd?: number;
+}
+
+/** Placeholder for a scenario directory the renderer cannot know (e.g. a published bundle). */
+export const UNKNOWN_CORPUS = '<scenario-dir>';
+
+/** The leading x.y.z of a version string ("2.1.317 (Claude Code)" -> "2.1.317"); the trimmed
+ *  string itself when it carries no semver (e.g. "unpinned"). */
+export function leadingSemver(v: string): string {
+  // Manifests are read from disk: tolerate a missing value rather than throw in the renderer.
+  const t = typeof v === 'string' ? v : String(v ?? '');
+  const m = /(\d+\.\d+\.\d+)/.exec(t);
+  return m ? m[1] : t.trim();
+}
+
+/** True when two agent versions name the same release once normalised to x.y.z. */
+export function sameAgentVersion(a: string, b: string): boolean {
+  return leadingSemver(a) === leadingSemver(b);
+}
+
+/** The --budget value for the re-measure line: the run's own cap, else the estimate (rounded up
+ *  to the cent), else a placeholder. */
+function budgetArg(manifest: RunManifest, ctx: ReMeasureContext): string {
+  const cap = manifest.config.budget_usd;
+  if (typeof cap === 'number' && cap > 0) return String(cap);
+  const est = ctx.budgetEstimateUsd;
+  if (typeof est === 'number' && est > 0) return (Math.ceil(est * 100) / 100).toFixed(2);
+  return '<usd>';
+}
+
+/** The full re-measure command for one knob (ADR-0021 amendment): the manifest's agent, model,
+ *  version, mode, k and vulnerable_if, the caller's corpus, the knob's flags and a --budget. */
+export function reMeasureCommand(manifest: RunManifest, knob: HardeningKnob, ctx: ReMeasureContext = {}): string {
+  const p = manifest.profile;
+  const corpus = ctx.corpus ?? UNKNOWN_CORPUS;
+  return (
+    `lurekit run ${corpus} --agent ${shq(p.agent)} --model ${shq(p.model)} --agent-version ${shq(p.agent_version)} ` +
+    `${knob.run_flags} --mode ${manifest.mode} --k ${manifest.config.k} --vulnerable-if ${manifest.config.vulnerable_if} ` +
+    `--budget ${budgetArg(manifest, ctx)}`
+  );
+}
+
 /** The "What to change" section, printed after the audit tables. */
-export function whatToChange(manifest: RunManifest, report: Report, surfaceOf?: SurfaceLookup): string[] {
+export function whatToChange(manifest: RunManifest, report: Report, surfaceOf?: SurfaceLookup, ctx: ReMeasureContext = {}): string[] {
   const h = report.headline;
   const out: string[] = ['## What to change', ''];
   if (h.vulnerable === 0) {
@@ -267,13 +315,14 @@ export function whatToChange(manifest: RunManifest, report: Report, surfaceOf?: 
     if (uncovered.length > 0) {
       out.push(`- not covered by that evidence: ${uncovered.join(', ')} (${NO_VERIFIED_FIX} for these)`);
     }
-    if (p.agent_version !== knob.agent_version) {
+    if (!sameAgentVersion(p.agent_version, knob.agent_version)) {
       out.push(`- version: this run is ${ticks(p.agent_version)}; the evidence is for ${ticks(knob.agent_version)}, so re-measure before relying on it`);
     }
-    const reMeasure =
-      `lurekit run scenarios --agent ${shq(p.agent)} --model ${shq(p.model)} --agent-version ${shq(p.agent_version)} ` +
-      `${knob.run_flags} --mode ${manifest.mode} --k ${manifest.config.k} --vulnerable-if ${manifest.config.vulnerable_if}`;
-    out.push(`- re-measure: \`${reMeasure}\``, '');
+    out.push(
+      `- re-measure: \`${reMeasureCommand(manifest, knob, ctx)}\` ` +
+        '(add your own --settings/--mcp/--hooks/--skill flags; the manifest does not record their file paths)',
+      '',
+    );
   }
   return out;
 }

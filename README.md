@@ -34,8 +34,14 @@ A live run launches your real, authenticated agent and costs money. Check the ho
 
 ```bash
 npx lurekit doctor --agent claude-code --model sonnet
-npx lurekit run node_modules/lurekit/scenarios --agent claude-code --model sonnet --agent-version <your-version> --budget 2
+npx lurekit run --agent claude-code --model sonnet --agent-version <your-version> --budget 2
 ```
+
+Without a scenario directory, `run` (like `plan`, `list`, `validate` and `doctor`) uses `./scenarios` when the
+current directory has one, else the corpus shipped with the package, and prints which one
+(`corpus: <path> (shipped with the package)`). On 1.2.0 and older, pass the directory explicitly. Report and
+publish flags (`--format`, `--output`, `--results`, `--budget`) are checked before the prompt, so a typo costs
+nothing; a finished run prints the `lurekit report` and `lurekit publish` commands for its run directory.
 
 - `doctor` checks Node, the agent binary (path, version, auto-update), login (no-spend probes only), the
   corpus and the detector self-tests, and prints a cost estimate. Exit 1 on any fail line.
@@ -62,8 +68,8 @@ From npm (the `lurekit` bin is `dist/cli.js`):
 ```bash
 npm install --save-dev lurekit
 npx lurekit --help
-npx lurekit validate node_modules/lurekit/scenarios     # offline: schema-validate the bundled scenarios
-npx lurekit run node_modules/lurekit/scenarios --model <model-id> --format markdown --output report.md   # live
+npx lurekit validate     # offline: schema-validate the bundled scenarios (no ./scenarios here)
+npx lurekit run --model <model-id> --format markdown --output report.md   # live, the bundled scenarios
 ```
 
 From a checkout:
@@ -86,7 +92,8 @@ node dist/cli.js run --model <model-id> --format markdown --output report.md
 node dist/cli.js report <runDir> --format sarif --output report.sarif
 ```
 
-The scenario directory defaults to `./scenarios`; pass another as the positional `[dir]`.
+Without the positional `[dir]`, the scenario directory is `./scenarios` when it exists, else the corpus shipped
+with the package; pass another directory to override both.
 
 `run` options (from `lurekit --help`):
 
@@ -145,8 +152,8 @@ reporting. It is not a benchmark result, and every replayed run's `evidence.json
    `default` in every repetition, so the measured difference is attributable to `--setting-sources user`.
 3. Re-measure: run the same command again with the setting and compare the two arms on the same corpus. The
    report prints the exact re-measure command.
-4. To share a result, `lurekit publish <runDir>` writes a bundle after the redaction gate; a
-   [badge](docs/guide/badge.md) can point to it.
+4. To share a result, `lurekit publish <runDir> --redact-home` writes a bundle after the redaction gate (by
+   default to `<results>/<run id>/bundle`; `--out <dir>` overrides); a [badge](docs/guide/badge.md) can point to it.
 
 ## Why you can trust the numbers
 

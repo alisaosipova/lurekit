@@ -22,7 +22,7 @@
 // `run --replay <dir>` re-drives a recorded Claude Code run instead (ADR-0015): offline, no spend.
 // A live `run` prints its plan and asks before launching (ADR-0022); `--yes` skips the prompt.
 
-import { readFileSync, writeFileSync, existsSync, realpathSync, mkdirSync, accessSync, statSync, readdirSync, constants as fsConstants } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, realpathSync, mkdirSync, accessSync, statSync, readdirSync, rmdirSync, constants as fsConstants } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -43,8 +43,8 @@ import { getDetector, IMPLEMENTED_DETECTORS } from './detectors/index.js';
 import { fixturesForScenario } from './fixtures/index.js';
 import { BenchmarkRunner, Budget } from './runner/runner.js';
 import type { RunConfig, RunManifest, RunnerIds, RunMeta, EvidenceRecord } from './runner/types.js';
-import { report, REPOSITORY_URL, type ReportFormat, type EvidenceLookup, type SurfaceLookup } from './report/index.js';
-import { planPublish, readRunDir, writeBundle, formatPlanFailure, selectEvidence } from './report/publish.js';
+import { report, REPOSITORY_URL, type ReportFormat, type EvidenceLookup, type SurfaceLookup, type ReMeasureContext } from './report/index.js';
+import { planPublish, readRunDir, writeBundle, formatPlanFailure, selectEvidence, defaultBundleDir } from './report/publish.js';
 import {
   type AgentProbe,
   type Check,
@@ -96,6 +96,9 @@ export interface CliDeps {
   isInteractive?(): boolean;
   /** ADR-0022: ask one question on the terminal and return the answer line. */
   ask?(question: string): Promise<string>;
+  /** Directory of the published run `demo` renders (ADR-0021). Optional; defaults to the copy
+   *  shipped with the package. A test points it at a missing directory for the refusal path. */
+  demoBundleDir?(): string;
 }
 
 export function defaultDeps(): CliDeps {
@@ -107,7 +110,10 @@ export function defaultDeps(): CliDeps {
       if (agent === 'cursor-cli') return new CursorCliAdapter(); // ADR-0016
       if (agent === 'codex-cli') return new CodexCliAdapter(); // ADR-0018
       if (agent === 'openhands') return new OpenHandsAdapter(); // ADR-0019
-      throw new Error(`no adapter for agent "${agent}" in 0.1 (only claude-code, cursor-cli, codex-cli and openhands are implemented)`);
+      throw new Error(
+        `no adapter for agent "${agent}" (implemented: claude-code, cursor-cli, codex-cli, openhands)\n` +
+          'next: lurekit doctor --agent claude-code',
+      );
     },
     cwd: () => process.cwd(),
     stdout: (s) => process.stdout.write(s),
@@ -188,7 +194,10 @@ function parseFlags(argv: string[]): Flags {
   const valueFor = (flag: string, i: number): string => {
     const v = argv[i];
     if (v === undefined || v.startsWith('--')) {
-      throw new Error(`${flag} expects a value (got ${v === undefined ? 'nothing' : JSON.stringify(v)})`);
+      throw new Error(
+        `${flag} expects a value (got ${v === undefined ? 'nothing' : JSON.stringify(v)})\n` +
+          `next: pass the value as the next argument (${flag} <value>); lurekit --help lists every flag`,
+      );
     }
     return v;
   };
@@ -213,7 +222,9 @@ function parseFlags(argv: string[]): Flags {
         f.str.set(name, valueFor(a, ++i));
       } else if (NUMBER_FLAGS.has(name)) {
         const v = Number(valueFor(a, ++i));
-        if (Number.isNaN(v)) throw new Error(`--${name} expects a number`);
+        if (Number.isNaN(v)) {
+          throw new Error(`--${name} expects a number\nnext: pass a number, e.g. --${name} ${name === 'k' ? '3' : '5'}`);
+        }
         f.num.set(name, v);
       } else if (BOOLEAN_FLAGS.has(name)) {
         f.bool.add(name);
@@ -234,17 +245,19 @@ function readJsonFile(p: string): unknown {
 // --- subcommands ------------------------------------------------------------
 
 export function cmdValidate(flags: Flags, deps: CliDeps): number {
-  const dir = flags._[0] ?? 'scenarios';
-  const { scenarios, errors } = loadScenarioDir(dir);
+  const corpus = resolveScenarioDir(flags._[0], deps);
+  const { scenarios, errors } = loadScenarioDir(corpus.dir);
   for (const s of scenarios) deps.stdout(`OK    ${s.id}  ${s.name}\n`);
   for (const e of errors) deps.stderr(`FAIL  ${e.file}  ${e.message}\n`);
+  const dir = flags._[0] ?? corpus.shown;
   deps.stdout(`\n${scenarios.length} valid, ${errors.length} error${errors.length === 1 ? '' : 's'} in ${dir}\n`);
   return errors.length === 0 ? 0 : 1;
 }
 
 export function cmdList(flags: Flags, deps: CliDeps): number {
-  const dir = flags._[0] ?? 'scenarios';
-  const { scenarios, errors } = loadScenarioDir(dir);
+  const corpus = resolveScenarioDir(flags._[0], deps);
+  const dir = flags._[0] ?? corpus.shown;
+  const { scenarios, errors } = loadScenarioDir(corpus.dir);
   for (const s of scenarios) {
     const applies = s.applies_to?.join(',') ?? 'all';
     const runnable = s.runnable === false ? 'no ' : 'yes';
@@ -268,10 +281,15 @@ export async function cmdSelftest(_flags: Flags, deps: CliDeps): Promise<number>
 
 /** Build the SetupProfile under test from flags. `--model` is required: pinning the model is a
  *  core reproducibility requirement (ADR-0005), so we never fabricate one. */
-function buildProfile(flags: Flags, deps: CliDeps): SetupProfile {
+function buildProfile(flags: Flags, deps: CliDeps, hint = 'lurekit run'): SetupProfile {
   const agent = (flags.str.get('agent') ?? 'claude-code') as AgentId;
   const model = flags.str.get('model');
-  if (!model) throw new Error('run: --model <id> is required (the model id is pinned into the manifest)');
+  if (!model) {
+    throw new Error(
+      `${hint.split(' ')[1] ?? 'run'}: --model <id> is required (the model id is pinned into the manifest)\n` +
+        `next: ${hint} --model sonnet   (or any model id your agent accepts)`,
+    );
+  }
   // No default workdir (and never os.tmpdir()): the runner gives every repetition its own
   // fresh <results>/<benchmark_run_id>/<scenario_id>/<rep>/work. --workdir only sets a BASE
   // for those per-run dirs (<base>/<scenario_id>/<rep>), ADR-0002 / evidence-spec §2.1.
@@ -313,11 +331,15 @@ function settingSourcesNote(profile: SetupProfile): string {
   return profile.setting_sources ? `, setting_sources=${profile.setting_sources.join(',')}` : '';
 }
 
-function buildConfig(flags: Flags, deps: CliDeps): RunConfig {
+function buildConfig(flags: Flags, deps: CliDeps, hint = 'lurekit run'): RunConfig {
   const mode = (flags.str.get('mode') ?? 'smoke') as 'smoke' | 'full';
-  if (mode !== 'smoke' && mode !== 'full') throw new Error(`--mode must be smoke|full`);
+  if (mode !== 'smoke' && mode !== 'full') {
+    throw new Error(`--mode must be smoke|full\nnext: ${hint} --mode smoke   (k=1; --mode full is k=3)`);
+  }
   const vulnerableIf = (flags.str.get('vulnerable-if') ?? 'any') as 'any' | 'majority';
-  if (vulnerableIf !== 'any' && vulnerableIf !== 'majority') throw new Error(`--vulnerable-if must be any|majority`);
+  if (vulnerableIf !== 'any' && vulnerableIf !== 'majority') {
+    throw new Error(`--vulnerable-if must be any|majority\nnext: ${hint} --vulnerable-if any   (or majority)`);
+  }
   const isolation = (flags.str.get('isolation') ?? 'container') as 'container' | 'container+netns';
   const k = flags.num.get('k') ?? (mode === 'smoke' ? 1 : 3);
   return {
@@ -358,6 +380,143 @@ function shippedScenariosArg(deps: CliDeps): string {
   return rel === '' ? '.' : /^[A-Za-z0-9._/-]+$/.test(rel) ? rel : `'${shipped.replace(/'/g, "'\\''")}'`;
 }
 
+/** Where a resolved scenario directory came from (ADR-0022 amendment, corpus resolution order). */
+export type CorpusSource = 'argument' | 'cwd' | 'shipped';
+
+export interface ResolvedCorpus {
+  /** Path handed to loadScenarioDir. */
+  dir: string;
+  /** The same directory as the user should type it (relative to the cwd when plain). */
+  shown: string;
+  source: CorpusSource;
+}
+
+/** ADR-0022 amendment: one corpus resolution for run/plan/validate/list/doctor. An explicit
+ *  argument wins; else ./scenarios when that directory exists in the cwd; else the corpus shipped
+ *  next to the package (so `npx lurekit plan` works from an empty directory). */
+export function resolveScenarioDir(arg: string | undefined, deps: CliDeps): ResolvedCorpus {
+  if (arg !== undefined) return { dir: arg, shown: typedPath(arg), source: 'argument' };
+  const local = path.join(deps.cwd(), 'scenarios');
+  let localIsDir = false;
+  try {
+    localIsDir = statSync(local).isDirectory();
+  } catch {
+    localIsDir = false;
+  }
+  if (localIsDir) return { dir: local, shown: 'scenarios', source: 'cwd' };
+  return { dir: path.join(packageRoot(), 'scenarios'), shown: shippedScenariosArg(deps), source: 'shipped' };
+}
+
+/** The "corpus: <path> (...)" line printed by plan and run. */
+function corpusLine(c: ResolvedCorpus): string {
+  const why = c.source === 'shipped' ? 'shipped with the package' : c.source === 'cwd' ? './scenarios in the current directory' : 'given on the command line';
+  return `corpus: ${c.shown} (${why})\n`;
+}
+
+/** A path as a shell user types it: unchanged when plain, single-quoted otherwise. */
+function typedPath(p: string): string {
+  return /^[A-Za-z0-9._/:@+-]+$/.test(p) ? p : `'${p.replace(/'/g, "'\\''")}'`;
+}
+
+/** A path for a printed next command: relative to the cwd when it lies below it, else absolute. */
+function shownPath(p: string, deps: CliDeps): string {
+  const abs = path.resolve(deps.cwd(), p);
+  const rel = path.relative(deps.cwd(), abs);
+  return typedPath(rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : abs);
+}
+
+/** Run directories (holding a manifest.json) under a results root, newest manifest first. */
+export function listRunDirs(resultsRoot: string, max = 10): string[] {
+  let names: string[] = [];
+  try {
+    names = readdirSync(resultsRoot);
+  } catch {
+    return [];
+  }
+  const found: Array<{ dir: string; mtime: number }> = [];
+  for (const n of names) {
+    const dir = path.join(resultsRoot, n);
+    try {
+      found.push({ dir, mtime: statSync(path.join(dir, 'manifest.json')).mtimeMs });
+    } catch {
+      /* not a completed run directory */
+    }
+  }
+  found.sort((a, b) => b.mtime - a.mtime || (a.dir < b.dir ? 1 : -1));
+  return found.slice(0, max).map((f) => f.dir);
+}
+
+/** ADR-0022 amendment: the "no manifest" refusal of report/publish lists the run directories
+ *  that do exist under --results and names the next command for the newest one. */
+function noRunDirMessage(command: 'report' | 'publish', given: string | undefined, flags: Flags, deps: CliDeps): string {
+  const resultsFlag = flags.str.get('results') ?? '.aab-runs';
+  const root = path.resolve(deps.cwd(), resultsFlag);
+  const runs = listRunDirs(root);
+  const tail = command === 'report' ? ' --format markdown' : ' --redact-home';
+  const head = given === undefined
+    ? `${command}: a benchmark run directory is required\n`
+    : `no manifest.json in ${given} (not a completed run directory)\n`;
+  if (runs.length === 0) {
+    return (
+      head +
+      `no run directories with a manifest.json under ${shownPath(root, deps)}\n` +
+      `next: lurekit run --model <id>   (writes one), or pass --results <dir> where your runs are\n`
+    );
+  }
+  return (
+    head +
+    `run directories under ${shownPath(root, deps)} (newest first):\n` +
+    runs.map((r) => `  ${shownPath(r, deps)}\n`).join('') +
+    `next: lurekit ${command} ${shownPath(runs[0], deps)}${tail}\n`
+  );
+}
+
+/** ADR-0022 amendment (pre-spend validation): every run flag that would otherwise only fail after
+ *  the agent ran (and was paid for) is checked first. Returns the refusal text, or undefined. */
+function preSpendProblem(flags: Flags, deps: CliDeps, hint: string): string | undefined {
+  const format = flags.str.get('format');
+  if (format !== undefined && !REPORT_FORMATS.includes(format as ReportFormat)) {
+    return `--format must be ${REPORT_FORMATS.join('|')} (got ${JSON.stringify(format)}).\nnext: ${hint} --format markdown`;
+  }
+  const output = flags.str.get('output');
+  if (output !== undefined) {
+    const abs = path.resolve(deps.cwd(), output);
+    let isDir = false;
+    try {
+      isDir = statSync(abs).isDirectory();
+    } catch {
+      isDir = false;
+    }
+    if (isDir) return `--output ${output} is a directory; it must name a file.\nnext: ${hint} --output ${typedPath(path.join(output, 'report.md'))}`;
+    const parent = path.dirname(abs);
+    try {
+      if (!statSync(parent).isDirectory()) throw Object.assign(new Error('ENOTDIR'), { code: 'ENOTDIR' });
+      accessSync(parent, fsConstants.W_OK);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code ?? (err as Error).message;
+      return `cannot write --output ${output}: its directory ${parent} is not writable (${code}).\nnext: ${hint} --output ./report.md`;
+    }
+  }
+  const budget = flags.num.get('budget');
+  if (budget !== undefined && !(Number.isFinite(budget) && budget > 0)) {
+    return `--budget must be a number of USD greater than 0 (got ${budget}).\nnext: ${hint} --budget 5`;
+  }
+  return undefined;
+}
+
+/** ADR-0021 amendment: the doctor-style cost estimate for re-running a manifest's scenarios at
+ *  its k, used as the re-measure --budget when the run had no cap. */
+function reMeasureEstimate(manifest: RunManifest): number | undefined {
+  const basis = planCostBasis(manifest.profile.agent as AgentId);
+  if (!basis) return undefined;
+  return manifest.results.length * Math.max(manifest.config.k, 1) * basis.perRepUsd;
+}
+
+function reMeasureContext(manifest: RunManifest, corpus: string | undefined): ReMeasureContext {
+  const est = reMeasureEstimate(manifest);
+  return { ...(corpus !== undefined ? { corpus } : {}), ...(est !== undefined ? { budgetEstimateUsd: est } : {}) };
+}
+
 /** ADR-0022: fail before any agent launch when the results root cannot be created/written. */
 function resultsRootProblem(root: string): string | undefined {
   try {
@@ -384,7 +543,8 @@ function planCostBasis(agent: AgentId): CostEstimate | undefined {
 }
 
 export async function cmdPlan(flags: Flags, deps: CliDeps): Promise<number> {
-  const dir = flags._[0] ?? 'scenarios';
+  const corpus = resolveScenarioDir(flags._[0], deps);
+  const dir = corpus.dir;
   const problem = scenarioDirProblem(dir, deps);
   if (problem) {
     deps.stderr(`${problem}\n`);
@@ -392,13 +552,26 @@ export async function cmdPlan(flags: Flags, deps: CliDeps): Promise<number> {
   }
   const { scenarios, errors } = loadScenarioDir(dir);
   if (errors.length) deps.stderr(`warning: ${errors.length} scenario file(s) failed to load (run 'validate')\n`);
-  const profile = buildProfile(flags, deps);
-  const cfg = buildConfig(flags, deps);
+  const hint = `lurekit plan${flags._[0] !== undefined ? ` ${corpus.shown}` : ''}`;
+  const profile = buildProfile(flags, deps, hint);
+  const cfg = buildConfig(flags, deps, hint);
+  deps.stdout(corpusLine(corpus));
   const runner = new BenchmarkRunner({
     ids: makeIds(deps.newRunId()),
     fixtures: fixturesForScenario,
   });
+  // plan is an offline preview: the detector self-tests scratch under <results>/<id>/.selftest
+  // and remove it; a results root that only existed for that scratch is removed too, so `plan`
+  // leaves no empty .aab-runs/ behind (the CI package job checks the empty directory stays empty).
+  const rootExisted = existsSync(cfg.resultsRoot);
   const plan = await runner.plan(scenarios, profile, cfg);
+  if (!rootExisted) {
+    try {
+      rmdirSync(cfg.resultsRoot); // only when empty: never removes run material
+    } catch {
+      /* not empty or already gone */
+    }
+  }
   for (const s of plan.kept) deps.stdout(`KEEP  ${s.id}  ${s.forbidden_effect.detector}  ${s.name}\n`);
   for (const sk of plan.skipped) deps.stdout(`SKIP  ${sk.scenario_id}  ${sk.reason}: ${sk.detail}\n`);
   deps.stdout(`\nplan: ${plan.kept.length} would run, ${plan.skipped.length} skipped (profile agent=${profile.agent}, model=${profile.model}${settingSourcesNote(profile)})\n`);
@@ -493,7 +666,8 @@ function repIssues(results: ScenarioResult[]): RepIssue[] {
 }
 
 export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
-  const dir = flags._[0] ?? 'scenarios';
+  const corpus = resolveScenarioDir(flags._[0], deps);
+  const dir = corpus.dir;
   const problem = scenarioDirProblem(dir, deps);
   if (problem) {
     deps.stderr(`refusing to run: ${problem}\n`);
@@ -504,12 +678,19 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
     const first = errors[0];
     deps.stderr(
       `refusing to run: ${errors.length} scenario file(s) in ${dir} are invalid (first: ${first.file}: ${first.message}).\n` +
-        `Next: lurekit validate ${dir}\n`,
+        `Next: lurekit validate ${flags._[0] ?? corpus.shown}\n`,
     );
     return 1;
   }
-  const profile = buildProfile(flags, deps);
-  const cfg = buildConfig(flags, deps);
+  const hint = `lurekit run${flags._[0] !== undefined ? ` ${corpus.shown}` : ''}`;
+  const profile = buildProfile(flags, deps, hint);
+  const cfg = buildConfig(flags, deps, hint);
+  // ADR-0022 amendment: report flags are checked before the prompt and any spawn, not after a paid run.
+  const spendProblem = preSpendProblem(flags, deps, `${hint} --model ${typedPath(profile.model)}`);
+  if (spendProblem) {
+    deps.stderr(`refusing to run: ${spendProblem}\n`);
+    return 1;
+  }
   // --replay <dir> (ADR-0015): re-drive a recorded claude-code run offline; no live agent.
   const replayDir = flags.str.get('replay');
   if (replayDir !== undefined && profile.agent !== 'claude-code') {
@@ -541,6 +722,7 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
   const meta: RunMeta = { createdAt: deps.now(), toolVersion: toolVersion() };
 
   const plan = await runner.plan(scenarios, profile, cfg);
+  deps.stderr(corpusLine(corpus));
   if (!live) deps.stderr(`replaying recording ${replayDir} (offline, no live agent)\n`);
 
   // ADR-0022: a live run shows its plan (and, with a host probe, the binary and auth lines),
@@ -577,15 +759,15 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
   const manifest = await runner.writeManifest(profile, cfg, plan.kept, results, meta);
 
   const runDir = path.join(cfg.resultsRoot, benchmarkRunId);
-  const format = (flags.str.get('format') ?? 'markdown') as ReportFormat;
-  if (!REPORT_FORMATS.includes(format)) throw new Error(`--format must be ${REPORT_FORMATS.join('|')}`);
+  const format = (flags.str.get('format') ?? 'markdown') as ReportFormat; // validated pre-spend
   const rendered = report(manifest, {
     format,
     evidenceLookup: makeEvidenceLookup(runDir, manifest),
     surfaceOf: surfaceLookupFrom(scenarios),
+    reMeasure: reMeasureContext(manifest, corpus.shown),
   });
   const output = flags.str.get('output');
-  if (output) writeFileSync(output, rendered, 'utf8');
+  if (output) writeFileSync(path.resolve(deps.cwd(), output), rendered, 'utf8');
   else deps.stdout(rendered + '\n');
 
   deps.stderr(`\nmanifest: ${path.join(runDir, 'manifest.json')}\n`);
@@ -603,24 +785,30 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
     deps.stderr('\nnothing was measured (exit 1): fix the first item above and re-run.\n');
     return 1;
   }
+  // ADR-0022 amendment: say what to do with the finished run.
+  const shownRun = shownPath(runDir, deps);
+  deps.stderr(`\nNext: lurekit report ${shownRun} --format markdown|json|sarif\n      lurekit publish ${shownRun} --redact-home\n`);
   return 0;
 }
 
 export function cmdReport(flags: Flags, deps: CliDeps): number {
   const runDir = flags._[0];
-  if (!runDir) throw new Error('report: a benchmark run directory is required');
-  const manifestPath = path.join(runDir, 'manifest.json');
-  if (!existsSync(manifestPath)) {
-    deps.stderr(`no manifest.json in ${runDir}\n`);
+  if (!runDir || !existsSync(path.join(runDir, 'manifest.json'))) {
+    deps.stderr(noRunDirMessage('report', runDir, flags, deps));
     return 1;
   }
+  const manifestPath = path.join(runDir, 'manifest.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as RunManifest;
   const format = (flags.str.get('format') ?? 'json') as ReportFormat;
-  if (!REPORT_FORMATS.includes(format)) throw new Error(`--format must be ${REPORT_FORMATS.join('|')}`);
+  if (!REPORT_FORMATS.includes(format)) {
+    throw new Error(`--format must be ${REPORT_FORMATS.join('|')}\nnext: lurekit report ${typedPath(runDir)} --format markdown`);
+  }
   const rendered = report(manifest, {
     format,
     evidenceLookup: makeEvidenceLookup(runDir, manifest),
-    ...(format === 'markdown' ? { surfaceOf: shippedSurfaceLookup() } : {}),
+    ...(format === 'markdown'
+      ? { surfaceOf: shippedSurfaceLookup(), reMeasure: reMeasureContext(manifest, resolveScenarioDir(undefined, deps).shown) }
+      : {}),
   });
   const output = flags.str.get('output');
   if (output) writeFileSync(output, rendered, 'utf8');
@@ -635,12 +823,11 @@ export function cmdReport(flags: Flags, deps: CliDeps): number {
  *  runs the §5 redaction gate, and writes only if the gate is clean. */
 export function cmdPublish(flags: Flags, deps: CliDeps): number {
   const runArg = flags._[0];
-  if (!runArg) throw new Error('publish: a benchmark run directory is required');
-  const runDir = path.resolve(deps.cwd(), runArg);
-  if (!existsSync(path.join(runDir, 'manifest.json'))) {
-    deps.stderr(`no manifest.json in ${runArg}\n`);
+  if (!runArg || !existsSync(path.join(path.resolve(deps.cwd(), runArg), 'manifest.json'))) {
+    deps.stderr(noRunDirMessage('publish', runArg, flags, deps));
     return 1;
   }
+  const runDir = path.resolve(deps.cwd(), runArg);
   const withhold = flags.multi.get('withhold') ?? [];
   if (withhold.some((w) => typeof w !== 'string' || w === '' || w.startsWith('--'))) {
     deps.stderr('publish: --withhold needs a scenario id; nothing written\n');
@@ -663,11 +850,14 @@ export function cmdPublish(flags: Flags, deps: CliDeps): number {
     deps.stderr(formatPlanFailure(plan));
     return 1;
   }
-  const outDir = path.resolve(deps.cwd(), flags.str.get('out') ?? path.join('reports', plan.benchmarkRunId));
+  // ADR-0022 amendment: the default bundle goes inside the run directory (<results>/<id>/bundle),
+  // never into the cwd; --out still overrides it.
+  const outFlag = flags.str.get('out');
+  const outDir = outFlag !== undefined ? path.resolve(deps.cwd(), outFlag) : defaultBundleDir(runDir);
   try {
     writeBundle(outDir, plan.files);
   } catch (err) {
-    deps.stderr(`${(err as Error).message}; nothing written\n`);
+    deps.stderr(`${(err as Error).message}; nothing written\nnext: lurekit publish ${typedPath(runArg)} --out <an empty directory you can write>\n`);
     return 1;
   }
   for (const f of plan.files) deps.stdout(`wrote ${f.rel}\n`);
@@ -689,10 +879,22 @@ export function cmdPublish(flags: Flags, deps: CliDeps): number {
 export async function cmdDoctor(flags: Flags, deps: CliDeps): Promise<number> {
   const allowed = new Set(['agent', 'model', 'format']);
   const extra = [...flags.str.keys(), ...flags.num.keys(), ...flags.multi.keys(), ...flags.bool].filter((n) => !allowed.has(n));
-  if (extra.length > 0) throw new Error(`doctor accepts only [dir], --agent, --model and --format (got --${extra[0]})`);
-  if (flags._.length > 1) throw new Error(`doctor takes at most one scenario directory (got ${flags._.length} positionals)`);
+  if (extra.length > 0) {
+    throw new Error(
+      `doctor accepts only [dir], --agent, --model and --format (got --${extra[0]})\n` +
+        `next: lurekit doctor --agent ${flags.str.get('agent') ?? 'claude-code'}${flags.str.has('model') ? ` --model ${typedPath(flags.str.get('model')!)}` : ''}   (--${extra[0]} belongs to lurekit run/plan)`,
+    );
+  }
+  if (flags._.length > 1) {
+    throw new Error(
+      `doctor takes at most one scenario directory (got ${flags._.length} positionals)\n` +
+        `next: lurekit doctor ${typedPath(flags._[0])}`,
+    );
+  }
   const format = flags.str.get('format') ?? 'text';
-  if (format !== 'text' && format !== 'json') throw new Error('doctor: --format must be text|json');
+  if (format !== 'text' && format !== 'json') {
+    throw new Error('doctor: --format must be text|json\nnext: lurekit doctor --format json');
+  }
   const info = agentInfo(flags.str.get('agent') ?? 'claude-code');
   const agent = info.id;
   const model = flags.str.get('model');
@@ -704,7 +906,7 @@ export async function cmdDoctor(flags: Flags, deps: CliDeps): Promise<number> {
   const update = checkUpdate(info, bin, probe.platform);
   if (update) checks.push(update);
   checks.push(checkAuth(info, bin, probe));
-  checks.push(checkModel(info, model));
+  checks.push(checkModel(info, model, resolveScenarioDir(flags._[0], deps).shown));
   const perm = checkOpenHandsPermission(info);
   if (perm) checks.push(perm);
   checks.push(checkIsolation());
@@ -712,8 +914,9 @@ export async function cmdDoctor(flags: Flags, deps: CliDeps): Promise<number> {
   // Corpus + selftests: the runner's own plan decides what would run, with the detector
   // self-tests run once here and reused (no second control run).
   const dirArg = flags._[0];
-  const dir = dirArg ?? path.join(packageRoot(), 'scenarios');
-  const shown = dirArg ?? shippedScenariosArg(deps);
+  const corpus = resolveScenarioDir(dirArg, deps);
+  const dir = corpus.dir;
+  const shown = dirArg ?? corpus.shown;
   const selftests: SelfTestOutcome[] = await runDetectorSelfTests();
   const verified = new Map<DetectorKind, boolean>(selftests.map((r) => [r.kind, r.ok]));
   let kept = 0;
@@ -738,7 +941,7 @@ export async function cmdDoctor(flags: Flags, deps: CliDeps): Promise<number> {
   checks.push({ id: 'cost', status: 'ok', summary: estimateSentence(agent, kept, basis) });
 
   const result = summarize(agent, model, checks, kept, basis);
-  deps.stdout(format === 'json' ? JSON.stringify(result, null, 2) + '\n' : renderDoctor(result));
+  deps.stdout(format === 'json' ? JSON.stringify(result, null, 2) + '\n' : renderDoctor(result, missing ? undefined : corpus.shown));
   return result.fail > 0 ? 1 : 0;
 }
 
@@ -773,19 +976,44 @@ export function demoBanner(manifest: RunManifest, scenariosDir = 'scenarios'): s
 /** demo [--format json|markdown|sarif] [--output <file>] (ADR-0021): offline, zero cost, no auth.
  *  Renders the bundled published run through the same reporter as `report`. */
 export function cmdDemo(flags: Flags, deps: CliDeps): number {
-  if (flags._.length > 0) throw new Error(`demo takes no positional arguments (got ${JSON.stringify(flags._[0])})`);
+  if (flags._.length > 0) {
+    throw new Error(
+      `demo takes no positional arguments (got ${JSON.stringify(flags._[0])})\n` +
+        'next: lurekit demo   (for a run of your own: lurekit report <runDir> --format markdown)',
+    );
+  }
   const allowed = new Set(['format', 'output']);
   const extra = [...flags.str.keys(), ...flags.num.keys(), ...flags.multi.keys(), ...flags.bool]
     .filter((n) => !allowed.has(n));
-  if (extra.length > 0) throw new Error(`demo accepts only --format and --output (got --${extra[0]})`);
+  if (extra.length > 0) {
+    throw new Error(
+      `demo accepts only --format and --output (got --${extra[0]})\n` +
+        `next: lurekit demo --format markdown   (--${extra[0]} belongs to another command; lurekit --help)`,
+    );
+  }
   const format = (flags.str.get('format') ?? 'markdown') as ReportFormat;
-  if (!REPORT_FORMATS.includes(format)) throw new Error(`--format must be ${REPORT_FORMATS.join('|')}`);
-  const manifest = readJsonFile(path.join(demoBundleDir(), 'manifest.json')) as RunManifest;
+  if (!REPORT_FORMATS.includes(format)) {
+    throw new Error(`--format must be ${REPORT_FORMATS.join('|')}\nnext: lurekit demo --format markdown`);
+  }
+  const manifestPath = path.join(deps.demoBundleDir ? deps.demoBundleDir() : demoBundleDir(), 'manifest.json');
+  let manifest: RunManifest;
+  try {
+    manifest = readJsonFile(manifestPath) as RunManifest;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code ?? (err as Error).message;
+    deps.stderr(
+      `demo: the published run that ships with lurekit is missing or unreadable in this install (${manifestPath}: ${code}); ` +
+        'the package is incomplete, nothing was rendered.\n' +
+        `next: npm install lurekit@${toolVersion()}   (reinstall), or read the bundle at ${REPOSITORY_URL}/tree/main/reports/${DEMO_RUN_ID}\n`,
+    );
+    return 1;
+  }
+  const shipped = shippedScenariosArg(deps);
   const body = report(manifest, {
     format,
-    ...(format === 'markdown' ? { surfaceOf: shippedSurfaceLookup() } : {}),
+    ...(format === 'markdown' ? { surfaceOf: shippedSurfaceLookup(), reMeasure: reMeasureContext(manifest, shipped) } : {}),
   });
-  const banner = demoBanner(manifest, shippedScenariosArg(deps));
+  const banner = demoBanner(manifest, shipped);
   // Machine formats stay parseable: the banner goes to stderr for json/sarif.
   const rendered = format === 'markdown' ? banner + body : body;
   if (format !== 'markdown') deps.stderr(banner);
@@ -827,7 +1055,7 @@ Commands:
   report <runDir>  Render a report from a completed run. --format --output.
   publish <runDir> Write a shareable bundle (manifest, evidence, report.md/json/sarif, index.md)
                    after the redaction gate (no raw transcripts). Offline.
-                   --out <dir> (default reports/<benchmark_run_id>)  --allow-host <host> (repeatable)
+                   --out <dir> (default <runDir>/bundle)  --allow-host <host> (repeatable)
                    --withhold <scenario-id> (repeatable)  leave a scenario out of the bundle
                                   pending coordinated disclosure (ADR-0014); totals recomputed
                    --exclude <scenario-id> (repeatable)  leave out a scenario whose result is not
@@ -838,6 +1066,9 @@ Commands:
   demo             Print a published run that ships with the package (no agent, no auth, no cost),
                    rendered exactly like 'report', with a banner saying it is not your setup.
                    --format json|markdown|sarif (default markdown)  --output <file>
+
+[dir] (run, plan, validate, list, doctor): the given directory, else ./scenarios when it exists,
+else the scenario corpus shipped with lurekit.
 
 Flags are strict: an unknown --flag, a --flag=value form, or a flag token containing spaces
 is an error (exit 1). Pass each flag and its value as separate arguments.
@@ -877,10 +1108,38 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     case 'publish': return cmdPublish(flags, deps);
     case 'demo': return cmdDemo(flags, deps);
     case 'doctor': return cmdDoctor(flags, deps);
-    default:
-      deps.stderr(`unknown command: ${command}\n\n${USAGE}`);
+    default: {
+      const near = closestCommand(command);
+      const next = near ? `next: lurekit ${near}   (did you mean "${near}"?)` : 'next: lurekit --help';
+      deps.stderr(`unknown command: ${command}\n${next}\n\n${USAGE}`);
       return 2;
+    }
   }
+}
+
+/** Levenshtein distance (small inputs only: command names). */
+function editDistance(a: string, b: string): number {
+  const prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    let diag = prev[0];
+    prev[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const up = prev[j];
+      prev[j] = Math.min(prev[j] + 1, prev[j - 1] + 1, diag + (a[i - 1] === b[j - 1] ? 0 : 1));
+      diag = up;
+    }
+  }
+  return prev[b.length];
+}
+
+/** ADR-0022 amendment: the command name within edit distance 2 of a mistyped one, if any. */
+export function closestCommand(typed: string): string | undefined {
+  let best: { name: string; d: number } | undefined;
+  for (const name of COMMANDS) {
+    const d = editDistance(typed.toLowerCase(), name);
+    if (d <= 2 && (best === undefined || d < best.d)) best = { name, d };
+  }
+  return best?.name;
 }
 
 /** Resolve a path to its real file, falling back to path.resolve when it does not exist. */
@@ -907,7 +1166,9 @@ if (isMainModule(process.argv[1], import.meta.url)) {
   main(process.argv.slice(2))
     .then((code) => process.exit(code))
     .catch((err) => {
-      process.stderr.write(`error: ${(err as Error).message}\n`);
+      // ADR-0022 amendment: every refusal names the next command; a message without one gets the help.
+      const msg = (err as Error).message;
+      process.stderr.write(`error: ${msg}\n${/\nnext: /.test(msg) ? '' : 'next: lurekit --help\n'}`);
       process.exit(1);
     });
 }

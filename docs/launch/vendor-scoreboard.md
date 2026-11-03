@@ -97,8 +97,8 @@ of the result is not conditional on the author's approval; factual corrections a
 
 ## Proposal: `docs/results/` layout for third-party arms
 
-Today published bundles live under `reports/<benchmark_run_id>/` (the `lurekit publish` default
-`--out`) and summaries under `docs/reports/`. `docs/results/` does not exist. Proposal (needs an
+Today published bundles live under `reports/<benchmark_run_id>/` (written with
+`lurekit publish --out reports/<benchmark_run_id>`; the default `--out` is `<results>/<benchmark_run_id>/bundle`) and summaries under `docs/reports/`. `docs/results/` does not exist. Proposal (needs an
 ADR before anything lands, since it adds a published-data contract):
 
 ```

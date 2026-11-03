@@ -168,7 +168,7 @@ reported 1.395508 USD for 21 scenarios (`aab-20261102112637-5c55ad74`) and 1.598
 (`aab-20261102161512-ca5fe106`). `--budget` has no default, so set one:
 
 ```sh
-npx lurekit run node_modules/lurekit/scenarios --agent claude-code \
+npx lurekit run --agent claude-code \
   --model <model-id> --agent-version <your-version> --mode smoke --budget 2
 ```
 

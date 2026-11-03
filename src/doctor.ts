@@ -143,7 +143,7 @@ export const SUPPORTED_AGENTS: readonly AgentId[] = ['claude-code', 'cursor-cli'
 export function agentInfo(agent: string): AgentInfo {
   const info = (AGENTS as Record<string, AgentInfo | undefined>)[agent];
   if (!info) {
-    throw new Error(`unknown agent "${agent}" (supported: ${SUPPORTED_AGENTS.join(', ')})`);
+    throw new Error(`unknown agent "${agent}" (supported: ${SUPPORTED_AGENTS.join(', ')})\nnext: lurekit doctor --agent ${SUPPORTED_AGENTS[0]}`);
   }
   return info;
 }
@@ -338,6 +338,17 @@ export function checkAuth(info: AgentInfo, bin: BinaryFinding, probe: AgentProbe
           summary: `logged in (claude auth status: authMethod=${s.method ?? 'unknown'}); a login does not prove the account can pay for -p runs`,
         };
       }
+      if (s.loggedIn === false && hasEnv(probe, 'ANTHROPIC_API_KEY')) {
+        // NOTES "Auth status without a session": with ANTHROPIC_API_KEY set, `auth status`
+        // answered loggedIn:true (authMethod api_key) on 2.1.318; whether a `-p` run honours the
+        // variable when the status says logged out is not verified, so this is a warn, not a fail.
+        return {
+          id: 'auth',
+          status: 'warn',
+          summary: 'not logged in; ANTHROPIC_API_KEY is set (UNVERIFIED whether -p honours it on this version)',
+          fix: 'claude auth login   (or keep the key: only a one-scenario live smoke run shows whether it reaches -p)',
+        };
+      }
       if (s.loggedIn === false) {
         return {
           id: 'auth',
@@ -403,7 +414,7 @@ export function checkAuth(info: AgentInfo, bin: BinaryFinding, probe: AgentProbe
 export const CLAUDE_MODEL_ALIASES: readonly string[] = ['fable', 'opus', 'sonnet'];
 
 /** What happens to the model id. No adapter can validate it offline (NOTES). */
-export function checkModel(info: AgentInfo, model: string | undefined): Check {
+export function checkModel(info: AgentInfo, model: string | undefined, corpus?: string): Check {
   if (model === undefined) {
     return {
       id: 'model',
@@ -420,7 +431,7 @@ export function checkModel(info: AgentInfo, model: string | undefined): Check {
         id: 'model',
         status: 'warn',
         summary: `"${model}" is neither a documented alias (${CLAUDE_MODEL_ALIASES.join(', ')}) nor a claude-* name; what claude does with an unknown id is not verified offline (a rejected id ends each run inconclusive)`,
-        fix: 'lurekit run <dir> --agent claude-code --model sonnet',
+        fix: `lurekit run ${corpus ?? '<dir>'} --agent claude-code --model sonnet`,
       };
     case 'cursor-cli':
       return {
@@ -515,7 +526,7 @@ export function checkCorpus(
       id: 'corpus',
       status: 'fail',
       summary: `scenario directory ${dir} does not exist or holds no .yaml scenarios`,
-      fix: 'lurekit doctor <scenario dir>   (omit the argument to check the corpus shipped with lurekit)',
+      fix: `lurekit doctor --agent ${agent}   (no directory argument: ./scenarios if it exists, else the corpus shipped with lurekit)`,
     };
   }
   if (r.errors > 0) {
@@ -605,10 +616,13 @@ export function renderChecks(checks: Check[]): string {
   return lines.join('\n') + '\n';
 }
 
-export function renderDoctor(r: DoctorReport): string {
+/** `corpus` is the resolved scenario directory as the user should type it (ADR-0022 amendment):
+ *  the Next line carries every known value; only a value doctor cannot know stays as <...>. */
+export function renderDoctor(r: DoctorReport, corpus?: string): string {
   const head = `lurekit doctor: agent ${r.agent}${r.model ? `, model ${r.model}` : ''}\n\n`;
+  const next = `lurekit run ${corpus ?? '<dir>'} --agent ${r.agent} --model ${r.model ?? '<id>'}`;
   const tail =
     `\n${r.fail} fail, ${r.warn} warn. ` +
-    (r.fail > 0 ? 'Fix the fail lines before a live run.\n' : 'Next: lurekit run <dir> --agent ' + r.agent + ' --model <id> (asks before it spends).\n');
+    (r.fail > 0 ? `Fix the fail lines before a live run. Then: ${next}\n` : `Next: ${next} (asks before it spends).\n`);
   return head + renderChecks(r.checks) + tail;
 }

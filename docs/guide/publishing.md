@@ -38,7 +38,7 @@ lurekit publish <runDir> [--out <dir>] [--allow-host <host>]... [--withhold <sce
 | option | default | effect |
 |---|---|---|
 | `<runDir>` | (required) | The benchmark run directory, `<results>/<benchmark_run_id>`, containing `manifest.json`. |
-| `--out <dir>` | `reports/<benchmark_run_id>` (relative to the current directory) | Output directory. It must be absent or empty; a non-empty directory is refused so stale, unscanned files cannot ride along. |
+| `--out <dir>` | `<runDir>/bundle`, i.e. `<results>/<benchmark_run_id>/bundle` for a run under `--results` (inside the run directory, never the cwd) | Output directory. It must be absent or empty; a non-empty directory is refused so stale, unscanned files cannot ride along. |
 | `--allow-host <host>` | none | Repeatable. Allow URLs on one more host (see [--allow-host](#--allow-host)). |
 | `--withhold <scenario-id>` | none | Repeatable. Leave one scenario out of the bundle (see [Withholding a scenario](#withholding-a-scenario)). |
 | `--exclude <scenario-id>` | none | Repeatable. Leave out a scenario whose result is not a measurement (see [Excluding a scenario](#excluding-a-scenario)). An id may not be given to both `--withhold` and `--exclude`. |
@@ -54,6 +54,7 @@ lurekit publish .aab-runs/<benchmark_run_id>
 lurekit publish .aab-runs/<benchmark_run_id> --redact-home
 lurekit publish .aab-runs/<benchmark_run_id> --redact-home --withhold AAB-003
 lurekit publish .aab-runs/<benchmark_run_id> --out site/runs/<benchmark_run_id>
+lurekit publish .aab-runs/<benchmark_run_id> --redact-home --out reports/<benchmark_run_id>   # the repository layout
 ```
 
 On success it prints one `wrote <file>` line per file, then for example:
@@ -62,10 +63,10 @@ On success it prints one `wrote <file>` line per file, then for example:
 withheld (ADR-0014): AAB-003
 redaction applied: home directory -> <HOME> (22 replacements)
 
-published 29 file(s) to <cwd>/reports/<benchmark_run_id>
+published 29 file(s) to <cwd>/.aab-runs/<benchmark_run_id>/bundle
 ```
 
-The run directory itself is never modified. Every rewrite described below is applied to in-memory
+The run's own files are never modified (the default bundle is a new `bundle/` directory beside them, which a later publish of the same run ignores). Every rewrite described below is applied to in-memory
 copies only, so the original bytes stay available for local audit.
 
 ## What a bundle contains

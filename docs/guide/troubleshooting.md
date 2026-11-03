@@ -343,7 +343,7 @@ Each finding names the file and the kind:
 - Token shape: a value matching a known secret pattern. The message never echoes it. Do not
   publish that run until you know where the value came from.
 
-Other rules: the output dir (default `reports/<benchmark_run_id>`) must be empty; use
+Other rules: the output dir (default `<results>/<benchmark_run_id>/bundle`) must be empty; use
 `--withhold <scenario-id>` to keep a scenario that cites a still-unpatched issue out of the bundle
 (ADR-0014). The gate is a heuristic, not a proof of absence; read the bundle before you push it.
 The source run dir is never modified. Full walkthrough: [publishing.md](publishing.md).

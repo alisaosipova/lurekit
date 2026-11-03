@@ -43,7 +43,9 @@ Option 3.
 `lurekit publish <runDir> [--out <dir>] [--allow-host <host>]... [--withhold <scenario-id>]... [--exclude <scenario-id>]... [--redact-home]`
 
 - Default output dir: `reports/<benchmark_run_id>` (relative to the cwd). A non-empty output
-  dir is refused, so stale unscanned files cannot ride along.
+  dir is refused, so stale unscanned files cannot ride along. Superseded by the ADR-0022
+  amendment (block 5): the default is now `<results>/<benchmark_run_id>/bundle`; the
+  repository's `reports/` bundles pass `--out reports/<id>`.
 - Bundle contents, and nothing else:
   - `manifest.json` (byte copy, except for operator MCP server names and `--redact-home`
     replacements);

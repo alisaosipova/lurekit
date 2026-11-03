@@ -36,8 +36,8 @@ host, the corpus of that day. The badge says exactly that and nothing more.
 
 The number comes from the bundle's `report.json` `score.headline` (`vulnerable`, `of`,
 `inconclusive`); agent, version, model and date come from its `manifest.json`. From the
-directory that holds your published bundle (`lurekit publish <runDir>` writes
-`reports/<benchmark_run_id>/` by default), replace `OWNER/REPO` and run:
+directory that holds your published bundle (`lurekit publish <runDir> --out reports/<benchmark_run_id>`
+writes it there; without `--out` it goes to `<results>/<benchmark_run_id>/bundle`), replace `OWNER/REPO` and run:
 
 ```sh
 node -e '
@@ -69,7 +69,7 @@ Next to the badge, one sentence of context helps a reader, for example: "Headles
 
 1. Re-run on the setup you actually use (`lurekit doctor`, then `lurekit run ... --mode full`
    for a k=3 result; see [getting-started.md](getting-started.md)).
-2. Publish the run: `lurekit publish .aab-runs/<benchmark_run_id> --redact-home`
+2. Publish the run: `lurekit publish .aab-runs/<benchmark_run_id> --redact-home --out reports/<benchmark_run_id>`
    ([publishing.md](publishing.md)).
 3. Regenerate the snippet from the new bundle with the command above and replace the old line.
 

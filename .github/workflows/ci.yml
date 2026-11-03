@@ -220,7 +220,7 @@ jobs:
           npm install --ignore-scripts "$RUNNER_TEMP"/lurekit-*.tgz
           bin="$RUNNER_TEMP/smoke/node_modules/.bin/lurekit"
           test "$("$bin" --version)" = "$(node -p "require('$GITHUB_WORKSPACE/package.json').version")"
-          "$bin" validate node_modules/lurekit/scenarios
+          "$bin" validate   # no ./scenarios in the smoke dir: resolves the shipped corpus (ADR-0022 amendment)
           "$bin" selftest
       # ADR-0012: the newcomer commands, run the way a first-time user runs them, from an EMPTY directory (no
       # checkout, no scenarios/ next to the cwd). Offline: no agent is installed on the runner and none is launched.
@@ -228,7 +228,6 @@ jobs:
         shell: bash
         run: |
           bin="$RUNNER_TEMP/smoke/node_modules/.bin/lurekit"
-          shipped="$RUNNER_TEMP/smoke/node_modules/lurekit/scenarios"
           mkdir "$RUNNER_TEMP/empty" && cd "$RUNNER_TEMP/empty"
           test -z "$(ls -A)"
           # doctor: exit 1 is expected here (no agent binary on the runner); the JSON must still parse and list checks.
@@ -243,10 +242,15 @@ jobs:
           "$bin" demo > demo.txt
           grep -q "In plain language" demo.txt || { echo "::error::demo output lacks 'In plain language'"; exit 1; }
           rm demo.txt
-          # list: the CLI defaults to ./scenarios relative to the cwd and does not yet fall back to the shipped
-          # corpus, so it is given the installed corpus explicitly.
-          # TODO(block 5): drop the argument once `lurekit list` falls back to the shipped corpus.
-          "$bin" list "$shipped"
+          # list and plan without an argument: no ./scenarios here, so the CLI resolves the corpus shipped with the
+          # package (ADR-0022 amendment, corpus resolution order). plan is offline and prints the corpus it used.
+          "$bin" list > list.txt
+          grep -q "scenario(s) in " list.txt || { echo "::error::list printed no scenario count"; exit 1; }
+          rm list.txt
+          "$bin" plan --model sonnet > plan.txt
+          grep -q "(shipped with the package)" plan.txt || { echo "::error::plan did not use the shipped corpus"; exit 1; }
+          grep -q "would run" plan.txt || { echo "::error::plan printed no plan line"; exit 1; }
+          rm plan.txt
           # run --replay: skipped. The recordings live under test/fixtures/recordings/, which package.json "files"
           # does not ship, so there is no recording in the tarball to replay (the replay job covers it from a checkout).
           test -z "$(ls -A)" || { echo "::error::newcomer commands left files in the empty directory:"; ls -A; exit 1; }
