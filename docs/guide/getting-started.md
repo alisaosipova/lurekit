@@ -83,6 +83,26 @@ LureKit records environment variable *names* in warnings when relevant, never th
 
 Start here. None of these launches an agent.
 
+### doctor -- check this host before a live run
+
+```bash
+lurekit doctor --agent claude-code --model sonnet
+```
+
+One line per check (`ok`, `warn` or `fail`), with a `fix:` command under each warn/fail line:
+Node version, the agent binary (real path, version, and whether it auto-updates in place), the
+agent's login state (no-spend checks only: `claude auth status`, `agent status`, or whether the
+API-key variable is set; key values are never read), the model id, the isolation label, the
+corpus, the detector self-tests, and an estimated cost:
+
+```
+ok    cost        about 1.52 USD for smoke (k=1), about 4.57 USD for full (k=3) on sonnet, from a published run; other models differ (...)
+```
+
+Exit 1 when any line is `fail`. `--format json` prints the same checks for scripts. If your
+Claude Code is an npm-global install, doctor warns that it replaces itself in place when it
+auto-updates and prints the pinned `npm install --prefix` recipe to use for a batch.
+
 ### validate -- schema-validate the scenarios
 
 ```bash
@@ -176,19 +196,31 @@ lurekit run \
   --format markdown --output report.md
 ```
 
+Before it launches anything, `run` prints the plan (scenarios kept, k, estimated cost, budget
+cap, and the binary and login lines from `doctor`) and asks `Launch? [y/N]`. Only `y` launches.
+In a script or CI job (stdin not a terminal) it refuses unless you pass `--yes`, so a pipeline
+never spends by accident. `--replay` runs never ask: they cost nothing.
+
 - `--model` is required and is pinned into the manifest.
 - `--agent-version` is optional but recommended; it records the version you believe you are
   testing and warns on drift. Default is `unpinned`.
 - `--budget <usd>` bounds the run's spend.
 - `--mode smoke` (the default) runs each kept scenario once (`k=1`); `--mode full` runs
-  `k=3`. Override with `--k <n>`.
+  `k=3` (about three times the cost, and it asks too). Override with `--k <n>`.
+- `--yes` skips the confirmation prompt.
 
 LureKit prints progress to stderr and the report to stdout (or to `--output`):
 
 ```
-running 52 scenario(s) against claude-code (model=claude-sonnet-4-5, k=1, mode=smoke)
+running 25 scenario(s) against claude-code (model=claude-sonnet-4-5, k=1, mode=smoke)
 results under .aab-runs/aab-<timestamp>-<id>
+[1/25] AAB-001  Pre-trust MCP start from project files (CVE-2025-59536)
+...
 ```
+
+If repetitions fail for a setup reason (binary, login, network, model, budget), a
+`what went wrong:` block after the report names each one with the recorded warning, the evidence
+file and the next command; a run that measured nothing for such a reason exits 1.
 
 ### Where results land
 

@@ -14,12 +14,22 @@
 # =============================================================================
 set -eu
 
+# --- Check the host first (offline, no spend) -------------------------------
+# doctor prints ok/warn/fail per check (Node, binary path and version, auto-update,
+# login state, corpus, detector self-tests) with a fix command, and the estimated
+# cost of smoke and full runs. Exit 1 on any fail line.
+#
+#   node dist/cli.js doctor --agent claude-code --model "$MODEL"
+
 # --- Pin the exact agent binary ---------------------------------------------
 # AAB_CLAUDE_BIN tells the claude-code adapter which executable to launch, so the
 # run records a known, reproducible binary instead of whatever is first on PATH.
-# Use an absolute path to the specific version you want to measure.
+# Use an absolute path to the specific version you want to measure. An npm-global
+# install replaces itself in place when it auto-updates (doctor warns about it), so
+# use a separate, version-pinned install for a batch:
 #
-#   export AAB_CLAUDE_BIN="/opt/claude-code/2.1.316/bin/claude"
+#   npm install --prefix .aab-runs/_bin/claude-2.1.317 @anthropic-ai/claude-code@2.1.317
+#   export AAB_CLAUDE_BIN="$PWD/.aab-runs/_bin/claude-2.1.317/node_modules/.bin/claude"
 
 # --- Pin the model and the reported agent version ---------------------------
 # --model is required (it is written into the manifest). --agent-version should
@@ -27,6 +37,12 @@ set -eu
 #
 #   MODEL="claude-sonnet-4-6"
 #   AGENT_VERSION="2.1.316"
+
+# --- Confirmation -----------------------------------------------------------
+# A live run prints its plan (scenarios, k, estimated cost, budget cap) and asks
+# "Launch? [y/N]" on a terminal. Run this script from a terminal and answer y, or
+# add --yes to each run below for an unattended run: without a terminal and without
+# --yes, lurekit refuses to launch (exit 1).
 
 # --- Keep it cheap and small -------------------------------------------------
 # --mode smoke + --k 1 is one repetition per scenario. --budget caps total spend

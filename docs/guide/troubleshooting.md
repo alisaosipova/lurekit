@@ -9,6 +9,7 @@ Related guides: [getting-started.md](getting-started.md), [cli-reference.md](cli
 
 ## Contents
 
+- [My first live run failed or refused to start](#my-first-live-run-failed-or-refused-to-start)
 - [The agent binary vanished in the middle of a batch](#the-agent-binary-vanished-in-the-middle-of-a-batch)
 - [Can I run on a subscription instead of an API key?](#can-i-run-on-a-subscription-instead-of-an-api-key)
 - [Why is a verdict inconclusive?](#why-is-a-verdict-inconclusive)
@@ -23,6 +24,29 @@ Related guides: [getting-started.md](getting-started.md), [cli-reference.md](cli
 - [Where do I report a vulnerability?](#where-do-i-report-a-vulnerability)
 
 ---
+
+## My first live run failed or refused to start
+
+Run `lurekit doctor --agent <id> --model <id>` first: it checks Node, the agent binary, the
+login, the corpus and the detectors without spending anything, and prints a fix command under
+each problem. Then match what `run` printed (ADR-0022):
+
+| `run` printed | What it means | Next |
+|---------------|---------------|------|
+| `refusing to launch: ... stdin is not a terminal` | a live run needs a yes; there is no terminal to ask | add `--yes` (or run it from a terminal) |
+| `not launched: nothing was run or spent.` | you answered something other than `y` | re-run and answer `y` |
+| `refusing to launch: <agent> binary "<name>" not found on PATH` | the adapter cannot find the agent | install it or `export AAB_*_BIN=<absolute path>`; the line prints the command |
+| `refusing to launch: AAB_*_BIN=<path> does not point to an executable file` | the override is wrong | fix the path or `unset` the variable |
+| `refusing to run: scenario directory "<dir>" does not exist` | wrong positional | pass a scenario directory; the message names the shipped one |
+| `refusing to run: cannot write results under <dir>` | `--results` is not writable | `--results ./lurekit-runs` |
+| `refusing to run: openhands: headless mode always runs always-approve ...` | OpenHands headless cannot ask before tool calls | add `--permission-mode always-approve`, inside your own container or VM |
+| `what went wrong:` ... `is not authenticated for this run` | the agent ran but was not logged in | the `next:` line: `claude auth login`, `agent login`, `export CODEX_API_KEY=...` or `export LLM_API_KEY=...` |
+| `what went wrong:` ... `could not reach its model API` | network or DNS failure | check the network or proxy the agent uses |
+| `what went wrong:` ... `not run: the next repetition could have exceeded --budget` | the budget cap stopped the run | raise `--budget` as the `next:` line suggests |
+
+A run that measured nothing because of such a failure exits 1. A Codex CLI run with no network
+retries forever ("Reconnecting... waiting for network") and lurekit has no per-repetition timeout
+yet: the `[i/N]` progress line shows which scenario is stuck; press Ctrl-C.
 
 ## The agent binary vanished in the middle of a batch
 

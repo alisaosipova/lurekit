@@ -29,6 +29,9 @@ The design is split across several files so each piece stays small and reviewabl
 - `adr-0021-demo-and-prescriptive-report.md` - `lurekit demo` (a published run shipped with the
   package, rendered offline) and the plain-language / "What to change" report layers.
   **Proposed, implemented; awaiting approval.**
+- `adr-0022-doctor-smoke-default-and-error-paths.md` - `lurekit doctor` (no-spend host checks and a
+  cost estimate), the live-run plan and "Launch? [y/N]" confirmation (`--yes`), and newcomer error
+  messages that name the next command. **Proposed, implemented; awaiting approval.**
 - `evidence-spec.md` — the detector/evidence/verdict/adapter/reporting contract in detail
   (§1 detectors, §2 evidence+manifest, §3 verdicts, §4 adapter+observation, §5 redaction,
   §6 reporting). The ADRs below reference it rather than restating it.
@@ -146,7 +149,8 @@ recorded as data, never consulted in logic) so the manifest fully determines the
 ## ADR-0006: Cost control
 
 **Status:** accepted (2026-11-01), partially implemented (budget caps in `src/runner/`;
-`$/full run` estimate is a Week-5 deliverable).
+`$/full run` estimate is a Week-5 deliverable; a per-agent estimate from the shipped published
+run is printed by `doctor` and before every live `run`, ADR-0022).
 
 ### Context
 Live-agent runs cost money and time. CI must be cheap enough to run per-PR; the full comparison
@@ -474,3 +478,4 @@ plumbing, keep decisions in ADRs; codified in `CLAUDE.md`. This document was ass
 | 0019 | OpenHands adapter (`adr-0019-openhands-adapter.md`) | proposed, implemented (stream layer, transcript cross-check); awaiting approval |
 | 0020 | Profile settings forwarding (`adr-0020-profile-settings-forwarding.md`) | proposed, implemented; awaiting approval |
 | 0021 | Demo command and prescriptive report layer (`adr-0021-demo-and-prescriptive-report.md`) | proposed, implemented; awaiting approval |
+| 0022 | Doctor, smoke default and newcomer error paths (`adr-0022-doctor-smoke-default-and-error-paths.md`) | proposed, implemented; awaiting approval |

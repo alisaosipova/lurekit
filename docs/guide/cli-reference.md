@@ -23,7 +23,8 @@ as a flag after a command (`lurekit run --help`).
 ## Subcommands
 
 Only `run` launches a real agent (cost / auth), and only unless it is given `--replay`.
-Everything else is fully offline: no agent, no network, no spend.
+Everything else is fully offline: no agent, no network, no spend. `doctor` only asks the local agent binary for
+its version and login status (no session, no spend).
 
 ### run
 
@@ -34,8 +35,35 @@ lurekit run [dir] --model <id> [options]
 Run the benchmark against a live agent, write a run directory and a manifest, and print a
 report. `[dir]` is the scenario directory (default `./scenarios`). `--model` is required.
 With `--replay <dir>` it re-drives a recorded Claude Code run offline instead of launching an
-agent. Accepts all profile, config, output and replay flags below. Exit 0 on completion; 1 if
-any scenario in `[dir]` fails to load (the run is refused) or a flag/value is invalid.
+agent. Accepts all profile, config, output and replay flags below.
+
+Without `--mode` a run is smoke (`k=1`). Before a live run (no `--replay`) launches anything it
+prints its plan to stderr (ADR-0022):
+
+```
+plan: 25 scenario(s) will run, 27 skipped; k=1 (smoke), 25 launch(es) of claude-code (model=sonnet)
+estimated cost: about 1.52 USD (25 scenario(s) x k=1 x 0.061 USD) on sonnet, from a published run; other models differ
+budget cap: none (add --budget <usd> to stop before a repetition that could exceed it)
+ok    binary      claude-code: /path/to/claude (via PATH "claude"), version 2.1.317 (Claude Code)
+ok    auth        logged in (claude auth status: authMethod=claude.ai); ...
+Launch? [y/N]
+```
+
+Only `y` or `yes` launches. `--yes` launches without the prompt. When stdin is not a terminal and
+`--yes` is absent the run is refused (exit 1) with a message naming `--yes`, so CI never launches
+a live agent by accident. `--mode full` (k=3) asks the same way; `--replay` never asks (zero
+cost). The estimate comes from the published run shipped as the demo (claude-code on sonnet
+only); other agents print "no published run yet, no estimate". A binary that cannot be found is
+refused before the prompt with the install or `AAB_*_BIN` fix.
+
+While it runs, `run` prints `[i/N] <scenario id> <name>` per scenario. After the report it prints
+a `what went wrong:` block for repetitions that did not measure anything (binary, auth, network,
+model, budget, adapter), each with the recorded warning, the evidence path and the next command.
+
+Exit 0 on completion; 1 if `[dir]` is missing, holds no scenarios or a scenario fails to load,
+if `--results` cannot be written, if the launch is declined or refused, if nothing was measured
+because of a setup failure (binary, auth, network, model, adapter), or if a flag/value is
+invalid.
 
 ### validate
 
@@ -99,6 +127,37 @@ Exit 0 on a clean gate + successful write; 1 if the manifest is missing, a `--wi
 `--exclude` value is not a scenario id, an id is given to both flags, the gate fails, or the write fails (nothing is written on any failure).
 Offline.
 
+### doctor
+
+```
+lurekit doctor [dir] [--agent <id>] [--model <id>] [--format text|json]
+```
+
+Check a host before the first live run (ADR-0022). One line per check, `ok` / `warn` / `fail`,
+and a `fix:` command under each warn/fail line:
+
+- `node`: Node >= 20.19.
+- `binary`: the agent binary as the adapter resolves it (`AAB_*_BIN`, else PATH), its real path
+  and `--version`.
+- `update`: whether the install updates itself in place (Claude Code npm-global: warn, with the
+  pinned `npm install --prefix` recipe).
+- `auth`: no-spend checks only. claude-code: `claude auth status --json` (only `loggedIn` and
+  `authMethod` are kept; asked only when `--version` reports Claude Code >= 2.1.317, else
+  `not checked`); cursor-cli: `CURSOR_API_KEY` present, else `agent status --format json`;
+  codex-cli: `CODEX_API_KEY` present (the run-scoped `CODEX_HOME` hides `codex login`);
+  openhands: `LLM_API_KEY` present. Key values are never read.
+- `model`: what the agent does with `--model` (no adapter validates it offline).
+- `permission` (openhands only): headless needs `--permission-mode always-approve`.
+- `isolation`: `--isolation` is an evidence label in the manifest; no container runtime is
+  started, required or checked.
+- `corpus`: `[dir]` (default: the corpus shipped with lurekit) validates, and how many scenarios
+  would run for the agent; `selftest`: every detector's positive/negative control passes.
+- `cost`: "about X USD for smoke (k=1), about Y USD for full (k=3) on sonnet, from a published
+  run; other models differ" for claude-code; "no published run yet, no estimate" otherwise.
+
+`--format json` prints `{agent, model, checks: [{id, status, summary, fix?}], estimate, fail,
+warn}`. Exit 0 when no line is `fail`, 1 otherwise. Starts no agent session and spends nothing.
+
 ### demo
 
 ```
@@ -146,6 +205,7 @@ the body would be digested into evidence yet never reach the agent.
 | `--isolation <m>` | string | `container` | `container`, `container+netns` |
 | `--budget <usd>` | number | *(none)* | a number |
 | `--results <dir>` | string | `.aab-runs` | a path |
+| `--yes` | boolean | off | `run` only: launch a live run without the `Launch? [y/N]` prompt (required when stdin is not a terminal) |
 
 ### Output flags (run, report, demo)
 
@@ -218,7 +278,7 @@ non-claude agent, and `--replay` with a non-claude agent.
 | Code | Meaning |
 |------|---------|
 | `0` | Success. For `validate`/`list`/`selftest` this also means no errors/failures. |
-| `1` | A handled failure or a thrown error: invalid scenarios (`validate`, or `run` refusing to start), a failed detector self-test, a missing `manifest.json` (`report`, `publish`), a publish gate or write failure, a bad `--withhold` or `--exclude`, or any parsing/validation error (unknown flag, `--flag=value`, whitespace token, missing value, missing `--model`, a bad enum value, an agent-flag mismatch, `--replay` on a non-claude agent). |
+| `1` | A handled failure or a thrown error: a `doctor` fail line; a live `run` declined at the prompt, refused without `--yes` off a terminal, refused by the preflight (binary, results dir, openhands permission), or one that measured nothing because of a setup failure; invalid scenarios (`validate`, or `run` refusing to start), a failed detector self-test, a missing `manifest.json` (`report`, `publish`), a publish gate or write failure, a bad `--withhold` or `--exclude`, or any parsing/validation error (unknown flag, `--flag=value`, whitespace token, missing value, missing `--model`, a bad enum value, an agent-flag mismatch, `--replay` on a non-claude agent). |
 | `2` | Unknown command (usage is printed to stderr). |
 
 ## Environment variables

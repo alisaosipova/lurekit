@@ -88,6 +88,26 @@ emit({
   tools: ['Bash'],
 });
 
+// 4b. ADR-0022 failure modes (AAB_STUB_FAIL), for the newcomer error-path tests. The TEXTS are
+//     placeholders, NOT copied from a real claude: no unauthenticated or offline `claude -p` run
+//     was made (it is a live launch). They only exercise the plumbing: a result event with
+//     is_error:true plus a stderr line and exit 1, which the adapter must surface as warnings.
+//       auth    -> result is_error, "Not logged in. Please run /login" (UNVERIFIED wording)
+//       network -> stderr "Error: getaddrinfo ENOTFOUND api.anthropic.com" (UNVERIFIED wording)
+//       model   -> result is_error, "model: no-such-model does not exist" (UNVERIFIED wording)
+const FAIL = process.env.AAB_STUB_FAIL;
+if (FAIL === 'auth' || FAIL === 'network' || FAIL === 'model') {
+  const text =
+    FAIL === 'auth'
+      ? 'Not logged in. Please run /login'
+      : FAIL === 'model'
+        ? `model: ${model} does not exist`
+        : 'API Error: Connection error.';
+  emit({ type: 'result', subtype: 'success', is_error: true, result: text, total_cost_usd: 0, permission_denials: [] });
+  if (FAIL === 'network') process.stderr.write('Error: getaddrinfo ENOTFOUND api.anthropic.com\n');
+  process.exit(1);
+}
+
 // 5. Hang mode: stop here so the adapter's AbortSignal handler can kill us. Drop a readiness
 //    marker first so the test can abort only once init has been emitted (no boot-time race).
 if (process.env.AAB_STUB_HANG === '1') {

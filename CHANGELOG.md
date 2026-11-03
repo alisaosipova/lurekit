@@ -19,6 +19,20 @@ No release is cut without changes.
 ## [Unreleased]
 
 ### Added
+- `lurekit doctor [dir] [--agent <id>] [--model <id>] [--format text|json]` (ADR-0022): ok / warn /
+  fail lines with a fix command for Node, the agent binary (real path, version, npm-global
+  auto-update with the pinned `--prefix` recipe), auth via no-spend probes only (`claude auth
+  status --json`, `agent status --format json`, API-key variable presence), model, isolation
+  label, corpus, detector self-tests, and a smoke/full cost estimate from the shipped published
+  run (claude-code on sonnet). Exit 1 on any fail line.
+- `lurekit run` (live) prints its plan (scenarios, k, estimated cost, budget cap, binary and auth
+  lines) and asks `Launch? [y/N]`; `--yes` skips the prompt, and without a terminal it refuses
+  unless `--yes` is given. `--replay` never asks. Progress line per scenario, and a
+  `what went wrong:` block naming the next command for binary / auth / network / model / budget /
+  adapter failures; a run that measured nothing for such a reason exits 1. Missing scenario
+  directories, unwritable `--results` and an openhands profile without `always-approve` are
+  refused before any launch. The Claude Code adapter now records a stderr excerpt on a non-zero
+  exit and the text of an `is_error` result event.
 - `lurekit demo` (ADR-0021): prints the published bare k=3 run `aab-20261103071018-88a78d8f`
   of Claude Code 2.1.317 (shipped as `demo/<id>/manifest.json` and `report.json`, byte-identical
   to `reports/<id>/`) through the same reporter as `report`, with a banner saying it is not your

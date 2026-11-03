@@ -80,7 +80,7 @@ export function parseOpenHandsPermissionMode(mode: string | undefined): { always
   }
   if (!ack) {
     throw new Error(
-      'openhands: headless mode always runs always-approve with no sandbox; the profile must state permission_mode: always-approve to run it',
+      'openhands: headless mode always runs always-approve with no sandbox; the profile must state permission_mode: always-approve to run it (pass --permission-mode always-approve)',
     );
   }
   return { alwaysApprove: true };

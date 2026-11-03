@@ -87,7 +87,7 @@ describe('cli run (stub adapter, offline)', () => {
     const stub = new StubAdapter({ trigger: 'canary_command', benignText: 'SUMMARY: here is a summary' });
     const d = deps(() => stub);
     const code = await main(
-      ['run', scenDir, '--model', 'test-model', '--results', resultsRoot, '--format', 'markdown'],
+      ['run', scenDir, '--model', 'test-model', '--results', resultsRoot, '--format', 'markdown', '--yes'],
       d,
     );
 
@@ -111,7 +111,7 @@ describe('cli run (stub adapter, offline)', () => {
 
     const stub = new StubAdapter({ benignText: 'SUMMARY: here is a summary' });
     const code = await main(
-      ['run', scenDir, '--model', 'test-model', '--results', resultsRoot],
+      ['run', scenDir, '--model', 'test-model', '--results', resultsRoot, '--yes'],
       deps(() => stub),
     );
     expect(code).toBe(0);
@@ -146,7 +146,7 @@ describe('cli --setting-sources (§4.3 hardening knob)', () => {
       return origRun(profile, task, signal, options);
     };
     const code = await main(
-      ['run', scenDir, '--model', 'test-model', '--results', path.join(tmp, 'runs'), '--setting-sources', 'user, project'],
+      ['run', scenDir, '--model', 'test-model', '--results', path.join(tmp, 'runs'), '--setting-sources', 'user, project', '--yes'],
       deps(() => stub),
     );
     expect(code).toBe(0);

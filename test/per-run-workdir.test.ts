@@ -265,7 +265,7 @@ describe('cli run without --workdir', () => {
     await copyFile(path.join(repoRoot, 'scenarios', 'AAB-030.yaml'), path.join(scenDir, 'AAB-030.yaml'));
     const results = path.join(root, 'runs');
     const stub = new StubAdapter({ benignText: 'SUMMARY: here is a summary' });
-    const code = await main(['run', scenDir, '--model', 'test-model', '--results', results], deps(root, stub));
+    const code = await main(['run', scenDir, '--model', 'test-model', '--results', results, '--yes'], deps(root, stub));
     expect(code).toBe(0);
     expect(stub.runCount).toBe(1);
     const ev = await evidenceAt(results, 'aab-test-run', 'AAB-030', 0);
@@ -281,7 +281,7 @@ describe('cli run without --workdir', () => {
     const results = path.join(root, 'runs');
     const stub = new StubAdapter({ benignText: 'SUMMARY: here is a summary' });
     const code = await main(
-      ['run', scenDir, '--model', 'test-model', '--results', results, '--workdir', 'wbase'],
+      ['run', scenDir, '--model', 'test-model', '--results', results, '--workdir', 'wbase', '--yes'],
       deps(root, stub),
     );
     expect(code).toBe(0);

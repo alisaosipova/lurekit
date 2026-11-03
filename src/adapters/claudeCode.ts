@@ -36,7 +36,7 @@ import type {
   ToolCall,
   McpServerStatus,
 } from './adapter.js';
-import { inputDigest, normalizeMcpServers, requireWorkdir, strictMcpConfigFor, validateSettingSources } from './adapter.js';
+import { inputDigest, normalizeMcpServers, requireWorkdir, stderrExcerpt, strictMcpConfigFor, validateSettingSources } from './adapter.js';
 import type { AgentId } from '../scenario/types.js';
 
 const STREAM_FILE = 'claude-stream.jsonl';
@@ -47,6 +47,9 @@ const HOOK_SCRIPT = 'aab-hook.cjs';
 export const HOOK_SETTINGS_FILE = 'claude-settings.json';
 /** File the profile's MCP config is written to for `--mcp-config` (evidence-spec §4.3). */
 export const MCP_CONFIG_FILE = 'mcp.json';
+
+/** Bytes of agent stderr kept in memory for the failure excerpt (never written to disk). */
+const STDERR_KEEP_MAX = 64 * 1024;
 
 /** Env var that overrides the `claude` binary path (so tests point at a stub). */
 export const CLAUDE_BIN_ENV = 'AAB_CLAUDE_BIN';
@@ -242,6 +245,7 @@ export class ClaudeCodeAdapter implements Adapter {
     const stdoutChunks: Buffer[] = [];
     let lineBuffer = '';
 
+    let stderrText = '';
     const handleLine = (line: string): void => {
       parseStreamLine(line, performance.now() - perfStart, state);
     };
@@ -278,8 +282,11 @@ export class ClaudeCodeAdapter implements Adapter {
           handleLine(line);
         }
       });
-      // Drain stderr so the pipe never blocks; contents are not evidence.
-      child.stderr.on('data', () => {});
+      // Drain stderr so the pipe never blocks. Contents are not evidence; only a capped,
+      // secret-redacted one-line excerpt becomes a warning on a non-zero exit (ADR-0022).
+      child.stderr.on('data', (buf: Buffer) => {
+        if (stderrText.length < STDERR_KEEP_MAX) stderrText += buf.toString('utf8');
+      });
       child.on('error', (err) => {
         warnings.push(`agent process error (${bin}): ${err.message}`);
         resolve(-1);
@@ -293,6 +300,10 @@ export class ClaudeCodeAdapter implements Adapter {
     });
 
     signal.removeEventListener('abort', onAbort);
+    if (exitCode !== 0) {
+      const excerpt = stderrExcerpt(stderrText);
+      warnings.push(excerpt !== undefined ? `agent exited ${exitCode}; stderr: ${excerpt}` : `agent exited ${exitCode} with an empty stderr`);
+    }
 
     const endedAt = Date.now();
 
@@ -328,6 +339,9 @@ export interface StreamState {
   effectivePermissionMode?: string;
   mcpServers?: McpServerStatus[];
   costUsd?: number;
+  /** ADR-0022: the final result event said is_error:true; a capped one-line excerpt of its
+   *  `result` text (or its subtype), so a failed run says why in evidence warnings. */
+  resultError?: string;
   /** §4.2 "Attempts": entries of the result event's `permission_denials` (last result wins). */
   permissionDenials?: Array<{ id?: string; name?: string; input?: unknown; at: number }>;
   /** §4.2 "Attempts": `tool_result` blocks flagged `is_error: true`, in stream order. */
@@ -388,6 +402,10 @@ export function parseStreamLine(line: string, at: number, state: StreamState): v
     }
   } else if (type === 'result') {
     if (typeof evt.total_cost_usd === 'number') state.costUsd = evt.total_cost_usd;
+    if (evt.is_error === true) {
+      const text = typeof evt.result === 'string' && evt.result.trim() !== '' ? evt.result : String(evt.subtype ?? 'no result text');
+      state.resultError = stderrExcerpt(text) ?? 'no result text';
+    }
     // `permission_denials`: [{ tool_name, tool_use_id, tool_input }] — the tool uses the
     // permission gate refused during the run (§4.2 "Attempts").
     if (Array.isArray(evt.permission_denials)) {
@@ -489,7 +507,8 @@ export function assembleObservation(
   meta: ObservationMeta,
 ): RunObservation {
   const hook = hookCallsFromEntries(hookEntries, meta.startedAt);
-  const warnings = meta.warnings ?? [];
+  const warnings = [...(meta.warnings ?? [])];
+  if (state.resultError !== undefined) warnings.push(`result event reports is_error=true: ${state.resultError}`);
   const toolCalls = mergeById(state.calls, hook.calls);
   return {
     transcript_path: hook.transcriptPath,
