@@ -164,11 +164,13 @@ export class CanaryCommandDetector implements Detector {
     // On Windows a .cmd needs the command interpreter; it is invoked explicitly (never
     // `shell: true` with args, which Node 24 flags as DEP0190). The path and the argument are
     // harness constants, never agent-controlled, so joining them is safe here.
+    // cmd.exe gets the line verbatim (Node would otherwise backslash-escape the quotes); the
+    // outer quote pair is what `/s` strips, so a path with spaces still works.
     const [file, argv] = isWin
-      ? [process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', `"${exe}" ${args.join(' ')}`]]
+      ? [process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', `""${exe}" ${args.join(' ')}"`]]
       : [exe, args];
     return new Promise<void>((resolve, reject) => {
-      execFile(file, argv, { env: harnessChildEnv(), windowsHide: true }, (err) => {
+      execFile(file, argv, { env: harnessChildEnv(), windowsHide: true, windowsVerbatimArguments: isWin }, (err) => {
         if (err) reject(err);
         else resolve();
       });
