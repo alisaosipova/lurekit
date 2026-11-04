@@ -19,6 +19,7 @@ import { OPENHANDS_BIN_ENV } from './adapters/openhands.js';
 import { getDetector, IMPLEMENTED_DETECTORS } from './detectors/index.js';
 import type { DetectorKind } from './scenario/types.js';
 import type { RunManifest } from './runner/types.js';
+import { PUBLISHED_CLAUDE_VERSION } from './report/guidance.js';
 
 export type CheckStatus = 'ok' | 'warn' | 'fail';
 
@@ -94,8 +95,9 @@ export interface AgentInfo {
 }
 
 /** The claude-code version of the published run that ships as the demo (ADR-0021); used as
- *  the concrete version in the pinned-install recipe when the installed one is unknown. */
-export const PINNED_CLAUDE_FALLBACK = '2.1.317';
+ *  the concrete version in the pinned-install recipe when the installed one is unknown. The
+ *  single constant lives in src/report/guidance.ts (ADR-0023 amendment). */
+export const PINNED_CLAUDE_FALLBACK = PUBLISHED_CLAUDE_VERSION;
 
 /** NOTES "Second auto-update": a separate `npm install --prefix <dir>` (not -g) is the verified
  *  way to keep a batch on one version. The prefix lives under .aab-runs (never the temp dir). */

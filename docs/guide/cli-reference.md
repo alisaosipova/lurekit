@@ -57,12 +57,13 @@ agent. Accepts all profile, config, output and replay flags below.
 Without `--mode` a run is smoke (`k=1`). Before a live run (no `--replay`) launches anything it
 prints its plan to stderr (ADR-0022):
 
+<!-- n-line:run_plan,run_cost -->
 ```
 corpus: <installed package>/scenarios (shipped with the package)
 plan: 25 scenario(s) will run, 27 skipped; k=1 (smoke), 25 launch(es) of claude-code (model=sonnet)
 estimated cost: about 1.52 USD (25 scenario(s) x k=1 x 0.061 USD) on sonnet, from a published run; other models differ
 budget cap: none (add --budget <usd> to stop before a repetition that could exceed it)
-ok    binary      claude-code: /path/to/claude (via PATH "claude"), version 2.1.317 (Claude Code)
+ok    binary      claude-code: /path/to/claude (via PATH "claude"), version <x.y.z> (Claude Code)
 ok    auth        logged in (claude auth status: authMethod=claude.ai); ...
 Launch? [y/N]
 ```
@@ -178,13 +179,13 @@ lurekit doctor [dir] [--agent <id>] [--model <id>] [--format text|json]
 Check a host before the first live run (ADR-0022). One line per check, `ok` / `warn` / `fail`,
 and a `fix:` command under each warn/fail line:
 
-- `node`: Node >= 20.19.
+- `node`: Node >= <!-- n:versions.node_min -->20.19<!-- /n -->.
 - `binary`: the agent binary as the adapter resolves it (`AAB_*_BIN`, else PATH), its real path
   and `--version`.
 - `update`: whether the install updates itself in place (Claude Code npm-global: warn, with the
   pinned `npm install --prefix` recipe).
 - `auth`: no-spend checks only. claude-code: `claude auth status --json` (only `loggedIn` and
-  `authMethod` are kept; asked only when `--version` reports Claude Code >= 2.1.317, else
+  `authMethod` are kept; asked only when `--version` reports Claude Code >= <!-- n:versions.claude_auth_status_min -->2.1.317<!-- /n -->, else
   `not checked`); cursor-cli: `CURSOR_API_KEY` present, else `agent status --format json`;
   codex-cli: `CODEX_API_KEY` present (the run-scoped `CODEX_HOME` hides `codex login`);
   openhands: `LLM_API_KEY` present. Key values are never read. claude-code logged out while
@@ -214,7 +215,7 @@ warn}`. Exit 0 when no line is `fail`, 1 otherwise. Starts no agent session and 
 lurekit demo [--format <fmt>] [--output <file>]
 ```
 
-Print a published run that ships with the package (`demo/aab-20261103071018-88a78d8f/`:
+Print a published run that ships with the package (`demo/<run id>/`, run <!-- n:demo.run_id -->aab-20261103071018-88a78d8f<!-- /n -->:
 `manifest.json` and `report.json`, byte-identical to the bundle under `reports/`), rendered by
 the same reporter as `report`, so you can see a real report with no agent, no auth and no spend
 (ADR-0021). `--format` defaults to `markdown`; the Markdown output starts with a banner naming

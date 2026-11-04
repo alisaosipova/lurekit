@@ -6,7 +6,7 @@ permission mode, settings, MCP servers, hooks, skills); it replays scenarios der
 public security disclosures against that setup, using inert fixtures and out-of-band
 detectors, and reports "vulnerable to N of M scenarios" with per-scenario evidence.
 
-This guide walks the first offline checks, a first live run, and the offline workflows
+This guide walks the first offline checks, the demo, a first live run, and the offline workflows
 (report, publish, record-and-replay, profiles, other agents). For an exhaustive catalogue of
 subcommands, flags, exit codes, environment variables and the run-directory layout, see the
 [CLI reference](cli-reference.md).
@@ -57,7 +57,7 @@ checkout, substitute `node dist/cli.js <command>`.
 
 ## Prerequisites
 
-- **Node.js 20.19 or newer.** Check with `node --version`.
+- **Node.js <!-- n:versions.node_min -->20.19<!-- /n --> or newer.** Check with `node --version`.
 - **A supported coding agent on your `PATH`**, but only for a live `run`. Every other
   subcommand (`validate`, `list`, `selftest`, `plan`, `report`, `publish`, and `run --replay`)
   is fully offline and needs no agent, no network and no spend. The adapters look for these
@@ -101,8 +101,9 @@ agent's login state (no-spend checks only: `claude auth status`, `agent status`,
 API-key variable is set; key values are never read), the model id, the isolation label, the
 corpus, the detector self-tests, and an estimated cost:
 
+<!-- n-line:doctor_cost -->
 ```
-ok    cost        about 1.52 USD for smoke (k=1), about 4.57 USD for full (k=3) on sonnet, from a published run; other models differ (...)
+ok    cost        about 1.52 USD for smoke (k=1), about 4.57 USD for full (k=3) on sonnet, from a published run; other models differ (25 scenario(s) x 0.061 USD per scenario-repetition in aab-20261103071018-88a78d8f, the agent's client-side estimate)
 ```
 
 Exit 1 when any line is `fail`. `--format json` prints the same checks for scripts. If your
@@ -115,6 +116,7 @@ auto-updates and prints the pinned `npm install --prefix` recipe to use for a ba
 lurekit validate
 ```
 
+<!-- n-line:validate -->
 ```
 OK    AAB-001  Pre-trust MCP start from project files (CVE-2025-59536)
 ...
@@ -156,6 +158,7 @@ launching anything. `--model` is required, because the model is pinned into ever
 lurekit plan --model claude-opus-4-1
 ```
 
+<!-- n-line:plan_claude -->
 ```
 corpus: <installed package>/scenarios (shipped with the package)
 KEEP  AAB-001  canary_mcp_tool  Pre-trust MCP start from project files (CVE-2025-59536)
@@ -163,7 +166,7 @@ KEEP  AAB-002  canary_command  Hooks run after an ambiguous trust prompt (GHSA-p
 ...
 SKIP  AAB-055  not_runnable: scenario is marked runnable:false
 
-plan: 25 would run, 23 skipped (profile agent=claude-code, model=claude-opus-4-1)
+plan: 25 would run, 27 skipped (profile agent=claude-code, model=claude-opus-4-1)
 ```
 
 Change `--agent` to see a different agent's selection; scenarios whose `applies_to` excludes
@@ -173,8 +176,9 @@ the agent are skipped as `not_applicable`:
 lurekit plan --model gpt-5-codex --agent codex-cli
 ```
 
+<!-- n-line:plan_codex -->
 ```
-plan: 1 would run, 47 skipped (profile agent=codex-cli, model=gpt-5-codex)
+plan: 2 would run, 50 skipped (profile agent=codex-cli, model=gpt-5-codex)
 ```
 
 ### list -- the full catalogue
@@ -183,11 +187,39 @@ plan: 1 would run, 47 skipped (profile agent=codex-cli, model=gpt-5-codex)
 lurekit list
 ```
 
+<!-- n-line:list -->
 ```
 AAB-001  runnable=yes  detector=canary_mcp_tool  applies=claude-code  Pre-trust MCP start from project files (CVE-2025-59536)
 ...
 52 scenario(s) in scenarios
 ```
+
+## See a real result first: the demo
+
+Before you spend anything, look at a published run through the same reporter a real run uses.
+`demo` is offline: no agent, no auth, no cost.
+
+```bash
+lurekit demo
+```
+
+It prints a short banner saying this is a published run and not your setup, then the report of
+the published bare Claude Code run `<!-- n:demo.run_id -->aab-20261103071018-88a78d8f<!-- /n -->` (<!-- n:demo.scenarios -->21<!-- /n --> scenarios, k=<!-- n:demo.k -->3<!-- /n -->,
+model `<!-- n:demo.model -->sonnet<!-- /n -->`):
+
+<!-- n-line:demo_title,demo_headline,demo_resisted -->
+```
+# LureKit report: claude-code 2.1.317 (Claude Code)
+
+**In plain language:** The lures that worked came in through 1 attack surface: ...
+
+**Vulnerable to 4 of 21 scenarios** (degraded: 0, inconclusive: 0).
+
+Resisted: 12 not attempted, 5 denied (the agent attempted the forbidden action and the setup blocked it).
+```
+
+The report ends with **What to change**: the setting a published run showed resisting the same
+scenarios, and the exact command to re-measure with it. Your own run prints the same sections.
 
 ## A first live run
 
@@ -200,13 +232,34 @@ model and cap the spend:
 lurekit run \
   --agent claude-code \
   --model claude-sonnet-4-5 \
-  --agent-version 2.1.316 \
+  --agent-version <your-version> \
   --budget 5 \
   --format markdown --output report.md
 ```
 
+`--agent-version` is the version `claude --version` prints for the binary you run. The published
+runs used Claude Code <!-- n:versions.claude_published -->2.1.317<!-- /n -->; to measure that same version in a
+batch, install it next to your own (it never auto-updates in place) and point LureKit at it:
+
+<!-- n-line:pin_recipe -->
+```bash
+npm install --prefix .aab-runs/_bin/claude-2.1.317 @anthropic-ai/claude-code@2.1.317 && export AAB_CLAUDE_BIN="$PWD/.aab-runs/_bin/claude-2.1.317/node_modules/.bin/claude"
+```
+
 Before it launches anything, `run` prints the plan (scenarios kept, k, estimated cost, budget
-cap, and the binary and login lines from `doctor`) and asks `Launch? [y/N]`. Only `y` launches.
+cap, and the binary and login lines from `doctor`) and asks `Launch? [y/N]`. Only `y` launches:
+
+<!-- n-line:run_plan,run_cost -->
+```
+corpus: <installed package>/scenarios (shipped with the package)
+plan: 25 scenario(s) will run, 27 skipped; k=1 (smoke), 25 launch(es) of claude-code (model=sonnet)
+estimated cost: about 1.52 USD (25 scenario(s) x k=1 x 0.061 USD) on sonnet, from a published run; other models differ
+budget cap: none (add --budget <usd> to stop before a repetition that could exceed it)
+...
+Launch? [y/N]
+```
+
+(The excerpt is for `--model sonnet` without `--budget`.)
 In a script or CI job (stdin not a terminal) it refuses unless you pass `--yes`, so a pipeline
 never spends by accident. `--replay` runs never ask: they cost nothing.
 
@@ -232,10 +285,12 @@ inside your own container or VM ([roadmap, no-container decision](../plan/roadma
 
 LureKit prints progress to stderr and the report to stdout (or to `--output`):
 
+<!-- n-line:replay_running,progress_first -->
 ```
 corpus: <installed package>/scenarios (shipped with the package)
 running 25 scenario(s) against claude-code (model=claude-sonnet-4-5, k=1, mode=smoke)
 results under .aab-runs/aab-<timestamp>-<id>
+...
 [1/25] AAB-001  Pre-trust MCP start from project files (CVE-2025-59536)
 ...
 ```
@@ -277,19 +332,14 @@ must be absent or empty).
 
 ### Reading the headline
 
-The Markdown report opens with the headline verdict:
+The Markdown report opens with a short plain-language paragraph (which attack surfaces the
+working lures used, how stable the verdicts are, and what inconclusive means when there is any),
+then the headline verdict and the resisted split, as in the demo above.
 
-```
-# LureKit report: claude-code unpinned
-
-**Vulnerable to 0 of 18 scenarios** (degraded: 0, inconclusive: 7).
-
-Resisted: 18 not attempted, 0 denied (the agent attempted the forbidden action and the setup blocked it).
-```
-
-"Vulnerable to N of M" counts the scenarios where a detector observed the forbidden effect.
-`inconclusive` counts runs where the harness could not reach a confident verdict (for example
-a replayed run, see below). The per-scenario table that follows gives each scenario's verdict,
+"Vulnerable to N of M" counts the scenarios where a detector observed the forbidden effect, out
+of the M measured conclusively. `inconclusive` counts scenarios where the harness could not reach
+a confident verdict (for example a replayed run, see below); they are left out of M and never
+counted as passes. The per-scenario table that follows gives each scenario's verdict,
 confidence (`x/k vulnerable`) and disclosure source.
 
 ### Re-rendering a completed run
@@ -302,8 +352,10 @@ lurekit report .aab-runs/<benchmark_run_id> --format sarif --output report.sarif
 ```
 
 `report` defaults to `--format json`; `run` defaults to `--format markdown`. Allowed formats
-are `json`, `markdown` and `sarif`. The SARIF output is a standard 2.1.0 document:
+are `json`, `markdown` and `sarif`. The SARIF output is a standard <!-- n:versions.sarif -->2.1.0<!-- /n --> document (the driver
+version is the LureKit version that made the run):
 
+<!-- n-line:sarif_schema,sarif_version,sarif_tool_version -->
 ```json
 {
   "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
@@ -313,7 +365,7 @@ are `json`, `markdown` and `sarif`. The SARIF output is a standard 2.1.0 documen
       "tool": {
         "driver": {
           "name": "LureKit",
-          "version": "1.0.0",
+          "version": "1.2.0",
 ```
 
 ### Publishing a shareable bundle
@@ -369,9 +421,11 @@ lurekit run \
   --replay test/fixtures/recordings/claude-sample
 ```
 
+<!-- n-line:replay_header,replay_running -->
 ```
+corpus: <installed package>/scenarios (shipped with the package)
 replaying recording test/fixtures/recordings/claude-sample (offline, no live agent)
-running 52 scenario(s) against claude-code (model=claude-sonnet-4-5, k=1, mode=smoke)
+running 25 scenario(s) against claude-code (model=claude-sonnet-4-5, k=1, mode=smoke)
 results under .aab-runs/aab-<timestamp>-<id>
 ```
 
@@ -422,7 +476,7 @@ permission to measure them, see [troubleshooting](troubleshooting.md#all-my-feed
 
 ## Running other agents
 
-Four agent adapters exist. Only `claude-code` is live-validated. `cursor-cli`, `codex-cli` and
+<!-- n:adapters.count -->4<!-- /n --> agent adapters exist. Only `claude-code` is live-validated. `cursor-cli`, `codex-cli` and
 `openhands` are implemented and tested against offline stubs, but not yet live-validated:
 several behaviours are marked UNVERIFIED in their adapters (hooks firing under headless mode,
 version pinning, model echo), and the adapters surface those as run warnings. Treat their live

@@ -979,17 +979,23 @@ export function demoBanner(manifest: RunManifest, scenariosDir = 'scenarios'): s
   const spend = t.spend_usd.toFixed(2);
   const perRep = (t.spend_usd / Math.max(k, 1)).toFixed(2);
   const check = COMMANDS.includes('doctor') ? 'lurekit doctor' : 'lurekit selftest';
-  return (
-    `> **Demo: this is a published LureKit run, not your setup.** It measured ${p.agent} ${p.agent_version} ` +
-    `with model ${p.model} on ${date} (benchmark run ${manifest.benchmark_run_id}, ${scenarios} scenarios, k=${k}, ` +
-    `${manifest.mode} mode); the full public bundle with evidence is ${REPOSITORY_URL}/tree/main/reports/${manifest.benchmark_run_id}. ` +
-    `Only manifest.json and report.json ship with the package, so the per-scenario detector and tool-call ` +
-    `lines (read from evidence files) are not shown here. To evaluate and harden your own setup, run ` +
-    `\`${check}\`, then \`lurekit run ${scenariosDir} --agent ${p.agent} --model <model-id> --agent-version <your-version> --mode smoke\`: ` +
-    `it launches your real, authenticated agent and costs money. This run reported ${spend} USD for ` +
-    `${scenarios} scenarios at k=${k} (the agent's client-side estimate); smoke mode is k=1, so expect roughly ` +
-    `${perRep} USD for the same scenarios (this run's spend divided by k, an estimate).\n\n`
-  );
+  // ADR-0021 amendment: short lines, one fact per line, the next command on its own line.
+  const lines = [
+    '**Demo: this is a published LureKit run, not your setup.**',
+    `It measured ${p.agent} ${p.agent_version} with model ${p.model} on ${date}`,
+    `(benchmark run ${manifest.benchmark_run_id}, ${scenarios} scenarios, k=${k}, ${manifest.mode} mode).`,
+    `Full public bundle with evidence: ${REPOSITORY_URL}/tree/main/reports/${manifest.benchmark_run_id}`,
+    'Only manifest.json and report.json ship with the package, so the per-scenario detector',
+    'and tool-call lines (read from evidence files) are not shown here.',
+    `Cost: this run reported ${spend} USD for ${scenarios} scenarios at k=${k} (the agent's client-side estimate);`,
+    `smoke mode is k=1, so expect roughly ${perRep} USD for the same scenarios (spend divided by k, an estimate).`,
+    '',
+    'To evaluate and harden your own setup (launches your real, authenticated agent and costs money),',
+    `run \`${check}\`, then:`,
+    '',
+    `\`lurekit run ${scenariosDir} --agent ${p.agent} --model <model-id> --agent-version <your-version> --mode smoke\``,
+  ];
+  return lines.map((l) => (l ? `> ${l}` : '>')).join('\n') + '\n\n';
 }
 
 /** demo [--format json|markdown|sarif] [--output <file>] (ADR-0021): offline, zero cost, no auth.

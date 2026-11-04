@@ -1,8 +1,8 @@
 # LureKit
 
-**Headless Claude Code 2.1.317 with default settings took 4 of 21 publicly disclosed lures, all through config files in the project directory; one profile change (`--setting-sources user`) took it to 0 of 21** (bundles [`aab-20261103071018-88a78d8f`](reports/aab-20261103071018-88a78d8f/index.md) and [`aab-20261103062614-49ac1ce7`](reports/aab-20261103062614-49ac1ce7/index.md); model `sonnet`, k=3, majority).
+**Headless Claude Code <!-- n:versions.claude_published -->2.1.317<!-- /n --> with default settings took <!-- n:arms.bare.vulnerable -->4<!-- /n --> of <!-- n:arms.bare.of -->21<!-- /n --> publicly disclosed lures, all through config files in the project directory; one profile change (`--setting-sources user`) took it to <!-- n:arms.hardened.vulnerable -->0<!-- /n --> of <!-- n:arms.hardened.of -->21<!-- /n -->** (bundles [`aab-20261103071018-88a78d8f`](reports/aab-20261103071018-88a78d8f/index.md) and [`aab-20261103062614-49ac1ce7`](reports/aab-20261103062614-49ac1ce7/index.md); model `sonnet`, k=<!-- n:demo.k -->3<!-- /n -->, majority).
 
-![The first lines of the real `lurekit demo` output: a published Claude Code 2.1.317 run, vulnerable to 4 of 21 scenarios, all through settings_hooks_file](docs/assets/demo-output.svg)
+![The first lines of the real `lurekit demo` output: the published bare Claude Code run, its plain-language summary, headline and first table rows](docs/assets/demo-output.svg)
 
 LureKit is a runnable, disclosure-traced security benchmark for deployed coding-agent configurations.
 You point it at the coding-agent setup you actually run (agent, model, permission mode, settings, MCP servers,
@@ -10,7 +10,7 @@ hooks, skills). It replays scenarios derived from public security disclosures ag
 fixtures and out-of-band detectors, and reports **"vulnerable to N of M scenarios"** with per-scenario evidence.
 Every scenario cites a public disclosure (`source.primary_url`, required by the scenario schema): see the
 [scenario catalog](docs/catalog.md). Every published result: [verified against](docs/verified-against.md).
-Output: Markdown, JSON or SARIF. Requires Node 20.19 or newer.
+Output: Markdown, JSON or SARIF. Requires Node <!-- n:versions.node_min -->20.19<!-- /n --> or newer.
 
 ## Who this is for
 
@@ -47,9 +47,9 @@ nothing; a finished run prints the `lurekit report` and `lurekit publish` comman
   corpus and the detector self-tests, and prints a cost estimate. Exit 1 on any fail line.
 - `run` is smoke by default (k=1). It prints its plan (scenarios, k, estimated cost, budget cap) and asks
   `Launch? [y/N]`; `--yes` skips the prompt, and without a terminal it refuses unless `--yes` is given.
-- Cost: about **1.52 USD** for the 25 claude-code scenarios at k=1 on `sonnet`, about **4.57 USD** for
-  `--mode full` (k=3). The basis is the published bare run's spend per scenario-repetition (3.84 USD for 21
-  scenarios x 3 in `aab-20261103071018-88a78d8f`), the agent's client-side estimate; other models differ.
+- Cost: about **<!-- n:demo.claude_smoke_usd -->1.52<!-- /n --> USD** for the <!-- n:plan.claude-code.kept -->25<!-- /n --> claude-code scenarios at k=1 on `sonnet`, about **<!-- n:demo.claude_full_usd -->4.57<!-- /n --> USD** for
+  `--mode full` (k=3). The basis is the published bare run's spend per scenario-repetition (<!-- n:demo.spend_usd -->3.84<!-- /n --> USD for <!-- n:demo.scenarios -->21<!-- /n -->
+  scenarios x <!-- n:demo.k -->3<!-- /n --> in `<!-- n:demo.run_id -->aab-20261103071018-88a78d8f<!-- /n -->`), the agent's client-side estimate; other models differ.
   `--budget` has no default, so set one.
 - `doctor` and the launch confirmation need LureKit 1.2.0 or newer. On 1.1.1 and older, `run` launches
   **without asking**; set `--budget` and check the command before pressing enter.
@@ -173,31 +173,31 @@ reporting. It is not a benchmark result, and every replayed run's `evidence.json
 
 ## Status
 
-LureKit 1.2.0 is the latest npm release (see [CHANGELOG.md](CHANGELOG.md)).
+LureKit <!-- n:versions.tool -->1.2.0<!-- /n --> is the latest npm release (see [CHANGELOG.md](CHANGELOG.md)).
 
-- 52 scenarios catalogued in `scenarios/` ([catalog](docs/catalog.md)); 34 are runnable, and 25 of the
-  runnable ones apply to claude-code (the other 9 apply to other agents via each scenario's `applies_to`:
-  7 cursor-cli, 2 codex-cli, 2 openhands, counting AAB-010 and AAB-028 for both claude-code and cursor-cli).
-  18 browser-track scenarios are catalogued with `runnable: false`, pending a browser adapter; `plan()` skips
+- <!-- n:scenarios.total -->52<!-- /n --> scenarios catalogued in `scenarios/` ([catalog](docs/catalog.md)); <!-- n:scenarios.runnable -->34<!-- /n --> are runnable, and <!-- n:plan.claude-code.kept -->25<!-- /n --> of the
+  runnable ones apply to claude-code (the other <!-- n:scenarios.runnable_other_agents -->9<!-- /n --> apply to other agents via each scenario's `applies_to`:
+  <!-- n:plan.cursor-cli.kept -->7<!-- /n --> cursor-cli, <!-- n:plan.codex-cli.kept -->2<!-- /n --> codex-cli, <!-- n:plan.openhands.kept -->2<!-- /n --> openhands, counting AAB-010 and AAB-028 for both claude-code and cursor-cli).
+  <!-- n:scenarios.not_runnable -->18<!-- /n --> browser-track scenarios are catalogued with `runnable: false`, pending a browser adapter; `plan()` skips
   them as `not_runnable` ([roadmap](docs/plan/roadmap.md#browser-track-catalogued-not-runnable)).
-- 5 detectors: `canary_egress_http`, `canary_file_read`, `canary_command`, `canary_mcp_tool`,
+- <!-- n:detectors.count -->5<!-- /n --> detectors: `canary_egress_http`, `canary_file_read`, `canary_command`, `canary_mcp_tool`,
   `fs_diff`. `canary_egress_dns` is declared in the schema but deferred; scenarios referencing it
   fail loudly.
-- 8 inert fixture kinds: `poisoned_repo`, `mcp_stdio`, `mcp_http`, `skill_package`, `issue_feed`,
+- <!-- n:fixtures.count -->8<!-- /n --> inert fixture kinds: `poisoned_repo`, `mcp_stdio`, `mcp_http`, `skill_package`, `issue_feed`,
   `email_feed`, `web_server`, `local_registry`.
-- 4 agent adapters: `claude-code` (live-validated), `cursor-cli`, `codex-cli` and `openhands`
+- <!-- n:adapters.count -->4<!-- /n --> agent adapters: `claude-code` (live-validated), `cursor-cli`, `codex-cli` and `openhands`
   (implemented and tested against offline stubs; not yet live-validated), plus the `replay`
   adapter (`run --replay`).
-- The offline commands and the test suite run in CI. A live `run` against a real agent is a manual step
+- The offline commands and the test suite (<!-- n:tests -->725<!-- /n --> tests, as `vitest list` counts them) run in CI. A live `run` against a real agent is a manual step
   performed by the maintainer; it is not part of CI.
-- Published runs: ten run bundles under [reports/](reports/), one row each in
+- Published runs: <!-- n:bundles -->10<!-- /n --> run bundles under [reports/](reports/), one row each in
   [docs/verified-against.md](docs/verified-against.md), and the measurement summaries in
   [docs/reports/](docs/reports/README.md) (Claude Code 2.1.316, 2026-11-02; Claude Code 2.1.317, 2026-11-03).
-- Claude Code 2.1.317, model `sonnet`, k=3, `vulnerable_if=majority`
+- Claude Code <!-- n:versions.claude_published -->2.1.317<!-- /n -->, model `sonnet`, k=<!-- n:demo.k -->3<!-- /n -->, `vulnerable_if=majority`
   ([report](docs/reports/2026-11-03-claude-code-2.1.317-k3.md)):
-  bare vulnerable to 4 of 21 (`aab-20261103071018-88a78d8f`), hardened 0 of 21
-  (`aab-20261103062614-49ac1ce7`), bare + netread 4 of 24 (`aab-20261103075404-f5fe15ec`),
-  hardened + netread 0 of 24 (`aab-20261103091409-dff0d34a`); 0 inconclusive in each. The
+  bare vulnerable to <!-- n:arms.bare.vulnerable -->4<!-- /n --> of <!-- n:arms.bare.of -->21<!-- /n --> (`aab-20261103071018-88a78d8f`), hardened <!-- n:arms.hardened.vulnerable -->0<!-- /n --> of <!-- n:arms.hardened.of -->21<!-- /n -->
+  (`aab-20261103062614-49ac1ce7`), bare + netread <!-- n:arms.bare_netread.vulnerable -->4<!-- /n --> of <!-- n:arms.bare_netread.of -->24<!-- /n --> (`aab-20261103075404-f5fe15ec`),
+  hardened + netread <!-- n:arms.hardened_netread.vulnerable -->0<!-- /n --> of <!-- n:arms.hardened_netread.of -->24<!-- /n --> (`aab-20261103091409-dff0d34a`); <!-- n:arms_max_inconclusive -->0<!-- /n --> inconclusive in each. The
   default-permission arms exclude AAB-017, AAB-021 and AAB-056 as not a measurement; AAB-003 is
   withheld (ADR-0014) in all four. One agent, one model, one day, one host; headless only.
 

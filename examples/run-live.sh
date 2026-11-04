@@ -28,7 +28,12 @@ set -eu
 # install replaces itself in place when it auto-updates (doctor warns about it), so
 # use a separate, version-pinned install for a batch:
 #
-#   PIN=2.1.317   # the one place the version is typed
+# The pinned version is not typed here: it is PUBLISHED_CLAUDE_VERSION in
+# src/report/guidance.ts (the Claude Code version of the published runs), read
+# from the build so this script, doctor's recipe and the docs never disagree.
+# To measure another version, set PIN to it instead.
+#
+#   PIN="$(node -e "import('./dist/report/guidance.js').then((m) => console.log(m.PUBLISHED_CLAUDE_VERSION))")"
 #   npm install --prefix ".aab-runs/_bin/claude-$PIN" "@anthropic-ai/claude-code@$PIN"
 #   export AAB_CLAUDE_BIN="$PWD/.aab-runs/_bin/claude-$PIN/node_modules/.bin/claude"
 
@@ -38,7 +43,7 @@ set -eu
 #
 # Read the version from the pinned binary at run time instead of typing a literal,
 # so the recorded --agent-version can never disagree with the binary actually run
-# (`claude --version` prints e.g. "2.1.317 (Claude Code)"; keep the first field):
+# (`claude --version` prints "<x.y.z> (Claude Code)"; keep the first field):
 #
 #   MODEL="claude-sonnet-4-6"
 #   AGENT_VERSION="$("$AAB_CLAUDE_BIN" --version | awk '{print $1}')"

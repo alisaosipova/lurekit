@@ -64,6 +64,7 @@ import { extractHost, findSecretShape } from '../fixtures/fixture.js';
 import { report, buildScore, type EvidenceLookup } from './index.js';
 import type { SurfaceLookup } from './guidance.js';
 import { REPOSITORY_URL } from './sarif.js';
+import { REPORT_REPOSITORY_URLS } from './guidance.js';
 import { PARTIAL_MARKER } from './markdown.js';
 
 /** One file of the bundle: its path relative to the out dir (POSIX separators) and its text. */
@@ -143,10 +144,11 @@ export type PublishPlan =
     }
   | { ok: false; benchmarkRunId?: string; error?: string; leaks: Leak[] };
 
-/** URLs the tool itself emits in every render (SARIF $schema and driver.informationUri). They
- *  are exact strings, not hosts, so allowing them does not open the whole host. */
+/** URLs the tool itself emits (SARIF $schema and driver.informationUri, and the repository file
+ *  URLs a Markdown report cites, ADR-0021 amendment). They are exact strings, not hosts, so
+ *  allowing them does not open the whole host. */
 export const SARIF_SCHEMA_URL = 'https://json.schemastore.org/sarif-2.1.0.json';
-const INTRINSIC_URLS = new Set([SARIF_SCHEMA_URL, REPOSITORY_URL]);
+const INTRINSIC_URLS = new Set([SARIF_SCHEMA_URL, REPOSITORY_URL, ...REPORT_REPOSITORY_URLS]);
 
 /** Ids that become path segments must be plain (no separators, no traversal). */
 const SAFE_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;

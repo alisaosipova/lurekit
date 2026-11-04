@@ -51,7 +51,8 @@
     "catalog": "node scripts/catalog.mjs",
     "matrix": "node scripts/matrix.mjs",
     "assets:demo": "node scripts/render-demo-svg.mjs",
-    "docs:check": "node scripts/catalog.mjs --check && node scripts/matrix.mjs --check && node scripts/render-demo-svg.mjs --check"
+    "docs:numbers": "node scripts/numbers.mjs",
+    "docs:check": "npm run build && node scripts/numbers.mjs --check && node scripts/catalog.mjs --check && node scripts/matrix.mjs --check && node scripts/render-demo-svg.mjs --check"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "~1.32.1",

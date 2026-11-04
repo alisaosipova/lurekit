@@ -77,9 +77,10 @@ retry"):
 1. Install a separate, version-pinned copy of the agent and point `AAB_CLAUDE_BIN` at it:
 
    ```sh
-   npm i --prefix "$HOME/agents/claude-2.1.316" @anthropic-ai/claude-code@2.1.316
-   export AAB_CLAUDE_BIN="$HOME/agents/claude-2.1.316/node_modules/.bin/claude"
-   lurekit run scenarios --model <model-id> --agent-version 2.1.316 --results ./runs
+   PIN="<x.y.z>"   # replace with the version to measure, as `claude --version` prints it
+   npm i --prefix "$HOME/agents/claude-$PIN" "@anthropic-ai/claude-code@$PIN"
+   export AAB_CLAUDE_BIN="$HOME/agents/claude-$PIN/node_modules/.bin/claude"
+   lurekit run scenarios --model <model-id> --agent-version "$PIN" --results ./runs
    ```
 
    Pinning `AAB_CLAUDE_BIN` to the global install alone is not enough: an in-place npm update

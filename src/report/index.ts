@@ -14,13 +14,14 @@ import { buildScore, type Report } from './score.js';
 export { buildScore, REPORT_SCHEMA_VERSION, profileDigest } from './score.js';
 export type { Report, ReportScenario } from './score.js';
 export { renderJson } from './json.js';
-export { renderMarkdown } from './markdown.js';
+export { renderMarkdown, MARKDOWN_SCORING_NOTES } from './markdown.js';
 export type { EvidenceLookup, MarkdownOptions } from './markdown.js';
 export {
   HARDENING_KNOBS, NO_VERIFIED_FIX, UNKNOWN_SURFACE, plainLanguageSummary, whatToChange, vulnerableBySurface,
 } from './guidance.js';
 export type { SurfaceLookup, HardeningKnob, KnobEvidence, ReMeasureContext } from './guidance.js';
 export { leadingSemver, sameAgentVersion, reMeasureCommand, UNKNOWN_CORPUS } from './guidance.js';
+export { PUBLISHED_CLAUDE_VERSION, REPORT_REPOSITORY_URLS, INTERPRETING_RESULTS_URL, repoFileUrl } from './guidance.js';
 export { renderSarif, toSarif, REPOSITORY_URL } from './sarif.js';
 
 export type ReportFormat = 'json' | 'markdown' | 'sarif';

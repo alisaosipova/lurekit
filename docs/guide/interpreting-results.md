@@ -42,11 +42,13 @@ Related guides: [getting-started.md](getting-started.md), [troubleshooting.md](t
 The Markdown report (`run`, `report --format markdown`, `publish`'s `report.md`, `demo`) adds two
 layers around the audit tables (ADR-0021). The tables themselves are unchanged.
 
-- **In plain language** (above the tables): 3-5 sentences computed from the manifest: how many
-  scenarios were vulnerable out of those measured conclusively, the resisted split, the attack
-  surfaces (the scenario's `surface` field) the vulnerable ones came through, how many were
-  inconclusive, and how much to trust the verdicts (`k`, `vulnerable_if`, how many scenarios had
-  the same outcome in every repetition). A replayed run's warning is printed before it.
+- **In plain language** (above the tables): at most three sentences computed from the manifest,
+  saying only what the headline and the Resisted line below it do not: the attack surfaces (the
+  scenario's `surface` field) the vulnerable ones came through, how much to trust the verdicts
+  (`k`, `vulnerable_if`, how many scenarios had the same outcome in every repetition), and, when
+  the run has any, what inconclusive and degraded mean. A replayed run's warning is printed before
+  it. Files that are not in the npm package (the reference profile, this guide) are linked by
+  their repository URL.
 - **What to change** (after the tables), only when a scenario is vulnerable. For each vulnerable
   surface it prints a hardening setting **only if a published run showed that setting resisting
   the same scenarios**, with the bundles cited, what the setting excludes, its trade-off, and a

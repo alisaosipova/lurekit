@@ -40,3 +40,47 @@ no output. Hand-written tables of either would drift from the YAML and the bundl
   same change; a change to the demo bundle or to the Markdown reporter requires
   `npm run build && npm run assets:demo`.
 - The scripts are repository tooling, not shipped in the npm package.
+
+## Amendment (2026-11-03, block 6): numbers emitter, every hand-written count checked
+
+Status: proposed, implemented; awaiting maintainer approval. Before, README.md,
+`docs/guide/getting-started.md` and `docs/guide/cli-reference.md` carried hand-typed counts and
+costs (scenario totals, per-agent plan counts, USD estimates, the pinned Claude Code version, the
+SARIF driver version) that drifted from the code; `docs:check` needed a prior build and checked
+only the three generated files.
+
+- **Emitter.** `scripts/numbers.mjs` (repository tooling, not shipped) prints one JSON object of
+  facts computed from the tree: scenario counts from the loader (total, runnable, not runnable,
+  runnable but not for claude-code); per-agent `kept`/`skipped` from the real `lurekit plan` of
+  the built CLI (`dist/cli.js` `main()`, same plan logic as a user's run); the test count; the
+  adapters (`SUPPORTED_AGENTS`), implemented and deferred detectors (`IMPLEMENTED_DETECTORS`
+  against the schema enum) and fixture kinds (`IMPLEMENTED_FIXTURES`); versions (package, the
+  pinned Claude Code version, the `claude auth status` minimum, the Node minimum, SARIF); the demo
+  bundle's spend and the doctor cost basis and estimates derived from it (`costBasis`, `usd`);
+  every arm the hardening knob cites, read from its bundle's `report.json`; the number of
+  published bundles; and exact output lines (`plan`, `validate`, `list`, the doctor cost line, the
+  refused live-run preview, a replay of the sample recording, the demo headline, the SARIF
+  header of a fresh run). Scratch for the preview and the replay is `.aab-runs/_numbers`
+  (git-ignored), removed afterwards. No agent is launched (the adapter is a proxy that throws on
+  use), no network.
+- **Test count.** The number of test cases `vitest list --json` collects (after loops and
+  `each` expand): the "Tests" total of `vitest run`, not the number of `it(` call sites.
+- **One pinned version.** `PUBLISHED_CLAUDE_VERSION` in `src/report/guidance.ts` is the only place
+  the Claude Code version is typed. `HARDENING_KNOBS`, doctor's `PINNED_CLAUDE_FALLBACK` (the
+  pinned-install recipe), the docs (checked) and `examples/run-live.sh` (reads it from `dist/` with
+  `node -e`; the check fails if the script types any x.y.z) take it from there; a unit test pins
+  it to the demo manifest.
+- **Markers.** Each quoted number is wrapped as `<!-- n:KEY -->VALUE<!-- /n -->` (KEY a dotted
+  path into the JSON) and must equal the emitted value exactly. Output excerpts in fenced code
+  blocks are preceded by `<!-- n-line:K1,K2 -->`; the next block must contain each emitted line
+  (surrounding spaces trimmed). An unknown key, a drifted value, a missing line, a malformed
+  marker or a checked file with no marker fails `--check`.
+- **Wiring.** `npm run docs:numbers` prints the JSON; `npm run docs:check` builds first, then runs
+  `numbers.mjs --check`, then the three existing `--check` scripts. The CI `docs` job runs
+  `npm run docs:check`; the CI test job builds before `npm test`. `test/numbers.test.ts` tests the
+  marker checker on synthetic text and, when `dist/` is fresh, runs the full check with
+  `--skip-tests` (so the test does not re-collect the suite it is part of; the docs job checks the
+  test count).
+- **Not checked.** Release-history facts ("1.2.0 or newer", "1.1.1 and older"), example outputs of
+  one particular run (e.g. `published 30 file(s)`), and verified-on citations of a past binary
+  (`claude --help` 2.1.316) stay as written; they are history, not counts of the current tree.

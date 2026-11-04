@@ -19,6 +19,24 @@ No release is cut without changes.
 ## [Unreleased]
 
 ### Changed
+- Markdown report (ADR-0021 amendment, block 6): the plain-language paragraph is at most three
+  sentences and says only what the headline does not (attack surfaces, confidence, what
+  inconclusive/degraded mean); the per-vulnerable isolation line no longer prints the marker twice;
+  the scoring-notes line is plain words plus one link to the interpreting-results guide (report.json
+  keeps its `scoring_notes`); files not in the npm package (the hardened reference profile, the
+  guides) are cited by their repository URL, which the publish gate accepts as exact strings. The
+  audit table rows are unchanged.
+- `lurekit demo` banner: short lines, the `lurekit run` command on its own line.
+- Docs numbers (ADR-0023 amendment): `scripts/numbers.mjs` emits the counts, costs and versions the
+  docs quote (`npm run docs:numbers`); README.md, the getting-started guide and the CLI reference
+  mark each one and `npm run docs:check` (now builds first) fails on drift; the CI docs job runs it.
+  The Claude Code version of the published runs is one constant (`PUBLISHED_CLAUDE_VERSION`), reused
+  by doctor's pinned-install recipe and read by `examples/run-live.sh`.
+- Getting started: corrected plan counts (27 skipped for claude-code, codex-cli 2 of 52), the
+  replay header (corpus line, 25 scenarios), the SARIF driver version; a demo step before the first
+  live run; the live run uses `--agent-version <your-version>` plus the pinned-install recipe.
+- Troubleshooting: the version-pinned batch recipe takes the version as a `PIN` placeholder instead
+  of a stale literal.
 - Newcomer path (ADR-0022 amendment, block 5): `run`, `plan`, `validate`, `list` and `doctor`
   resolve the scenario directory the same way: the `[dir]` argument, else `./scenarios` when it
   exists, else the corpus shipped with the package; `plan` and `run` print

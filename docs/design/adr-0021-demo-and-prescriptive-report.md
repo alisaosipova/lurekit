@@ -66,3 +66,45 @@ compared `2.1.317` with `2.1.317 (Claude Code)` as different strings.
   leading `x.y.z` before comparing (`leadingSemver`; a string without one, e.g. `unpinned`, is
   compared as is). The "re-measure before relying on it" version line is printed only when they
   differ.
+
+## Amendment (2026-11-03, block 6): report verbosity and URL policy
+
+Status: proposed, implemented; awaiting maintainer approval. Before, the plain-language paragraph
+repeated the headline and the Resisted line in five long sentences, the per-vulnerable block
+printed `- isolation: partial [isolation: partial]`, the scoring-notes line cited spec sections,
+the What to change evidence line cited a NOTES file, and the report named `profiles/` and
+`docs/guide/` files that are not in the npm package without saying where to find them.
+
+- **Verbosity rule.** The plain-language paragraph says only what the headline and the Resisted
+  line do not: (1) the attack surfaces the working lures used (or that none worked, or that
+  nothing was measured conclusively), (2) the confidence (k, the `vulnerable_if` rule, and for
+  k > 1 how many conclusive scenarios were unanimous; for k = 1 the advice to re-run with --k 3),
+  (3) what inconclusive and degraded mean, only when the run has any. At most three sentences; no
+  count from the headline or the Resisted line is repeated. The "one arm" sentence is dropped.
+- **Isolation line.** The per-vulnerable block prints `- isolation: partial (see the note under the
+  table)`: the `[isolation: partial]` marker stays in the table cell and is explained once, in the
+  note under the table.
+- **Scoring-notes line.** The Markdown report prints `MARKDOWN_SCORING_NOTES`: the same rules in
+  plain words plus one link to the interpreting-results guide. `report.json` keeps its
+  `scoring_notes` string unchanged, so the published `report.json` files and the demo copy stay
+  byte-identical to what `report()` renders.
+- **URL policy for unshipped files.** A Markdown report never names a spec section, a NOTES file
+  or a bare repository path. A file that is not in the npm package (a reference profile, a guide)
+  is cited as a Markdown link with plain link text and its repository URL on the main branch
+  (`repoFileUrl()`: `https://github.com/alisaosipova/lurekit/blob/main/<path>`). The publish
+  redaction gate accepts exactly these URLs (`REPORT_REPOSITORY_URLS`, added to its intrinsic
+  exact-string list next to the repository and SARIF schema URLs), never the whole host. A unit
+  test checks that every such URL is in that list and that its path exists in the repository.
+  This replaces "The reference profile is cited by its repository path and marked as not in the
+  npm package" in the Decision above.
+- **Audit tables.** Unchanged. The table rows, the headline, the Resisted line and the
+  per-vulnerable source/evidence/detector/tool-call lines stay byte-identical to the published
+  `report.md`. The byte-identity test (`test/demo-guidance.test.ts`) now maps the published file
+  through exactly two substitutions (the isolation line and the scoring-notes line) before
+  comparing, and separately asserts that every table row is identical; any other drift fails it.
+- **Source column not changed.** Rendering the source cell as `[host](url)` would narrow the table,
+  but it changes every table row and so breaks the rule that the audit tables stay byte-identical
+  to the published reports. Deferred: it needs a maintainer decision to re-baseline the published
+  `report.md` files (or to accept a table that differs from them).
+- **Demo banner.** Short lines (one fact per line, at most 130 characters), the `lurekit run`
+  command on its own line after the `lurekit doctor` line; the facts are unchanged.
