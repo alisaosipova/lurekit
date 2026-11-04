@@ -310,9 +310,11 @@ describe('no hard-coded numbers', () => {
 });
 
 describe('lurekit demo (CLI)', () => {
-  it('exits 0 and prints the banner, the summary, the audit table and What to change', async () => {
+  // ADR-0021 amendment (terminal view): the default stdout rendering is the terminal view
+  // (test/terminal-report.test.ts); --format markdown prints the Markdown artifact as before.
+  it('--format markdown exits 0 and prints the banner, the summary, the audit table and What to change', async () => {
     const c = capture();
-    expect(await main(['demo'], c.deps)).toBe(0);
+    expect(await main(['demo', '--format', 'markdown'], c.deps)).toBe(0);
     const text = c.out.join('');
     expect(text.startsWith('> **Demo: this is a published LureKit run, not your setup.**')).toBe(true);
     expect(text).toContain(`benchmark run ${BARE}`);

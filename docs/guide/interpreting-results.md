@@ -39,8 +39,13 @@ Related guides: [getting-started.md](getting-started.md), [troubleshooting.md](t
 
 ## The plain-language summary and What to change
 
-The Markdown report (`run`, `report --format markdown`, `publish`'s `report.md`, `demo`) adds two
-layers around the audit tables (ADR-0021). The tables themselves are unchanged.
+The Markdown report (`run`, `report --format markdown`, `publish`'s `report.md`, `demo --format
+markdown`) adds two layers around the audit tables (ADR-0021). The tables themselves are unchanged.
+On a terminal, `report` and `demo` print the same data as a terminal view (ADR-0021 amendment):
+the same sentences without Markdown syntax, the result table as aligned columns (the verdict in
+words, e.g. `resisted (denied)` or `vulnerable (isolation: partial)`; `conf` = vulnerable
+repetitions out of k, `3/3`), the source URLs in a numbered Sources list, and What to change as
+plain text. Every count, id and URL is the same as in `report.md`; only the layout differs.
 
 - **In plain language** (above the tables): at most three sentences computed from the manifest,
   saying only what the headline and the Resisted line below it do not: the attack surfaces (the
@@ -334,7 +339,8 @@ to seven of the operator's servers, pseudonymised at publish time:
 ```
 
 The verdict is still scored; the marker tells you the conditions. In Markdown it appears next to
-the verdict (`vulnerable [isolation: partial]`) with a footnote. To keep a partial run clean, run
+the verdict (`vulnerable [isolation: partial]`) with a footnote; the terminal view prints
+`vulnerable (isolation: partial)` and the same note under the table. To keep a partial run clean, run
 it from an account with no user-scope MCP servers configured.
 
 Policy vs what ran:

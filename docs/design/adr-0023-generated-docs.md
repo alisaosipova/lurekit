@@ -84,3 +84,27 @@ only the three generated files.
 - **Not checked.** Release-history facts ("1.2.0 or newer", "1.1.1 and older"), example outputs of
   one particular run (e.g. `published 30 file(s)`), and verified-on citations of a past binary
   (`claude --help` 2.1.316) stay as written; they are history, not counts of the current tree.
+
+## Amendment (2026-11-04, block 7): the demo image is the terminal view
+
+Status: proposed, implemented; awaiting maintainer approval. Before, the image was the first
+lines of the Markdown that `lurekit demo` printed, word-wrapped at 110 columns by the script:
+Markdown syntax and pipe-table rows wrapped across three lines, unreadable.
+
+- **Input.** `scripts/render-demo-svg.mjs` runs `node dist/cli.js demo` with `COLUMNS=110` and
+  `NO_COLOR=1` (a pipe: the CLI prints the terminal view of ADR-0021 amendment block 7 at 110
+  columns, no ANSI codes) and takes the lines from the top through the table header, its rule
+  and the first `TABLE_ROWS` (4) result rows. The script wraps nothing: the CLI already fits
+  every shown line in 110 columns, and the script fails if one is wider (a command line is
+  exempt). `--stdin` (the generated-docs test) takes the same output rendered in-process with
+  `CliDeps.terminal()` returning `COLUMNS=110`.
+- **Styling by line kind**, from the text alone: the banner's first line, the title, the
+  headline and the table header bold; the title rule, the table rule and the setup line dim; a
+  table row split into id, verdict and the rest, the verdict cell coloured by its first word
+  (red vulnerable, green resisted, yellow inconclusive/degraded). Each span carries an explicit
+  `x` from its character offset, so a renderer that does not flow `tspan`s (ImageMagick) places
+  it where a browser does.
+- **Unchanged.** The title bar and the dim footer are the only text that is not demo output;
+  pure ASCII, under 60 KB; `--check` and the CI docs job as before. `scripts/numbers.mjs` reads
+  the demo title, headline and Resisted lines from the terminal view (what `lurekit demo` prints
+  to a pipe), and the getting-started excerpt shows those lines.

@@ -146,8 +146,18 @@ lurekit report <runDir> [--format <fmt>] [--output <file>]
 ```
 
 Render a report from a completed run directory. `<runDir>` is required and must contain a
-`manifest.json`. `--format` defaults to `json` (note: `run` defaults to `markdown`). Writes to
-`--output <file>` or stdout. Exit 0, or 1 if `<runDir>` is missing or has no `manifest.json`;
+`manifest.json`. Without `--format`, stdout gets the terminal view (`text`) and `--output <file>`
+gets the Markdown artifact (`markdown`, the `report.md` a bundle carries); `--format
+text|markdown|json|sarif` (`md` is accepted for `markdown`) names the format explicitly (note:
+`run` defaults to `markdown`). The terminal view (ADR-0021 amendment) is the same data as the
+Markdown for a person reading a terminal: plain sentences wrapped at the terminal width (the
+terminal's columns on a TTY, else `COLUMNS`, else 100), the headline and the Resisted line, an
+aligned result table that never wraps (id, verdict in words, `conf` = vulnerable repetitions out of
+k, a short source reference when the width allows, the name truncated with `...`), the full source
+URLs as a numbered Sources list, the per-vulnerable evidence lines, and What to change as plain
+text with the re-measure command on one unbroken line. Colour (bold, red/green/yellow verdicts)
+only on a TTY, and never when `NO_COLOR` is set or `FORCE_COLOR=0`; a file is never coloured.
+Exit 0, or 1 if `<runDir>` is missing or has no `manifest.json`;
 then the run directories found under `--results` (default `.aab-runs`) are listed, newest first,
 up to 10, with `next: lurekit report <newest> --format markdown`. In Markdown, the "What to
 change" re-measure command reuses the run's agent, model, version, mode, k and vulnerable_if, the
@@ -219,11 +229,15 @@ lurekit demo [--format <fmt>] [--output <file>]
 Print a published run that ships with the package (`demo/<run id>/`, run <!-- n:demo.run_id -->aab-20261103071018-88a78d8f<!-- /n -->:
 `manifest.json` and `report.json`, byte-identical to the bundle under `reports/`), rendered by
 the same reporter as `report`, so you can see a real report with no agent, no auth and no spend
-(ADR-0021). `--format` defaults to `markdown`; the Markdown output starts with a banner naming
-the agent, version, model and date of that run and how to measure your own setup. For `json` and
-`sarif` the banner goes to stderr so stdout stays machine-readable (`--format json` prints the
-published `report.json` exactly). Evidence files are not shipped, so the per-scenario detector
-and tool-call lines are absent. Accepts only `--format` and `--output`; any other flag or a
+(ADR-0021). Without `--format`, stdout gets the terminal view described under `report` (the
+banner as plain paragraphs with the bundle URL and the run command on their own lines, then the
+report; coloured on a TTY) and `--output <file>` gets the
+Markdown. `--format markdown` (or `md`) prints the Markdown with the banner as a quote block, as
+`report.md` in a bundle looks; the README image is the first screen of the terminal view at 110
+columns. For `json` and `sarif` the banner goes to stderr so stdout stays machine-readable
+(`--format json` prints the published `report.json` exactly). Evidence files are not shipped, so
+the per-scenario detector and tool-call lines are absent. Accepts only `--format` and `--output`;
+any other flag or a
 positional argument is an error (exit 1). If the shipped demo files are missing from the
 install, it exits 1 with a message naming the reinstall command. Exit 0. Offline.
 
@@ -265,7 +279,7 @@ the body would be digested into evidence yet never reach the agent.
 
 | Flag | Type | Default | Allowed values |
 |------|------|---------|----------------|
-| `--format <fmt>` | string | `markdown` (run) / `json` (report) | `json`, `markdown`, `sarif` |
+| `--format <fmt>` | string | `markdown` (run) / `text` on stdout and `markdown` into `--output` (report, demo) | `text`, `markdown` (`md`), `json`, `sarif` |
 | `--output <file>` | string | stdout | a path |
 
 ### Replay flag (run only)

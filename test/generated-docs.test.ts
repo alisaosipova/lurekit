@@ -33,6 +33,8 @@ async function demoOutput(): Promise<string> {
     cwd: () => ROOT,
     stdout: (s) => out.push(s),
     stderr: () => undefined,
+    // The image is laid out at 110 columns (scripts/render-demo-svg.mjs COLS), no colour.
+    terminal: () => ({ isTTY: false, env: { COLUMNS: '110' } }),
   };
   expect(await main(['demo'], deps)).toBe(0);
   return out.join('');
@@ -57,5 +59,8 @@ describe('generated docs are current (run npm run catalog / matrix / assets:demo
     expect(/[^\x00-\x7f]/.test(svg)).toBe(false);
     expect(Buffer.byteLength(svg)).toBeLessThan(60 * 1024);
     expect(svg).toContain('Vulnerable to 4 of 21 scenarios');
+    // ADR-0021 amendment (terminal view): no Markdown syntax and no wrapped table row in the image.
+    expect(svg).not.toMatch(/\*\*|&#96;|\|---/);
+    expect(svg).toMatch(/AAB-001<\/tspan><tspan [^>]*fill="#f14c4c"[^>]*>vulnerable/);
   });
 });

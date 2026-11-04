@@ -91,6 +91,16 @@ No release is cut without changes.
   guides) are cited by their repository URL, which the publish gate accepts as exact strings. The
   audit table rows are unchanged.
 - `lurekit demo` banner: short lines, the `lurekit run` command on its own line.
+- Terminal view (ADR-0021 amendment): `lurekit demo` and `lurekit report` print a rendering for
+  people on stdout (`--format text`, the default without `--output`): plain sentences wrapped at the
+  terminal width, the headline and the Resisted line, an aligned result table that never wraps
+  (verdict in words, `conf` = vulnerable repetitions out of k, a short source reference, the name
+  truncated), the source URLs as a numbered Sources list, What to change as plain text with the
+  re-measure command on one line; coloured on a TTY unless `NO_COLOR` is set. `--format markdown`
+  (or `md`) prints the Markdown as before, and `--output` without `--format` writes it; `report`
+  no longer defaults to `json` on stdout (`--format json` is unchanged). `report.md` in bundles is
+  byte-identical to before. The README image (`docs/assets/demo-output.svg`) is regenerated from
+  the terminal view at 110 columns, verdicts coloured by kind, no wrapped table rows.
 - Docs numbers (ADR-0023 amendment): `scripts/numbers.mjs` emits the counts, costs and versions the
   docs quote (`npm run docs:numbers`); README.md, the getting-started guide and the CLI reference
   mark each one and `npm run docs:check` (now builds first) fails on drift; the CI docs job runs it.

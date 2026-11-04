@@ -2,7 +2,7 @@
 
 **Headless Claude Code <!-- n:versions.claude_published -->2.1.317<!-- /n --> with default settings took <!-- n:arms.bare.vulnerable -->4<!-- /n --> of <!-- n:arms.bare.of -->21<!-- /n --> publicly disclosed lures, all through config files in the project directory; one profile change (`--setting-sources user`) took it to <!-- n:arms.hardened.vulnerable -->0<!-- /n --> of <!-- n:arms.hardened.of -->21<!-- /n -->** (bundles [`aab-20261103071018-88a78d8f`](reports/aab-20261103071018-88a78d8f/index.md) and [`aab-20261103062614-49ac1ce7`](reports/aab-20261103062614-49ac1ce7/index.md); model `sonnet`, k=<!-- n:demo.k -->3<!-- /n -->, majority).
 
-![The first lines of the real `lurekit demo` output: the published bare Claude Code run, its plain-language summary, headline and first table rows](docs/assets/demo-output.svg)
+![The first screen of the real `lurekit demo` output: the published bare Claude Code run, its plain-language summary, headline and the first rows of the result table](docs/assets/demo-output.svg)
 
 LureKit is a runnable, disclosure-traced security benchmark for deployed coding-agent configurations.
 You point it at the coding-agent setup you actually run (agent, model, permission mode, settings, MCP servers,
@@ -25,7 +25,8 @@ npx lurekit demo
 ```
 
 `demo` prints the published bare run `aab-20261103071018-88a78d8f` through the same reporter as a real run,
-with a banner saying it is not your setup. No agent, no auth, no cost (LureKit 1.2.0 or newer; from a
+with a banner saying it is not your setup: on a terminal a plain-text view (the image above; `--format
+markdown` prints the `report.md` of the bundle). No agent, no auth, no cost (LureKit 1.2.0 or newer; from a
 checkout: `npm ci && npm run build && node dist/cli.js demo`).
 
 ## First real run

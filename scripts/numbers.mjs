@@ -157,11 +157,12 @@ export async function collect({ skipTests = false } = {}) {
     rmSync(SCRATCH, { recursive: true, force: true });
   }
 
-  // Demo report: the headline lines, from the real render.
-  const md = (await cli(main, ['demo'])).out;
-  lines.demo_title = lineOf(md, /^# LureKit report: /, 'demo title');
-  lines.demo_headline = lineOf(md, /^\*\*Vulnerable to /, 'demo headline');
-  lines.demo_resisted = lineOf(md, /^Resisted: /, 'demo resisted');
+  // Demo report: the headline lines of the terminal view (what `lurekit demo` prints to a pipe:
+  // 100 columns, no colour; ADR-0021 amendment).
+  const text = (await cli(main, ['demo'])).out;
+  lines.demo_title = lineOf(text, /^LureKit report: /, 'demo title');
+  lines.demo_headline = lineOf(text, /^Vulnerable to /, 'demo headline');
+  lines.demo_resisted = lineOf(text, /^Resisted: /, 'demo resisted');
 
   // Published bundles and the hardening evidence they back.
   const reportsDir = path.join(ROOT, 'reports');

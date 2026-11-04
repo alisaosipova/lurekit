@@ -43,7 +43,7 @@ import { getDetector, IMPLEMENTED_DETECTORS } from './detectors/index.js';
 import { fixturesForScenario } from './fixtures/index.js';
 import { BenchmarkRunner, Budget, DEFAULT_RUN_TIMEOUT_S, MAX_RUN_TIMEOUT_S } from './runner/runner.js';
 import type { RunConfig, RunManifest, RunnerIds, RunMeta, EvidenceRecord } from './runner/types.js';
-import { report, REPOSITORY_URL, type ReportFormat, type EvidenceLookup, type SurfaceLookup, type ReMeasureContext } from './report/index.js';
+import { report, REPOSITORY_URL, colorEnabled, terminalWidth, type ReportFormat, type EvidenceLookup, type SurfaceLookup, type ReMeasureContext } from './report/index.js';
 import { planPublish, readRunDir, writeBundle, formatPlanFailure, selectEvidence, defaultBundleDir } from './report/publish.js';
 import {
   type AgentProbe,
@@ -74,7 +74,30 @@ import type { Detector } from './detectors/detector.js';
 import type { DetectorKind } from './scenario/types.js';
 import type { ScenarioResult } from './runner/types.js';
 
-const REPORT_FORMATS: ReportFormat[] = ['json', 'markdown', 'sarif'];
+const REPORT_FORMATS: ReportFormat[] = ['json', 'markdown', 'sarif', 'text'];
+const FORMAT_LIST = REPORT_FORMATS.join('|');
+
+/** ADR-0021 amendment (terminal view): `md` is accepted for `markdown`; the other names as given. */
+function reportFormat(flags: Flags, fallback: ReportFormat): ReportFormat | undefined {
+  const raw = flags.str.get('format');
+  if (raw === undefined) return fallback;
+  if (raw === 'md') return 'markdown';
+  return REPORT_FORMATS.includes(raw as ReportFormat) ? (raw as ReportFormat) : undefined;
+}
+
+/** What the terminal view needs from the process: a TTY or not, its columns, and the colour
+ *  variables. Tests inject it; absent it means "not a terminal, no environment". */
+export interface TerminalInfo {
+  isTTY: boolean;
+  columns?: number;
+  env: Readonly<Record<string, string | undefined>>;
+}
+
+function terminalOptions(deps: CliDeps, toFile: boolean): { width: number; color: boolean } {
+  const t = deps.terminal ? deps.terminal() : { isTTY: false, env: {} };
+  const isTTY = !toFile && t.isTTY;
+  return { width: terminalWidth(isTTY, t.columns, t.env), color: colorEnabled(isTTY, t.env) };
+}
 
 /** Injected dependencies, so the command logic is testable offline without a live agent. The
  *  bin wires the real implementations; a test can pass a stub adapter and a fixed clock. */
@@ -99,6 +122,9 @@ export interface CliDeps {
   /** Directory of the published run `demo` renders (ADR-0021). Optional; defaults to the copy
    *  shipped with the package. A test points it at a missing directory for the refusal path. */
   demoBundleDir?(): string;
+  /** ADR-0021 amendment (terminal view): whether stdout is a terminal, its width, and the
+   *  NO_COLOR / FORCE_COLOR / COLUMNS variables. Absent => not a terminal, 100 columns, no colour. */
+  terminal?(): TerminalInfo;
 }
 
 export function defaultDeps(): CliDeps {
@@ -120,6 +146,7 @@ export function defaultDeps(): CliDeps {
     stderr: (s) => process.stderr.write(s),
     agentProbe: () => defaultAgentProbe(),
     isInteractive: () => process.stdin.isTTY === true,
+    terminal: () => ({ isTTY: process.stdout.isTTY === true, columns: process.stdout.columns, env: process.env }),
     ask: async (question) => {
       const rl = createInterface({ input: process.stdin, output: process.stderr });
       try {
@@ -497,8 +524,8 @@ function noRunDirMessage(command: 'report' | 'publish', given: string | undefine
  *  the agent ran (and was paid for) is checked first. Returns the refusal text, or undefined. */
 function preSpendProblem(flags: Flags, deps: CliDeps, hint: string): string | undefined {
   const format = flags.str.get('format');
-  if (format !== undefined && !REPORT_FORMATS.includes(format as ReportFormat)) {
-    return `--format must be ${REPORT_FORMATS.join('|')} (got ${JSON.stringify(format)}).\nnext: ${hint} --format markdown`;
+  if (format !== undefined && reportFormat(flags, 'markdown') === undefined) {
+    return `--format must be ${FORMAT_LIST} (got ${JSON.stringify(format)}).\nnext: ${hint} --format markdown`;
   }
   const output = flags.str.get('output');
   if (output !== undefined) {
@@ -814,14 +841,15 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
     const manifest = await runner.writeManifest(profile, cfg, plan.kept, results, meta);
 
     const runDir = path.join(cfg.resultsRoot, benchmarkRunId);
-    const format = (flags.str.get('format') ?? 'markdown') as ReportFormat; // validated pre-spend
+    const format = reportFormat(flags, 'markdown') ?? 'markdown'; // validated pre-spend
+    const output = flags.str.get('output');
     const rendered = report(manifest, {
       format,
       evidenceLookup: makeEvidenceLookup(runDir, manifest),
       surfaceOf: surfaceLookupFrom(scenarios),
       reMeasure: reMeasureContext(manifest, corpus.shown),
+      terminal: terminalOptions(deps, output !== undefined),
     });
-    const output = flags.str.get('output');
     if (output) writeFileSync(path.resolve(deps.cwd(), output), rendered, 'utf8');
     else deps.stdout(rendered + '\n');
 
@@ -843,7 +871,7 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
     }
     // ADR-0022 amendment: say what to do with the finished run.
     const shownRun = shownPath(runDir, deps);
-    deps.stderr(`\nNext: lurekit report ${shownRun} --format markdown|json|sarif\n      lurekit publish ${shownRun} --redact-home\n`);
+    deps.stderr(`\nNext: lurekit report ${shownRun} --format text|markdown|json|sarif\n      lurekit publish ${shownRun} --redact-home\n`);
     return 0;
   }
 }
@@ -856,18 +884,21 @@ export function cmdReport(flags: Flags, deps: CliDeps): number {
   }
   const manifestPath = path.join(runDir, 'manifest.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as RunManifest;
-  const format = (flags.str.get('format') ?? 'json') as ReportFormat;
-  if (!REPORT_FORMATS.includes(format)) {
-    throw new Error(`--format must be ${REPORT_FORMATS.join('|')}\nnext: lurekit report ${typedPath(runDir)} --format markdown`);
+  const output = flags.str.get('output');
+  // ADR-0021 amendment (terminal view): without --format, stdout gets the terminal view and a
+  // --output file gets the Markdown artifact; --format names the format explicitly.
+  const format = reportFormat(flags, output === undefined ? 'text' : 'markdown');
+  if (format === undefined) {
+    throw new Error(`--format must be ${FORMAT_LIST}\nnext: lurekit report ${typedPath(runDir)} --format markdown`);
   }
   const rendered = report(manifest, {
     format,
     evidenceLookup: makeEvidenceLookup(runDir, manifest),
-    ...(format === 'markdown'
+    ...(format === 'markdown' || format === 'text'
       ? { surfaceOf: shippedSurfaceLookup(), reMeasure: reMeasureContext(manifest, resolveScenarioDir(undefined, deps).shown) }
       : {}),
+    terminal: terminalOptions(deps, output !== undefined),
   });
-  const output = flags.str.get('output');
   if (output) writeFileSync(output, rendered, 'utf8');
   else deps.stdout(rendered + '\n');
   return 0;
@@ -1030,7 +1061,7 @@ export const COMMANDS: readonly string[] = ['run', 'validate', 'list', 'plan', '
 /** The demo banner (ADR-0021). Every value comes from the bundled manifest. */
 /** `scenariosDir` is the shipped corpus path as the user should type it (relative to their cwd),
  *  so the suggested command works from an npm install as well as from the repository root. */
-export function demoBanner(manifest: RunManifest, scenariosDir = 'scenarios'): string {
+export function demoBannerLines(manifest: RunManifest, scenariosDir = 'scenarios'): string[] {
   const p = manifest.profile;
   const t = manifest.totals;
   const date = manifest.created_at.slice(0, 10);
@@ -1040,7 +1071,7 @@ export function demoBanner(manifest: RunManifest, scenariosDir = 'scenarios'): s
   const perRep = (t.spend_usd / Math.max(k, 1)).toFixed(2);
   const check = COMMANDS.includes('doctor') ? 'lurekit doctor' : 'lurekit selftest';
   // ADR-0021 amendment: short lines, one fact per line, the next command on its own line.
-  const lines = [
+  return [
     '**Demo: this is a published LureKit run, not your setup.**',
     `It measured ${p.agent} ${p.agent_version} with model ${p.model} on ${date}`,
     `(benchmark run ${manifest.benchmark_run_id}, ${scenarios} scenarios, k=${k}, ${manifest.mode} mode).`,
@@ -1055,11 +1086,16 @@ export function demoBanner(manifest: RunManifest, scenariosDir = 'scenarios'): s
     '',
     `\`lurekit run ${scenariosDir} --agent ${p.agent} --model <model-id> --agent-version <your-version> --mode smoke\``,
   ];
-  return lines.map((l) => (l ? `> ${l}` : '>')).join('\n') + '\n\n';
 }
 
-/** demo [--format json|markdown|sarif] [--output <file>] (ADR-0021): offline, zero cost, no auth.
- *  Renders the bundled published run through the same reporter as `report`. */
+/** The Markdown banner: the lines above as a quote block. */
+export function demoBanner(manifest: RunManifest, scenariosDir = 'scenarios'): string {
+  return demoBannerLines(manifest, scenariosDir).map((l) => (l ? `> ${l}` : '>')).join('\n') + '\n\n';
+}
+
+/** demo [--format text|markdown|json|sarif] [--output <file>] (ADR-0021): offline, zero cost, no
+ *  auth. Renders the bundled published run through the same reporter as `report`: the terminal
+ *  view on stdout by default, the Markdown artifact with --format markdown or into --output. */
 export function cmdDemo(flags: Flags, deps: CliDeps): number {
   if (flags._.length > 0) {
     throw new Error(
@@ -1076,9 +1112,10 @@ export function cmdDemo(flags: Flags, deps: CliDeps): number {
         `next: lurekit demo --format markdown   (--${extra[0]} belongs to another command; lurekit --help)`,
     );
   }
-  const format = (flags.str.get('format') ?? 'markdown') as ReportFormat;
-  if (!REPORT_FORMATS.includes(format)) {
-    throw new Error(`--format must be ${REPORT_FORMATS.join('|')}\nnext: lurekit demo --format markdown`);
+  const output = flags.str.get('output');
+  const format = reportFormat(flags, output === undefined ? 'text' : 'markdown');
+  if (format === undefined) {
+    throw new Error(`--format must be ${FORMAT_LIST}\nnext: lurekit demo --format markdown`);
   }
   const manifestPath = path.join(deps.demoBundleDir ? deps.demoBundleDir() : demoBundleDir(), 'manifest.json');
   let manifest: RunManifest;
@@ -1094,15 +1131,17 @@ export function cmdDemo(flags: Flags, deps: CliDeps): number {
     return 1;
   }
   const shipped = shippedScenariosArg(deps);
+  const bannerLines = demoBannerLines(manifest, shipped);
   const body = report(manifest, {
     format,
-    ...(format === 'markdown' ? { surfaceOf: shippedSurfaceLookup(), reMeasure: reMeasureContext(manifest, shipped) } : {}),
+    ...(format === 'markdown' || format === 'text' ? { surfaceOf: shippedSurfaceLookup(), reMeasure: reMeasureContext(manifest, shipped) } : {}),
+    terminal: { ...terminalOptions(deps, output !== undefined), banner: bannerLines },
   });
   const banner = demoBanner(manifest, shipped);
-  // Machine formats stay parseable: the banner goes to stderr for json/sarif.
+  // The terminal view renders the banner itself; the Markdown gets it as a quote block; the
+  // machine formats stay parseable, so there it goes to stderr.
   const rendered = format === 'markdown' ? banner + body : body;
-  if (format !== 'markdown') deps.stderr(banner);
-  const output = flags.str.get('output');
+  if (format === 'json' || format === 'sarif') deps.stderr(banner);
   if (output) writeFileSync(path.resolve(deps.cwd(), output), rendered, 'utf8');
   else deps.stdout(rendered + '\n');
   return 0;
@@ -1137,13 +1176,14 @@ Commands:
                                     --settings file, observe hooks appended last (ADR-0020)
                    --setting-sources <csv>  claude-code only: load only these setting sources
                                     (user, project, local); default: flag not passed (agent default)
-                   --format json|markdown|sarif (default markdown)  --output <file>
+                   --format text|markdown|json|sarif (default markdown)  --output <file>
                    --replay <dir>  re-drive a recorded claude-code run offline (no agent, no cost)
   validate [dir]   Schema-validate every scenario (exit 1 on any error). Offline.
   list [dir]       List scenarios (id, detector, runnable, applies_to). Offline.
   plan [dir]       Show which scenarios would run for a profile, WITHOUT a live agent. Offline.
   selftest         Run each detector's positive/negative self-test. Offline.
-  report <runDir>  Render a report from a completed run. --format --output.
+  report <runDir>  Render a report from a completed run. --format text|markdown|json|sarif
+                   (default: text on stdout, markdown into --output)  --output <file>
   publish <runDir> Write a shareable bundle (manifest, evidence, report.md/json/sarif, index.md)
                    after the redaction gate (no raw transcripts). Offline.
                    --out <dir> (default <runDir>/bundle)  --allow-host <host> (repeatable)
@@ -1159,7 +1199,12 @@ Commands:
                                   published corpus_digest is recomputed from it
   demo             Print a published run that ships with the package (no agent, no auth, no cost),
                    rendered exactly like 'report', with a banner saying it is not your setup.
-                   --format json|markdown|sarif (default markdown)  --output <file>
+                   --format text|markdown|json|sarif (default: text on stdout, markdown into
+                   --output)  --output <file>
+
+'text' is the terminal view: plain sentences and an aligned table, coloured on a terminal unless
+NO_COLOR is set; width from the terminal, else COLUMNS, else 100. 'markdown' is the report.md
+that 'publish' writes.
 
 [dir] (run, plan, validate, list, doctor): the given directory, else ./scenarios when it exists,
 else the scenario corpus shipped with lurekit.

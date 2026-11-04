@@ -308,7 +308,7 @@ describe('corpus resolution: argument -> ./scenarios -> the shipped corpus', () 
 
 describe('run: pre-spend validation happens before the prompt and before any launch', () => {
   it.each([
-    [['--format', 'html'], /refusing to run: --format must be json\|markdown\|sarif \(got "html"\)\.\nnext: lurekit run .* --model sonnet --format markdown/],
+    [['--format', 'html'], /refusing to run: --format must be json\|markdown\|sarif\|text \(got "html"\)\.\nnext: lurekit run .* --model sonnet --format markdown/],
     [['--output', 'no-such-dir/report.md'], /refusing to run: cannot write --output no-such-dir\/report\.md: its directory .*no-such-dir is not writable \(ENOENT\)\.\nnext: /],
     [['--output', '.'], /refusing to run: --output \. is a directory; it must name a file\.\nnext: /],
     [['--budget', '0'], /refusing to run: --budget must be a number of USD greater than 0 \(got 0\)\.\nnext: .*--budget 5/],
@@ -338,7 +338,7 @@ describe('run: pre-spend validation happens before the prompt and before any lau
     expect(code, errText()).toBe(0);
     // The run directory is printed with the host separator (runs\\aab-test-newcomer on Windows).
     const run = path.join('runs', 'aab-test-newcomer');
-    expect(errText()).toContain(`Next: lurekit report ${run} --format markdown|json|sarif\n`);
+    expect(errText()).toContain(`Next: lurekit report ${run} --format text|markdown|json|sarif\n`);
     expect(errText()).toContain(`      lurekit publish ${run} --redact-home\n`);
   });
 });

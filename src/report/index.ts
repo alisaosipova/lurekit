@@ -10,6 +10,7 @@ import { renderMarkdown, type EvidenceLookup } from './markdown.js';
 import type { ReMeasureContext, SurfaceLookup } from './guidance.js';
 import { renderSarif } from './sarif.js';
 import { buildScore, type Report } from './score.js';
+import { renderTerminal, type TerminalOptions } from './terminal.js';
 
 export { buildScore, REPORT_SCHEMA_VERSION, profileDigest } from './score.js';
 export type { Report, ReportScenario } from './score.js';
@@ -23,8 +24,15 @@ export type { SurfaceLookup, HardeningKnob, KnobEvidence, ReMeasureContext } fro
 export { leadingSemver, sameAgentVersion, reMeasureCommand, UNKNOWN_CORPUS } from './guidance.js';
 export { PUBLISHED_CLAUDE_VERSION, REPORT_REPOSITORY_URLS, INTERPRETING_RESULTS_URL, repoFileUrl } from './guidance.js';
 export { renderSarif, toSarif, REPOSITORY_URL } from './sarif.js';
+export {
+  renderTerminal, colorEnabled, terminalWidth, sourceRef, verdictWords, confidenceCell, shortDigest, plain, wrap, truncate,
+  DEFAULT_WIDTH, MIN_WIDTH,
+} from './terminal.js';
+export type { TerminalData, TerminalOptions } from './terminal.js';
 
-export type ReportFormat = 'json' | 'markdown' | 'sarif';
+/** `text` is the terminal view (ADR-0021 amendment): the same data as `markdown`, for a person
+ *  reading a terminal; `markdown` is the artifact format on disk (report.md). */
+export type ReportFormat = 'json' | 'markdown' | 'sarif' | 'text';
 
 export interface ReportOptions {
   format: ReportFormat;
@@ -34,6 +42,8 @@ export interface ReportOptions {
   surfaceOf?: SurfaceLookup;
   /** Markdown only (ADR-0021 amendment): corpus path and budget estimate for the re-measure line. */
   reMeasure?: ReMeasureContext;
+  /** `text` only: the width and colour decided by the CLI, and the demo banner lines, if any. */
+  terminal?: TerminalOptions & { banner?: string[] };
 }
 
 /** Build the scoring block from the manifest and render it in the chosen format. */
@@ -46,6 +56,19 @@ export function report(manifest: RunManifest, opts: ReportOptions): string {
       return renderMarkdown(manifest, score, opts.evidenceLookup, { surfaceOf: opts.surfaceOf, ...(opts.reMeasure ? { reMeasure: opts.reMeasure } : {}) });
     case 'sarif':
       return renderSarif(manifest, score);
+    case 'text': {
+      const t = opts.terminal ?? { width: 100, color: false };
+      return renderTerminal(
+        {
+          manifest, report: score,
+          ...(opts.evidenceLookup ? { evidenceLookup: opts.evidenceLookup } : {}),
+          ...(opts.surfaceOf ? { surfaceOf: opts.surfaceOf } : {}),
+          ...(opts.reMeasure ? { reMeasure: opts.reMeasure } : {}),
+          ...(t.banner ? { banner: t.banner } : {}),
+        },
+        { width: t.width, color: t.color },
+      );
+    }
     default: {
       const bad: never = opts.format;
       throw new Error(`unknown report format: ${String(bad)}`);

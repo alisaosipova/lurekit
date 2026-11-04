@@ -108,3 +108,64 @@ the What to change evidence line cited a NOTES file, and the report named `profi
   `report.md` files (or to accept a table that differs from them).
 - **Demo banner.** Short lines (one fact per line, at most 130 characters), the `lurekit run`
   command on its own line after the `lurekit doctor` line; the facts are unchanged.
+
+## Amendment (2026-11-04, block 7): terminal view
+
+Status: proposed, implemented; awaiting maintainer approval. Before, `lurekit demo` and
+`lurekit report --format markdown` printed the Markdown report raw to the terminal: literal
+`**bold**`, backticks, a `|---|` pipe table whose rows carry 90-character source URLs and wrap at
+the terminal width; the README image, rendered from that output, was unreadable ("the SVG in the
+repo is broken, a human cannot read it").
+
+- **Two renderings of one data set.** The Markdown report stays the artifact format: `report.md`
+  in a bundle, `--format markdown` (alias `md`), and `--output <file>` without `--format`. Its
+  bytes are unchanged (the byte-identity tests of `test/demo-guidance.test.ts` stand). A new
+  `text` format (`src/report/terminal.ts`, `renderTerminal(data, { width, color })`, dispatched
+  by `report()` like the other formats) renders the same inputs (manifest, scoring block, the
+  guidance layers, the evidence lookup, and for `demo` the banner lines) for a person reading a
+  terminal. It adds no fact and drops none: every count, scenario id (in the same order) and
+  source URL of `report.md` appears in the terminal view; a unit test checks each against
+  `report.json`.
+- **Layout.** The demo banner as a bold title and prose paragraphs wrapped at the width (the
+  Markdown banner's one-fact-per-line text is joined into paragraphs, a line ending with a
+  colon closing one, so no half-line dangles at 80 or 100 columns); the bundle URL and the
+  `lurekit run` command whole on their own indented lines, never wrapped; the title underlined
+  with `=`; the plain-language paragraph wrapped at the width; the headline (`Vulnerable to N
+  of M scenarios (degraded: d, inconclusive: i).`, the parenthesis moved to an indented second
+  line when the headline does not fit the width) and the Resisted line (`Resisted: a not
+  attempted, b denied`, with the meaning of denied on the next line); the setup facts on one line (model,
+  the profile digest shortened to 12 hex characters and `...`, the run id). Then the result
+  table as aligned columns: `id`, `verdict` in words (`resisted (denied)`, `vulnerable
+  (isolation: partial)`), `conf` (the confidence tally compacted: `3/3 vulnerable` -> `3/3`,
+  `0/3 vulnerable, 1 inconclusive` -> `0/3 +1 inc`; a legend line follows the table), `source`
+  (a short reference: the CVE id when the name or URL has one, else the GHSA id, else the URL
+  host without `www.`) and `name`, truncated with `...` to the columns left. A table row is
+  never wrapped. The source column is shown only when the name still gets 36 columns
+  (`NAME_MIN`); below that it is dropped from the table, because every URL is in the numbered
+  **Sources** list that follows the table (`N. <id>  <url>`, table order). Then the isolation
+  note (when any row is partial), the per-vulnerable block (id and name, isolation, evidence
+  pointer, detector and tool-call name when evidence is available), the reading notes, and
+  What to change: the guidance layer's Markdown lines rendered as plain text (headings
+  underlined with `-`, bullets with a hanging indent, `[text](url)` as `text <url>`); the
+  re-measure command is printed whole on its own indented line after its note, never wrapped,
+  so it can be copied.
+- **Width.** `process.stdout.columns` when stdout is a TTY; else `COLUMNS` from the environment
+  when it is a positive integer; else 100; never below 60 (`terminalWidth`). Every line but a
+  URL, a command line and a table row's padding fits the width; URLs and commands are never
+  broken.
+- **Colour.** ANSI bold, dim, red (vulnerable), green (resisted) and yellow (inconclusive,
+  degraded) only when stdout is a TTY, `NO_COLOR` is unset or empty, and `FORCE_COLOR` is not
+  `0` (`colorEnabled`); a `--output` file is never coloured; `FORCE_COLOR` does not turn colour
+  on for a pipe. Padding is computed on the uncoloured text.
+- **CLI.** `demo` and `report`: without `--format`, stdout gets `text` and `--output` gets
+  `markdown`; `--format text|markdown|json|sarif` names the format (so `report` no longer prints
+  JSON by default on stdout; `--format json` is unchanged and still prints `report.json`
+  exactly). `run` keeps `markdown` as its default and accepts `text` as well. The process facts
+  the view needs (TTY, columns, the colour variables) come through `CliDeps.terminal()`, so the
+  tests are hermetic; absent it means a pipe at 100 columns, no colour. For `json` and `sarif`
+  the demo banner still goes to stderr; for `text` it is part of the view.
+- **README image.** `scripts/render-demo-svg.mjs` renders the first screen of the terminal view
+  (ADR-0023 amendment below): no Markdown syntax, aligned columns, verdict cells coloured by
+  kind.
+- **Not changed.** The Markdown reporter, `report.md` in every published bundle, `report.json`,
+  SARIF, the publish gate.

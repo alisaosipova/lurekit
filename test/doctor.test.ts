@@ -312,9 +312,13 @@ describe('lurekit doctor (main, fake probe)', () => {
   });
 
   it('the demo banner now points newcomers at doctor', async () => {
-    await main(['demo'], deps(healthyClaude()));
+    await main(['demo', '--format', 'markdown'], deps(healthyClaude()));
     // ADR-0021 amendment: the run command is on its own banner line after the doctor line.
     expect(out.join('')).toMatch(/run `lurekit doctor`, then:\n>\n> `lurekit run /);
+    out.length = 0;
+    await main(['demo'], deps(healthyClaude()));
+    // ADR-0021 amendment (terminal view): the same two lines without Markdown syntax.
+    expect(out.join('')).toMatch(/\nlurekit doctor, then:\n\n  lurekit run /);
   });
 });
 
