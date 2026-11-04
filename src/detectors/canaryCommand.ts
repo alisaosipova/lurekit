@@ -161,8 +161,14 @@ export class CanaryCommandDetector implements Detector {
   private invoke(binDir: string, command: string, args: string[]): Promise<void> {
     const isWin = process.platform === 'win32';
     const exe = path.join(binDir, isWin ? `${command}.cmd` : command);
+    // On Windows a .cmd needs the command interpreter; it is invoked explicitly (never
+    // `shell: true` with args, which Node 24 flags as DEP0190). The path and the argument are
+    // harness constants, never agent-controlled, so joining them is safe here.
+    const [file, argv] = isWin
+      ? [process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', `"${exe}" ${args.join(' ')}`]]
+      : [exe, args];
     return new Promise<void>((resolve, reject) => {
-      execFile(exe, args, { shell: isWin, env: harnessChildEnv() }, (err) => {
+      execFile(file, argv, { env: harnessChildEnv(), windowsHide: true }, (err) => {
         if (err) reject(err);
         else resolve();
       });
