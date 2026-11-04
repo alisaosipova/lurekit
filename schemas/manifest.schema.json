@@ -41,7 +41,8 @@
       "properties": {
         "scenario_count": { "type": "integer", "minimum": 0 },
         "scenario_ids": { "type": "array", "items": { "type": "string" } },
-        "corpus_digest": { "type": "string" }
+        "corpus_digest": { "type": "string" },
+        "corpus_digest_full": { "type": "string" }
       }
     },
     "profile": {

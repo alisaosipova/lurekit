@@ -18,6 +18,38 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+### Security
+- Publish redaction gate is stricter (ADR-0017 block-4 amendment, evidence-spec s5); a bundle the
+  gate rejected before is still rejected, and every committed bundle under `reports/` passes
+  unchanged. New finding kinds: `email`, `host` (scheme-less `host:port` / `host/path` with a
+  public TLD, internal-TLD hosts, protocol-relative `//host`, private-range IPv4), `ws_url`,
+  `ssh_url`, `git_ssh` (`git@host:path`), `bearer`, `jwt`, `private_key`, and `glpat-` GitLab
+  tokens under `token`. `url` also covers every other URL scheme (`ftp://`, `smb://`,
+  `postgres://`, ...) and `\\` / `///` separators. The operator-username check now runs
+  on every publish when the username has 4+ characters (before: only under `--redact-home`).
+- Allow-URL instead of allow-host: a URL passes only if it is exactly (ignoring the fragment) a
+  source URL of a published scenario of the run's corpus, or its host is named with
+  `--allow-host`. **Operator-visible:** another URL on a scenario source host (any other
+  `github.com` path, for example) used to pass and now needs `--allow-host <host>`.
+- Every harness-minted `aab-<word>-<hex>` value (`aab-skill-`, `aab-web-`, ...) is
+  pseudonymised to `<canary-token-N>`, not only `aab-canary-<hex>`.
+- `--withhold`/`--exclude` now also drop the ids from the published `corpus.scenario_ids`;
+  `corpus_digest` is recomputed over the published scenarios and the run's digest is kept as
+  `corpus_digest_full` (evidence-spec s2.3, manifest schema). **Operator-visible:** this needs
+  the scenario files the run used; new `publish --scenarios <dir>` (default: the shipped
+  corpus); a corpus that does not reproduce the run's digest fails the publish.
+- `publish` never follows symlinks in the run dir (skipped with a warning; a symlinked
+  `manifest.json` is an error) and writes the bundle atomically (`<out>.partial`, then rename;
+  removed on failure).
+- Child env allow-list (ADR-0008 block-4 amendment): agents, the MCP fixture server and detector
+  children no longer inherit the whole operator environment, only process basics, `LC_*`, the
+  Node.js knobs, `AAB_*`, the agent's own auth variables and `profile.env`. The forwarded
+  variable NAMES are recorded as `observation.env_forwarded` (evidence schema).
+  **Operator-visible:** an agent that needs another variable (a proxy, a provider key) must get it
+  through `profile.env`.
+- Codex, Cursor and OpenHands stderr files are capped at 1 MiB with a truncation marker;
+  `<agent>-argv.json` stores the task as `<task sha256:...>`.
+
 ### Changed
 - Markdown report (ADR-0021 amendment, block 6): the plain-language paragraph is at most three
   sentences and says only what the headline does not (attack surfaces, confidence, what

@@ -231,6 +231,9 @@ export interface RunObservation {
   // the recording carries, or `not_observable` when the recording has none (no agent fetched
   // anything during a replay, so the live fixtures' counters say nothing about the recording).
   fixture_delivery?: FixtureDeliverySource;
+  // ADR-0008 amendment "Child env allow-list" (evidence-spec s4.3): the NAMES (never values) of
+  // the environment variables the agent child was started with, sorted. Absent for replay/stubs.
+  env_forwarded?: string[];
 }
 
 /** One recorded fixture-delivery fact (replay recording.json `fixtures[]`, evidence-spec s3.1). */

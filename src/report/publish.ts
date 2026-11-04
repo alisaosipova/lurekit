@@ -7,10 +7,13 @@
 // why they must not leave the machine.
 //
 // Redaction gate (§5): before ANY file is written, every byte that would be published is
-// scanned. A non-loopback http(s) URL whose host is not a scenario source host (or an explicit
-// --allow-host), a token-shaped string (the fixture inertness patterns, src/fixtures/fixture.ts),
-// or an absolute path under a home directory fails the publish, and nothing is written. The gate
-// itself never rewrites (no `~` substitution): the maintainer must see and fix the leak.
+// scanned. A non-loopback URL (http(s), ws(s), ssh, git) that is not exactly a scenario source
+// URL of the published corpus (or on an explicit --allow-host host), a scheme-less public host,
+// an email address, a git remote, a credential shape (the fixture inertness patterns,
+// src/fixtures/fixture.ts: prefixed keys, Bearer, JWT, PEM private key), the operator's username,
+// or an absolute path under a home directory fails the publish, and nothing is written
+// (ADR-0017 block-4 amendment "Gate patterns", "Allow-URL"). The gate itself never rewrites (no
+// `~` substitution): the maintainer must see and fix the leak.
 //
 // One explicit, opt-in exception (--redact-home, ADR-0017 "Operator home redaction"): every
 // occurrence of the operator's OWN home directory in the published copies is replaced by the
@@ -54,13 +57,16 @@
 // withheld and excluded; an unknown id fails the publish.
 //
 // Structure: planPublish() / scanForLeaks() / renderIndex() are pure (data in, data out);
-// readRunDir() and writeBundle() are the only I/O; publishRun() glues them.
+// readRunDir() (lstat, never follows a symlink) and writeBundle() (atomic: <out>.partial, then
+// rename) are the only I/O; cmdPublish() in src/cli.ts glues them.
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import type { EvidenceRecord, RunManifest } from '../runner/types.js';
-import { extractHost, findSecretShape } from '../fixtures/fixture.js';
+import { extractHost, findSecretShapes } from '../fixtures/fixture.js';
+import type { Scenario } from '../scenario/types.js';
+import { corpusDigest } from '../scenario/digest.js';
 import { report, buildScore, type EvidenceLookup } from './index.js';
 import type { SurfaceLookup } from './guidance.js';
 import { REPOSITORY_URL } from './sarif.js';
@@ -85,8 +91,15 @@ export interface RunDirContents {
 }
 
 export interface PublishPolicy {
-  /** Extra hosts the maintainer deliberately allows (--allow-host). */
+  /** Extra hosts the maintainer deliberately allows (--allow-host): any URL, scheme-less
+   *  host reference or email address on such a host passes the gate. */
   allowHosts?: string[];
+  /** The scenario corpus the run used (or a superset of it). Its source.* URLs, for the
+   *  published scenarios of the run's corpus, are the only non-loopback URLs the gate passes
+   *  without --allow-host (ADR-0017 "Allow-URL"); with --withhold/--exclude it is also what the
+   *  published corpus_digest is recomputed from, after it is verified against the run's
+   *  original digest (ADR-0017 "Corpus block of a reduced bundle"). */
+  corpus?: Scenario[];
   /** The publishing user's home directory; any absolute path under it fails the gate. */
   homeDir?: string;
   /** --redact-home: replace every occurrence of `homeDir` in the published copies with
@@ -115,13 +128,26 @@ export const HOME_PLACEHOLDER = '<HOME>';
  *  path with every separator replaced by `-`, as in `~/.claude/projects/-home-u-work`). */
 export const HOME_SLUG_PLACEHOLDER = '<HOME-SLUG>';
 
-export type LeakKind = 'url' | 'token' | 'home_path' | 'home_user';
+/** Gate finding kinds (ADR-0017 "Gate patterns", evidence-spec s5). */
+export type LeakKind =
+  | 'url' // http(s):// URL that is not loopback, intrinsic, a source URL or an allowed host
+  | 'ws_url' // ws(s):// URL, same rule minus the source-URL exception
+  | 'ssh_url' // ssh:// / git:// / git+ssh:// URL
+  | 'git_ssh' // scp-style git remote: user@host:path
+  | 'host' // scheme-less host:port or host/path with a public TLD
+  | 'email' // an email address
+  | 'token' // prefixed API key / access token (sk-, ghp_, AKIA, xox*, AIza, glpat-, ...)
+  | 'bearer' // Bearer credential
+  | 'jwt' // JSON Web Token
+  | 'private_key' // PEM private-key header
+  | 'home_path'
+  | 'home_user';
 
 export interface Leak {
   file: string; // bundle-relative path
   kind: LeakKind;
-  /** Safe-to-print detail: the host for a URL, the pattern family for a token (never the
-   *  value), the path prefix for a home path. */
+  /** Safe-to-print detail: the host for a URL / host / email / git remote, the pattern family
+   *  for a token (never the value), the path prefix for a home path. */
   detail: string;
 }
 
@@ -187,6 +213,21 @@ export const HARNESS_MCP_SOURCES: ReadonlySet<string> = new Set(['dynamic', 'pro
 /** The placeholder for the n-th (1-based) distinct operator MCP server name. */
 export const userMcpPlaceholder = (n: number): string => `<user-mcp-${n}>`;
 
+/** Highest N assigned per names map (kept beside the caller's map so the signature is unchanged). */
+const placeholderN = new WeakMap<Map<string, string>, number>();
+function lastPlaceholderN(names: Map<string, string>): number {
+  const known = placeholderN.get(names);
+  if (known !== undefined) return known;
+  // A map filled elsewhere: derive once from its values.
+  let max = 0;
+  for (const v of names.values()) {
+    const m = /^<user-mcp-(\d+)>$/.exec(v);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  placeholderN.set(names, max);
+  return max;
+}
+
 /** Rewrite, in place, the `name` of every non-harness entry of every `mcp_servers` array found
  *  anywhere in `value`. `names` maps an original name to its placeholder and is shared across
  *  all files of one publish, so the same server gets the same placeholder everywhere. An entry
@@ -213,12 +254,14 @@ export function pseudonymizeMcpServers(
         let placeholder = names.get(e.name);
         if (placeholder === undefined) {
           // Never reuse a name a kept (harness) entry carries, so a placeholder cannot be
-          // mistaken for a fixture server.
-          const used = new Set(names.values());
-          let n = names.size + 1;
-          while (used.has(userMcpPlaceholder(n)) || reserved.has(userMcpPlaceholder(n))) n++;
+          // mistaken for a fixture server. Placeholders are assigned with increasing N, so the
+          // next candidate starts after the highest N handed out so far (O(1) per name; no Set
+          // of the used values is rebuilt per name).
+          let n = Math.max(names.size, lastPlaceholderN(names)) + 1;
+          while (reserved.has(userMcpPlaceholder(n))) n++;
           placeholder = userMcpPlaceholder(n);
           names.set(e.name, placeholder);
+          placeholderN.set(names, n);
         }
         e.name = placeholder;
         count++;
@@ -268,13 +311,18 @@ export const CANARY_TOKEN_KEYS: ReadonlySet<string> = new Set(['token', 'marker'
  *  `input.command` of `ls`, which is not canary-shaped) is never harvested. The whole string must
  *  match, so a command line that merely contains the token is not itself taken (the token inside
  *  it is still replaced, as a substring, by replaceCanaryTokens). */
-const CANARY_TOKEN_SHAPE = /^(?:aab-canary-[0-9a-f]{8,}|[0-9a-f]{16,})$/;
+const CANARY_TOKEN_SHAPE = /^(?:aab-[a-z]+-[0-9a-f]{8,}|[0-9a-f]{16,})$/;
 
-/** The `aab-canary-<hex>` family as a substring: the prefix is harness-only, so any occurrence
- *  anywhere (a tool-call command, a URL path) is a minted canary even without a detector hit. */
-const CANARY_PREFIXED_RE = /aab-canary-[0-9a-f]{8,}/g;
+/** The `aab-<word>-<hex>` family as a substring (ADR-0017 "Harness canary tokens"): every value
+ *  the harness mints carries the `aab-` prefix, a lowercase word naming its minter and a hex run
+ *  (`aab-canary-<hex>` detector commands/packages, `aab-skill-<hex>` skill-package markers,
+ *  `aab-web-<hex>` web-server markers, and any later `aab-<word>-<hex>`). The prefix is
+ *  harness-only, so any occurrence anywhere (a tool-call command, a URL path) is a minted value
+ *  even without a detector hit. The word is letters only, so a benchmark run id
+ *  (`aab-<digits>-<hex>`) never matches. */
+const CANARY_PREFIXED_RE = /aab-[a-z]+-[0-9a-f]{8,}/g;
 
-/** Add every `aab-canary-<hex>` substring of `text` to `tokens` (first-seen order). Pure. */
+/** Add every `aab-<word>-<hex>` substring of `text` to `tokens` (first-seen order). Pure. */
 export function collectPrefixedCanaryTokens(text: string, tokens: Map<string, string>): Map<string, string> {
   for (const m of text.matchAll(CANARY_PREFIXED_RE)) {
     if (!tokens.has(m[0])) tokens.set(m[0], canaryTokenPlaceholder(tokens.size + 1));
@@ -339,8 +387,84 @@ function reserialize(original: string, value: unknown): string {
 
 // --- redaction gate (pure) --------------------------------------------------------------
 
-const URL_RE = /https?:\/\/[^\s"'<>`|\\]+/gi;
+// Any scheme-qualified URL: a scheme of two or more characters (so a Windows drive `C:\\` is
+// not one) and two or more `/` or `\` (so `https:\\host` and `https:///host` count too). http(s),
+// ws(s), ssh/git/sftp have their own kinds; every other scheme (ftp, smb, postgres, redis, ...)
+// is a `url` finding. No left boundary: `xhttps://host` is still a URL finding (fail closed).
+const URL_RE = /[A-Za-z][A-Za-z0-9+.-]+:[\\/]{2,}[^\s"'<>`|\\]+/gi;
+/** The scheme separator of a URL_RE match, normalised to `://` before host extraction. */
+const URL_SEP_RE = /^([A-Za-z][A-Za-z0-9+.-]+):[\\/]+/;
 const TRAILING_PUNCT = /[.,;:!?)\]}*_]+$/;
+
+/** Public top-level domains a scheme-less host reference must end in to be a finding (ADR-0017
+ *  "Gate patterns"). Curated, not the full IANA list: TLDs that collide with common file
+ *  extensions or words (md, sh, py, rs, pl, ts, app, so, zip, mov, in, me, run) are left out so
+ *  `README.md/`, `run.sh:12` or `Cursor.app/Contents` are not findings. */
+export const GATE_PUBLIC_TLDS: readonly string[] = [
+  'com', 'net', 'org', 'io', 'dev', 'ai', 'co', 'cloud', 'xyz', 'info', 'biz', 'gov', 'edu', 'mil',
+  'us', 'uk', 'de', 'ru', 'fr', 'jp', 'cn', 'eu', 'ca', 'au', 'nl', 'ch', 'se', 'es', 'it', 'br',
+  'kr', 'tech', 'site', 'online', 'security', 'blog', 'page', 'link', 'tv', 'gg', 'ly',
+];
+const TLD_ALT = GATE_PUBLIC_TLDS.join('|');
+const LABEL = '[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?';
+
+/** Scheme-less host followed by `:<port>` or `/<path>`, not preceded by a URL/path/email
+ *  character (so a host inside a scheme URL, a file path or an address is not double-counted). */
+const BARE_HOST_RE = new RegExp(
+  `(?<![A-Za-z0-9._%+@/:\\\\-])((?:${LABEL}\\.)+(?:${TLD_ALT}))(?![A-Za-z0-9-])(?=:\\d{1,5}(?!\\d)|/[A-Za-z0-9._~%-])`,
+  'gi',
+);
+/** Internal / reserved / special-use TLDs (RFC 2606, RFC 6761, RFC 6762, ICANN `.internal`,
+ *  common private zones). A host ending in one of these is an internal name: a finding with or
+ *  without a port or path (ADR-0017 "Gate patterns"). `.localhost` is loopback, not listed;
+ *  `home` and `private` are left out because `user.home` / `this.private` are code, not hosts. */
+export const GATE_INTERNAL_TLDS: readonly string[] = [
+  'internal', 'local', 'localdomain', 'lan', 'corp', 'intranet', 'intra', 'home.arpa', 'example',
+  'test', 'invalid',
+];
+/** A dotted host ending in an internal TLD, not part of a longer dotted name (so
+ *  `settings.local.json` or `publish.test.ts` are file names, not hosts). */
+const INTERNAL_HOST_RE = new RegExp(
+  `(?<![A-Za-z0-9._%+@/:\\-])((?:${LABEL}\\.)+(?:${GATE_INTERNAL_TLDS.map((t) => t.replace('.', '\\.')).join('|')}))(?![A-Za-z0-9-])(?!\\.[A-Za-z0-9])`,
+  'gi',
+);
+/** A scheme-less IPv4 literal with a port (`10.0.0.5:22`); loopback and 0.0.0.0 are filtered. */
+const IPV4_PORT_RE = /(?<![A-Za-z0-9._%+@/:\\-])((?:\d{1,3}\.){3}\d{1,3}):\d{1,5}(?!\d)/g;
+/** A scheme-less RFC 1918 / CGNAT / link-local IPv4 literal, with or without a port (ADR-0017
+ *  "Gate patterns" block 4 amendment): an internal address is a finding on its own. Not part of
+ *  a longer dotted number (`1.10.0.0.5`, `10.0.0.5.1`). */
+const IPV4_PRIVATE_RE =
+  /(?<![A-Za-z0-9._%+@/:\\-])(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|169\.254\.\d{1,3}\.\d{1,3}|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3})(?![0-9]|\.[0-9])/g;
+/** A protocol-relative reference `//host.tld` (public or internal TLD) not preceded by a scheme,
+ *  path or word character. */
+const PROTO_REL_HOST_RE = new RegExp(
+  `(?<![A-Za-z0-9._%+@:\\\\/-])//((?:${LABEL}\\.)+(?:${[...GATE_PUBLIC_TLDS, ...GATE_INTERNAL_TLDS].map((t) => t.replace('.', '\\.')).join('|')}))(?![A-Za-z0-9-])`,
+  'gi',
+);
+/** scp-style git remote `user@host:path` (git@github.com:org/repo.git). */
+const GIT_SSH_RE = new RegExp(`(?<![A-Za-z0-9._%+-])[A-Za-z0-9._-]+@((?:${LABEL}\\.)+[A-Za-z]{2,}):(?=[A-Za-z0-9~._/-])`, 'g');
+/** An email address: local part, `@`, a dotted domain ending in an alphabetic TLD. A git remote
+ *  (`@host:path`) is reported by GIT_SSH_RE instead. */
+const EMAIL_RE = new RegExp(
+  `(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@((?:${LABEL}\\.)+[A-Za-z]{2,})(?![A-Za-z0-9-])(?!:[A-Za-z0-9~._/-])`,
+  'g',
+);
+
+/** What the gate lets through besides loopback and the tool's intrinsic URLs. */
+export interface GateAllow {
+  /** Exact http(s) URLs (compared without the fragment): the run's scenario source URLs. */
+  urls?: ReadonlySet<string>;
+  /** Hosts the operator allowed explicitly (--allow-host): any URL, host, email or remote on
+   *  such a host passes. */
+  hosts?: ReadonlySet<string>;
+}
+
+/** A URL in its gate comparison form: fragment dropped, scheme and host lowercased. */
+export function normalizeGateUrl(url: string): string {
+  const noFrag = url.split('#')[0];
+  const m = /^([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^/?#]*)(.*)$/.exec(noFrag);
+  return m ? m[1].toLowerCase() + m[2].toLowerCase() + m[3] : noFrag;
+}
 
 function isLoopbackHost(host: string): boolean {
   if (host === 'localhost' || host.endsWith('.localhost')) return true;
@@ -496,17 +620,23 @@ export function redactHomeEncoded(text: string, homeDir: string): { text: string
   return { text: out, counts };
 }
 
-/** Final check under --redact-home: one leak per file in which the operator's bare username
- *  (homeUsername()) still appears as a token bounded by non-alphanumerics (or the text ends).
- *  The finding names the file, never the value. Pure. */
-export function findUsernameTokens(files: BundleFile[], homeDir: string | undefined): Leak[] {
+/** The shortest operator username the gate checks without --redact-home (ADR-0017 "Operator
+ *  username"): shorter names (`u`, `op`, `dev`) collide with ordinary words too often. Under
+ *  --redact-home the check runs for any length, as before. */
+export const USERNAME_MIN_LEN = 4;
+
+/** One leak per file in which the operator's bare username (homeUsername()) still appears as a
+ *  token bounded by non-alphanumerics (or the text ends). Runs on every publish when the
+ *  username is at least `minLen` characters (0 = any length, used under --redact-home). The
+ *  finding names the file, never the value. Pure. */
+export function findUsernameTokens(files: BundleFile[], homeDir: string | undefined, minLen = 0): Leak[] {
   const user = homeUsername(homeDir);
-  if (!user) return [];
+  if (!user || user.length < minLen) return [];
   const re = new RegExp(`${NOT_AFTER_ALNUM}${escapeRe(user)}${NOT_BEFORE_ALNUM}`);
   const leaks: Leak[] = [];
   for (const f of files) {
     if (scanViews(f.text).some((v) => re.test(v))) {
-      leaks.push({ file: f.rel, kind: 'home_user', detail: 'operator username still present after --redact-home (value redacted)' });
+      leaks.push({ file: f.rel, kind: 'home_user', detail: 'operator username present (value redacted)' });
     }
   }
   return leaks;
@@ -520,41 +650,126 @@ export function findUsernameTokens(files: BundleFile[], homeDir: string | undefi
  *  nothing published is rewritten. */
 function scanViews(text: string): string[] {
   const unescaped = text.replace(/\\\\|\\[nrtbf]/g, (m) => (m === '\\\\' ? m : ' '));
-  return unescaped === text ? [text] : [text, unescaped];
+  // A further view with the remaining JSON escapes decoded (`\/` -> `/`, `\u0040` -> `@`), so an
+  // escaped spelling of a URL, address or path is seen in its plain form.
+  const decoded = unescaped.replace(/\\\\|\\\/|\\u([0-9A-Fa-f]{4})/g, (m, hex: string | undefined) =>
+    m === '\\\\' ? m : m === '\\/' ? '/' : String.fromCharCode(parseInt(hex as string, 16)),
+  );
+  return [...new Set([text, unescaped, decoded])];
 }
 
-/** Scan bundle files for §5 leaks. Pure; returns every leak found (empty = clean). */
-export function scanForLeaks(files: BundleFile[], allowedHosts: Set<string>, homeDir?: string): Leak[] {
+/** Percent-decoded copies of the scan views (once and twice, so `%252F` is seen as `/`), for the
+ *  home-path patterns only: `C%3A%5CUsers%5Cu` or a double-encoded `/home/u` still fails.
+ *  Malformed escapes are left as is. */
+function percentDecodedViews(views: string[]): string[] {
+  const dec = (t: string): string => t.replace(/%[0-9A-Fa-f]{2}/g, (e) => String.fromCharCode(parseInt(e.slice(1), 16)));
+  const out = new Set<string>();
+  for (const v of views) {
+    if (!v.includes('%')) continue;
+    const once = dec(v);
+    if (once !== v) out.add(once);
+    const twice = dec(once);
+    if (twice !== once) out.add(twice);
+  }
+  return [...out];
+}
+
+/** Scan bundle files for s5 leaks. Pure; returns every leak found (empty = clean). `allow` is a
+ *  GateAllow, or (back-compat) a plain Set of explicitly allowed hosts. */
+export function scanForLeaks(files: BundleFile[], allow: ReadonlySet<string> | GateAllow, homeDir?: string): Leak[] {
+  const gate: GateAllow = allow instanceof Set ? { hosts: allow } : (allow as GateAllow);
+  const allowedHosts = gate.hosts ?? new Set<string>();
+  const allowedUrls = new Set([...(gate.urls ?? [])].map(normalizeGateUrl));
+  const hostOk = (host: string): boolean => isLoopbackHost(host) || allowedHosts.has(host);
   const leaks: Leak[] = [];
   const homeRes = homePathPatterns(homeDir);
   for (const f of files) {
     const views = scanViews(f.text);
-    // URLs: loopback, an intrinsic tool URL, or an allowlisted host.
-    const seenHosts = new Set<string>();
+    // One finding per (kind, host) per file; the detail names the host, never a path or value.
+    const seen = new Set<string>();
+    const report = (kind: LeakKind, host: string, detail: string): void => {
+      const key = `${kind}\u0000${host}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      leaks.push({ file: f.rel, kind, detail });
+    };
     for (const view of views) {
+      // Scheme URLs: loopback, an intrinsic tool URL, an exact scenario source URL (http(s)
+      // only), or an explicitly allowed host.
       for (const m of view.matchAll(URL_RE)) {
-        const url = m[0].replace(TRAILING_PUNCT, '');
+        let raw = m[0].replace(TRAILING_PUNCT, '');
+        // A known scheme glued to a preceding word (`xhttps://`, `\nhttps://` read raw) is judged
+        // as that scheme, exactly as before the generic-scheme widening.
+        const known = /(?:git\+ssh|https?|wss?|ssh|sftp|scp|git)$/i.exec(raw.slice(0, raw.indexOf(':')));
+        if (known) raw = raw.slice(known.index);
+        const url = raw.replace(URL_SEP_RE, '$1://');
         if (INTRINSIC_URLS.has(url)) continue;
+        const scheme = url.slice(0, url.indexOf(':')).toLowerCase();
+        // `file:///abs/path` has no host: the home-path patterns below judge the path.
+        if (scheme === 'file' && /^file:[\\/]{3}/i.test(raw)) continue;
         const host = extractHost(url);
-        if (isLoopbackHost(host) || allowedHosts.has(host) || seenHosts.has(host)) continue;
-        seenHosts.add(host);
-        leaks.push({ file: f.rel, kind: 'url', detail: `non-allowlisted host "${host}"` });
+        if (hostOk(host)) continue;
+        if (scheme === 'http' || scheme === 'https') {
+          if (allowedUrls.has(normalizeGateUrl(url))) continue;
+          report('url', host, `non-allowlisted host "${host}" (not a scenario source URL)`);
+        } else if (scheme === 'ws' || scheme === 'wss') {
+          report('ws_url', host, `${scheme}:// URL on non-allowlisted host "${host}"`);
+        } else if (scheme === 'ssh' || scheme === 'git' || scheme === 'git+ssh' || scheme === 'sftp' || scheme === 'scp') {
+          report('ssh_url', host, `${scheme}:// URL on non-allowlisted host "${host}"`);
+        } else {
+          report('url', host, `${scheme}:// URL on non-allowlisted host "${host}"`);
+        }
+      }
+      // A view without the scheme URLs, so their hosts and userinfo are not seen again below.
+      const rest = view.replace(URL_RE, ' ');
+      for (const m of rest.matchAll(GIT_SSH_RE)) {
+        const host = m[1].toLowerCase();
+        if (!hostOk(host)) report('git_ssh', host, `scp-style git remote on host "${host}"`);
+      }
+      for (const m of rest.matchAll(EMAIL_RE)) {
+        const host = m[1].toLowerCase();
+        if (!hostOk(host)) report('email', host, `email address at "${host}" (value redacted)`);
+      }
+      for (const m of rest.matchAll(BARE_HOST_RE)) {
+        const host = m[1].toLowerCase();
+        if (!hostOk(host)) report('host', host, `scheme-less host reference "${host}"`);
+      }
+      for (const m of rest.matchAll(INTERNAL_HOST_RE)) {
+        const host = m[1].toLowerCase();
+        if (!hostOk(host)) report('host', host, `internal host name "${host}"`);
+      }
+      for (const m of rest.matchAll(PROTO_REL_HOST_RE)) {
+        const host = m[1].toLowerCase();
+        if (!hostOk(host)) report('host', host, `protocol-relative host reference "${host}"`);
+      }
+      for (const m of rest.matchAll(IPV4_PRIVATE_RE)) {
+        const host = m[1];
+        if (!hostOk(host)) report('host', host, `private IP address "${host}"`);
+      }
+      for (const m of rest.matchAll(IPV4_PORT_RE)) {
+        const host = m[1];
+        if (!hostOk(host) && host !== '0.0.0.0') report('host', host, `scheme-less IP address with port "${host}"`);
       }
     }
-    // Token shapes: one list, owned by the fixture inertness contract. Scan per line so a
-    // report naming several families reports each; the value is never echoed.
-    const families = new Set<string>();
+    // Credential shapes: one list, owned by the fixture inertness contract. Scan per line so a
+    // file naming several families reports each; the value is never echoed.
+    const families = new Map<string, LeakKind>();
     for (const view of views) {
       for (const line of view.split(/\r?\n/)) {
-        const name = findSecretShape(line);
-        if (name !== undefined) families.add(name);
+        for (const { name, kind } of findSecretShapes(line)) families.set(name, kind);
+      }
+      // A credential split across lines (raw or JSON-escaped line breaks, plus the indentation
+      // that follows): the joined text is scanned too.
+      const joined = view.replace(/(?:\\r|\\n|\r|\n)+[ \t]*/g, '');
+      if (joined !== view) {
+        for (const { name, kind } of findSecretShapes(joined)) families.set(name, kind);
       }
     }
-    for (const name of families) {
-      leaks.push({ file: f.rel, kind: 'token', detail: `${name} (value redacted)` });
+    for (const [name, kind] of families) {
+      leaks.push({ file: f.rel, kind, detail: `${name} (value redacted)` });
     }
     // Home paths, plain or encoded: fail, never rewrite to `~`.
-    home: for (const view of views) {
+    home: for (const view of [...views, ...percentDecodedViews(views)]) {
       for (const re of homeRes) {
         const m = re.exec(view);
         if (m) {
@@ -711,6 +926,85 @@ export function recomputeTotals(results: RunManifest['results']): RunManifest['t
   return totals;
 }
 
+/** Every http(s) URL under a scenario's `source` block (primary_url, secondary_urls, and any
+ *  other URL-valued field the block carries). */
+export function scenarioSourceUrls(scenario: Pick<Scenario, 'source'>): string[] {
+  const out: string[] = [];
+  const walk = (v: unknown): void => {
+    if (typeof v === 'string') {
+      if (/^https?:\/\//i.test(v)) out.push(v);
+    } else if (Array.isArray(v)) {
+      for (const x of v) walk(x);
+    } else if (v && typeof v === 'object') {
+      for (const x of Object.values(v as Record<string, unknown>)) walk(x);
+    }
+  };
+  walk(scenario.source);
+  return out;
+}
+
+/** The gate allow-list for a (published) manifest (ADR-0017 "Allow-URL"): the exact source URLs
+ *  of the manifest's published results and of every scenario of `corpus` whose id is in the
+ *  manifest's corpus.scenario_ids, plus the hosts named by --allow-host. A source URL opens only
+ *  itself, never its host: another URL on github.com fails unless the operator allows the host. */
+export function gateAllowFor(
+  manifest: Pick<RunManifest, 'results' | 'corpus'>,
+  corpus: Scenario[] | undefined,
+  allowHosts: string[] | undefined,
+): GateAllow {
+  const urls = new Set<string>();
+  for (const r of manifest.results) {
+    if (typeof r.source === 'string' && /^https?:\/\//i.test(r.source)) urls.add(normalizeGateUrl(r.source));
+  }
+  const ids = new Set(Array.isArray(manifest.corpus?.scenario_ids) ? manifest.corpus.scenario_ids : []);
+  for (const sc of corpus ?? []) {
+    if (!ids.has(sc.id)) continue;
+    for (const u of scenarioSourceUrls(sc)) urls.add(normalizeGateUrl(u));
+  }
+  const hosts = new Set<string>();
+  for (const h of allowHosts ?? []) hosts.add(extractHost(h));
+  return { urls, hosts };
+}
+
+/** The corpus block of a reduced bundle (ADR-0017 "Corpus block of a reduced bundle",
+ *  evidence-spec s2.3): `scenario_ids` without the withheld/excluded ids, `scenario_count` to
+ *  match, `corpus_digest` recomputed over the published scenarios with the runner's algorithm,
+ *  and the run's original digest kept as `corpus_digest_full`. The recomputation needs the
+ *  scenario files: `corpus` must reproduce the original digest over the original ids first, so
+ *  the published digest is exactly the one a run over the reduced corpus would record. Fails
+ *  closed (error) when it cannot. Unchanged when no dropped id is in the corpus. Pure. */
+export function reduceCorpusBlock(
+  block: RunManifest['corpus'],
+  drop: ReadonlySet<string>,
+  corpus: Scenario[] | undefined,
+): { corpus: RunManifest['corpus'] } | { error: string } {
+  const ids = block.scenario_ids;
+  const kept = ids.filter((x) => !drop.has(x));
+  if (kept.length === ids.length) return { corpus: block };
+  const byId = new Map((corpus ?? []).map((sc) => [sc.id, sc]));
+  const missing = ids.filter((x) => !byId.has(x));
+  const next =
+    'pass --scenarios <the scenario directory the run used> so the published corpus_digest can be recomputed';
+  if (missing.length > 0) {
+    return {
+      error: `cannot recompute corpus_digest over the published scenarios: ${missing.length} corpus scenario(s) not found in the scenario corpus (first: ${missing[0]}); ${next}`,
+    };
+  }
+  if (corpusDigest(ids.map((x) => byId.get(x) as Scenario)) !== block.corpus_digest) {
+    return {
+      error: `cannot recompute corpus_digest over the published scenarios: the scenario corpus does not reproduce the run's corpus_digest (the scenario files changed since the run); ${next}`,
+    };
+  }
+  return {
+    corpus: {
+      scenario_count: kept.length,
+      scenario_ids: kept,
+      corpus_digest: corpusDigest(kept.map((x) => byId.get(x) as Scenario)),
+      corpus_digest_full: block.corpus_digest,
+    },
+  };
+}
+
 /** Build and gate the bundle. Pure: nothing is read or written here. */
 export function planPublish(contents: RunDirContents, policy: PublishPolicy = {}): PublishPlan {
   let manifest: RunManifest;
@@ -763,6 +1057,11 @@ export function planPublish(contents: RunDirContents, policy: PublishPolicy = {}
     manifest.totals = recomputeTotals(manifest.results);
   }
   if (excluded.length > 0) manifest.excluded = excluded;
+  if (dropSet.size > 0 && manifest.corpus && Array.isArray(manifest.corpus.scenario_ids)) {
+    const reduced = reduceCorpusBlock(manifest.corpus, dropSet, policy.corpus);
+    if ('error' in reduced) return { ok: false, benchmarkRunId: id, error: reduced.error, leaks: [] };
+    manifest.corpus = reduced.corpus;
+  }
   const keptEvidence = contents.evidence.filter((f) => !dropSet.has(f.rel.split('/')[0]));
 
   // Operator MCP server names (unconditional): rewrite the parsed manifest and records, and
@@ -889,16 +1188,11 @@ export function planPublish(contents: RunDirContents, policy: PublishPolicy = {}
     files.push({ rel: 'index.md', text: redactCanary(renderIndex(manifest, evidenceRels, mcpNotes)) });
   }
 
-  const allowed = new Set<string>();
-  for (const r of manifest.results) {
-    if (typeof r.source === 'string' && /^https?:\/\//i.test(r.source)) allowed.add(extractHost(r.source));
-  }
-  for (const h of policy.allowHosts ?? []) allowed.add(extractHost(h));
-
   // The gate always runs, and after redaction: a foreign home path, a token or a URL still fails.
-  // Under --redact-home, a final check: the operator's bare username must not survive anywhere.
-  const leaks = scanForLeaks(files, allowed, policy.homeDir);
-  if (policy.redactHome) leaks.push(...findUsernameTokens(files, policy.homeDir));
+  // The operator's bare username must not survive anywhere: checked on every publish when it is
+  // at least USERNAME_MIN_LEN characters, and for any length under --redact-home.
+  const leaks = scanForLeaks(files, gateAllowFor(manifest, policy.corpus, policy.allowHosts), policy.homeDir);
+  leaks.push(...findUsernameTokens(files, policy.homeDir, policy.redactHome ? 0 : USERNAME_MIN_LEN));
   if (leaks.length > 0) return { ok: false, benchmarkRunId: id, leaks };
   return homeReplacements === undefined
     ? { ok: true, benchmarkRunId: id, files, mcpNameReplacements, canaryTokenReplacements, withheld, excluded }
@@ -922,10 +1216,33 @@ export function formatPlanFailure(plan: Extract<PublishPlan, { ok: false }>): st
 
 // --- I/O --------------------------------------------------------------------------------
 
+/** lstat-based kind of a path: 'missing', 'symlink', 'dir', 'file' or 'other'. Never follows a
+ *  link. */
+function entryKind(p: string): 'missing' | 'symlink' | 'dir' | 'file' | 'other' {
+  let st;
+  try {
+    st = lstatSync(p);
+  } catch {
+    return 'missing';
+  }
+  if (st.isSymbolicLink()) return 'symlink';
+  if (st.isDirectory()) return 'dir';
+  if (st.isFile()) return 'file';
+  return 'other';
+}
+
 /** Read manifest.json and every <scenario>/<rep>/evidence.json for the manifest's scenarios.
- *  Nothing else under the run dir is read (raw transcripts stay local). */
-export function readRunDir(runDir: string): RunDirContents {
-  const manifestText = readFileSync(path.join(runDir, 'manifest.json'), 'utf8');
+ *  Nothing else under the run dir is read (raw transcripts stay local). Symlinks are never
+ *  followed (ADR-0017 "Run-dir reading"): a symlinked scenario dir, repetition dir, evidence or
+ *  canary metadata file is skipped and named in `warnings`, so a link planted in the run dir
+ *  cannot pull an outside file into the bundle. A symlinked manifest.json is an error. */
+export function readRunDir(runDir: string): RunDirContents & { warnings: string[] } {
+  const warnings: string[] = [];
+  const mpath = path.join(runDir, 'manifest.json');
+  if (entryKind(mpath) === 'symlink') {
+    throw new Error(`publish: ${mpath} is a symlink; refusing to follow it`);
+  }
+  const manifestText = readFileSync(mpath, 'utf8');
   const evidence: BundleFile[] = [];
   const canaryMeta: BundleFile[] = [];
   let ids: string[] = [];
@@ -933,26 +1250,38 @@ export function readRunDir(runDir: string): RunDirContents {
     const m = JSON.parse(manifestText) as RunManifest;
     ids = Array.isArray(m.results) ? m.results.map((r) => r.scenario_id) : [];
   } catch {
-    return { manifestText, evidence }; // planPublish reports the parse error
+    return { manifestText, evidence, warnings }; // planPublish reports the parse error
   }
+  const skip = (rel: string): void => {
+    warnings.push(`publish: skipped symlink ${rel} (symlinks in a run dir are never followed)`);
+  };
   for (const id of ids) {
     if (typeof id !== 'string' || !SAFE_SEGMENT.test(id)) continue; // planPublish rejects it
     const sdir = path.join(runDir, id);
-    if (!existsSync(sdir)) continue;
-    const reps = readdirSync(sdir, { withFileTypes: true })
-      .filter((d) => d.isDirectory() && /^\d+$/.test(d.name))
-      .map((d) => Number(d.name))
-      .sort((a, b) => a - b);
+    const skind = entryKind(sdir);
+    if (skind === 'symlink') skip(id);
+    if (skind !== 'dir') continue;
+    const reps: number[] = [];
+    for (const d of readdirSync(sdir, { withFileTypes: true })) {
+      if (!/^\d+$/.test(d.name)) continue;
+      if (d.isSymbolicLink()) skip(`${id}/${d.name}`);
+      else if (d.isDirectory()) reps.push(Number(d.name));
+    }
+    reps.sort((a, b) => a - b);
     for (const rep of reps) {
-      const p = path.join(sdir, String(rep), 'evidence.json');
-      if (existsSync(p)) evidence.push({ rel: `${id}/${rep}/evidence.json`, text: readFileSync(p, 'utf8') });
       const rdir = path.join(sdir, String(rep));
-      for (const name of readdirSync(rdir).filter((n) => n.endsWith('.canary.json')).sort()) {
-        canaryMeta.push({ rel: `${id}/${rep}/${name}`, text: readFileSync(path.join(rdir, name), 'utf8') });
+      const p = path.join(rdir, 'evidence.json');
+      const ekind = entryKind(p);
+      if (ekind === 'symlink') skip(`${id}/${rep}/evidence.json`);
+      else if (ekind === 'file') evidence.push({ rel: `${id}/${rep}/evidence.json`, text: readFileSync(p, 'utf8') });
+      for (const d of readdirSync(rdir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+        if (!d.name.endsWith('.canary.json')) continue;
+        if (d.isSymbolicLink()) skip(`${id}/${rep}/${d.name}`);
+        else if (d.isFile()) canaryMeta.push({ rel: `${id}/${rep}/${d.name}`, text: readFileSync(path.join(rdir, d.name), 'utf8') });
       }
     }
   }
-  return { manifestText, evidence, canaryMeta };
+  return { manifestText, evidence, canaryMeta, warnings };
 }
 
 /** ADR-0022 amendment: publish's default output directory, inside the run directory it
@@ -963,14 +1292,31 @@ export function defaultBundleDir(runDir: string): string {
   return path.join(runDir, 'bundle');
 }
 
-/** Write a gated bundle. Refuses a non-empty out dir so stale, unscanned files cannot ride along. */
+/** Write a gated bundle atomically (ADR-0017 "Atomic bundle"): every file goes to the sibling
+ *  `<outDir>.partial` first, which is then renamed to `outDir`. On any failure the partial dir is
+ *  removed, so a failed publish never leaves a half-written bundle behind. Refuses a non-empty
+ *  out dir so stale, unscanned files cannot ride along, and a pre-existing `<outDir>.partial`
+ *  (never deleted: it is not ours). An existing empty out dir is replaced. */
 export function writeBundle(outDir: string, files: BundleFile[]): void {
   if (existsSync(outDir) && readdirSync(outDir).length > 0) {
     throw new Error(`publish: output directory ${outDir} is not empty`);
   }
-  for (const f of files) {
-    const dest = path.join(outDir, ...f.rel.split('/'));
-    mkdirSync(path.dirname(dest), { recursive: true });
-    writeFileSync(dest, f.text, 'utf8');
+  const partial = `${outDir.replace(/[\\/]+$/, '')}.partial`;
+  if (existsSync(partial)) {
+    throw new Error(`publish: staging directory ${partial} already exists (remove it after checking it is not needed)`);
+  }
+  mkdirSync(path.dirname(partial), { recursive: true });
+  mkdirSync(partial);
+  try {
+    for (const f of files) {
+      const dest = path.join(partial, ...f.rel.split('/'));
+      mkdirSync(path.dirname(dest), { recursive: true });
+      writeFileSync(dest, f.text, 'utf8');
+    }
+    if (existsSync(outDir)) rmdirSync(outDir); // empty (checked above); rmdir never removes content
+    renameSync(partial, outDir);
+  } catch (err) {
+    rmSync(partial, { recursive: true, force: true });
+    throw err;
   }
 }

@@ -149,13 +149,26 @@ export function assertLoopback(hostOrUrl: string, canaryHost?: string): void {
 // pasted into a fixture by mistake; they deliberately do NOT flag a bare random hex/base64
 // marker (a legitimate canary value has no such prefix), so the control detectors' random
 // tokens/markers pass. Matching is by prefix family, per the step-4 brief.
-const SECRET_PATTERNS: Array<{ name: string; re: RegExp }> = [
-  { name: 'OpenAI/Anthropic-style key (sk-)', re: /\bsk-[A-Za-z0-9_-]{16,}\b/ },
-  { name: 'GitHub token (ghp_/gho_/ghu_/ghs_/ghr_)', re: /\bgh[pousr]_[A-Za-z0-9]{20,}\b/ },
-  { name: 'GitHub fine-grained PAT (github_pat_)', re: /\bgithub_pat_[A-Za-z0-9_]{20,}\b/ },
-  { name: 'AWS access key id (AKIA)', re: /\bAKIA[0-9A-Z]{16}\b/ },
-  { name: 'Slack token (xox*)', re: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/ },
-  { name: 'Google API key (AIza)', re: /\bAIza[0-9A-Za-z_-]{35,}\b/ },
+/** The publish gate's finding kind for a secret family (ADR-0017 "Gate patterns"): `token` for
+ *  a prefixed API key / access token, `bearer` for an Authorization bearer credential, `jwt` for
+ *  a JSON Web Token, `private_key` for a PEM private-key header. */
+export type SecretKind = 'token' | 'bearer' | 'jwt' | 'private_key';
+
+const SECRET_PATTERNS: Array<{ name: string; kind: SecretKind; re: RegExp }> = [
+  { name: 'OpenAI/Anthropic-style key (sk-)', kind: 'token', re: /\bsk-[A-Za-z0-9_-]{16,}\b/ },
+  { name: 'GitHub token (ghp_/gho_/ghu_/ghs_/ghr_)', kind: 'token', re: /\bgh[pousr]_[A-Za-z0-9]{20,}\b/ },
+  { name: 'GitHub fine-grained PAT (github_pat_)', kind: 'token', re: /\bgithub_pat_[A-Za-z0-9_]{20,}\b/ },
+  { name: 'GitLab token (glpat-)', kind: 'token', re: /\bglpat-[A-Za-z0-9_-]{20,}/ },
+  { name: 'AWS access key id (AKIA)', kind: 'token', re: /\bAKIA[0-9A-Z]{16}\b/ },
+  { name: 'Slack token (xox*)', kind: 'token', re: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/ },
+  { name: 'Google API key (AIza)', kind: 'token', re: /\bAIza[0-9A-Za-z_-]{35,}/ },
+  // A bearer credential: the scheme word (any case, RFC 7235), whitespace, and an unbroken 20+
+  // char token68 body. Prose ("Bearer authentication", "bearer token") has no 20-char run.
+  { name: 'Bearer credential (Authorization: Bearer ...)', kind: 'bearer', re: /\bBearer\s+[A-Za-z0-9._~+/-]{20,}=*/i },
+  // A JWT: base64url header (always starts `eyJ`, i.e. `{"`), payload and signature segments.
+  // The signature may be short or empty (`alg: none`, truncated copies): still a token.
+  { name: 'JSON Web Token (eyJ...)', kind: 'jwt', re: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]*/ },
+  { name: 'PEM private key header (-----BEGIN ... PRIVATE KEY-----)', kind: 'private_key', re: /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----/ },
 ];
 
 /** Invariant (b). Reject a value that matches a known live-credential shape. The error names
@@ -178,6 +191,12 @@ export function findSecretShape(value: string): string | undefined {
     if (re.test(value)) return name;
   }
   return undefined;
+}
+
+/** Every live-credential family `value` matches (name + gate kind), in list order. Used by the
+ *  publish gate (ADR-0017) to report each family; never returns the matched value itself. */
+export function findSecretShapes(value: string): Array<{ name: string; kind: SecretKind }> {
+  return SECRET_PATTERNS.filter(({ re }) => re.test(value)).map(({ name, kind }) => ({ name, kind }));
 }
 
 /** Whether a value is just a bare loopback host (optionally host:port, no path). Such a value

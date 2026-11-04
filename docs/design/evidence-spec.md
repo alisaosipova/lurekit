@@ -576,7 +576,8 @@ inputs. No real secret is ever written: canary values only (§5).
   "mode": "smoke | full",
   "config": { "k": 3, "vulnerable_if": "any", "isolation": "container", "budget_usd": 5 },
   "corpus": { "scenario_count": 10, "scenario_ids": ["AAB-001", "…"],
-              "corpus_digest": "sha256 over the sorted scenario files" },
+              "corpus_digest": "sha256 over the sorted scenario files",
+              "corpus_digest_full": "published reduced bundles only, see below" },
   "profile": { /* the setup under test, as in §2.2 */ },
   "results": [ { "scenario_id": "AAB-001", "verdict": "resisted",
                  "confidence": "0/3 vulnerable", "runs": 3, "spend_usd": 0.0,
@@ -602,9 +603,22 @@ distinguishes `unreported`, and `strict_mcp_config` states the flag itself.
 **Excluded results (published bundles only).** A manifest copy written by `lurekit publish
 --exclude <id>` (ADR-0017 "Excluding a scenario") may carry a top-level `"excluded": ["<id>", ...]`
 array (manifest order, unique, non-empty when present): scenario ids whose results the operator
-declared not a measurement and left out. Each such id stays in `corpus.scenario_ids`, is absent
-from `results`, and `totals` cover `results` only. The runner never writes this field. It is not a
+declared not a measurement and left out. Each such id is absent from `results` and (since the
+block-4 amendment below) from `corpus.scenario_ids`, and `totals` cover `results` only. The runner never writes this field. It is not a
 disclosure hold: scenarios withheld under ADR-0014 (`--withhold`) are not listed here.
+
+**Corpus block of a reduced bundle (published bundles only; ADR-0017 block-4 amendment).** When
+`lurekit publish` withholds or excludes scenarios, the published `corpus` covers the published
+scenarios only: `scenario_ids` without the dropped ids, `scenario_count` its length, and
+`corpus_digest` recomputed with the runner's algorithm (sha256 over the sorted canonical
+scenarios) over those scenarios, so it equals what a run over the reduced corpus would record.
+The run's original digest is kept as `corpus_digest_full`. A manifest without
+`corpus_digest_full` is a full corpus block (the runner never writes the field). Bundles
+published before this amendment list dropped ids in `scenario_ids` and carry the full digest.
+
+**`observation.env_forwarded` (evidence record, section 2.2; ADR-0008 block-4 amendment).** The
+sorted names, never the values, of the environment variables the agent child was started with.
+Absent for adapters that spawn nothing (replay, stubs).
 
 The manifest lets someone else re-run the same corpus against the same pinned profile and
 compare. It records cost so a run stays inside `budget_usd`.
@@ -802,6 +816,20 @@ next run could exceed `budget_usd`, it stops and marks the remaining repetitions
   (by digest), the pinned agent version and model id, the scenario inputs, and the runner's own
   behaviour. A re-run against the same pinned profile yields a comparable verdict distribution,
   reported as the k-run tally (§3.2), not as a single deterministic pass/fail.
+- **Publish gate (ADR-0017, block-4 amendment).** Before a bundle is written every byte is
+  scanned; a finding fails the publish and nothing is written. Kinds: `url` (an `http(s)` URL
+  that is not loopback, an intrinsic tool URL, an exact scenario `source.*` URL of the published
+  corpus, or on an `--allow-host` host; also a URL of any other scheme), `ws_url`, `ssh_url`,
+  `git_ssh`, `host` (scheme-less host:port / host/path with a public TLD, an internal-TLD host,
+  a protocol-relative `//host`, a private-range IPv4), `email`, `token` (prefixed keys), `bearer`, `jwt`,
+  `private_key`, `home_path`, `home_user` (the operator's username, 4+ chars, on every publish).
+  The gate never rewrites; the unconditional rewrites before it (operator MCP names, harness
+  canary values including every `aab-<word>-<hex>`) and the opt-in `--redact-home` are listed in
+  ADR-0017. The bundle is written atomically (`<out>.partial`, then rename) and the run dir is
+  read without following symlinks.
+- **Child env (ADR-0008, block-4 amendment).** Agent, MCP fixture and detector children get an
+  allow-listed env, never the whole operator environment; agent stderr files are capped at
+  1 MiB; `<agent>-argv.json` stores the task as its sha256.
 
 ---
 

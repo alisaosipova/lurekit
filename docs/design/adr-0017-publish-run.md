@@ -197,8 +197,9 @@ Option 3.
   - the scenario's entry is removed from the published copy of `manifest.results`, and
     `manifest.totals` is recomputed from the remaining results with the runner's rule (one per
     verdict, `spend_usd` summed and rounded to 6 decimals), so the vulnerable count drops when a
-    vulnerable scenario is withheld. The `corpus` block (count, ids, digest) is kept as is: it
-    describes what was run, its digest must keep matching, and the id is listed openly anyway;
+    vulnerable scenario is withheld. The `corpus` block (count, ids, digest) was kept as is
+    until the block-4 amendment below ("Corpus block of a reduced bundle"): it now lists the
+    published scenarios only;
   - none of its `<scenario>/<rep>/evidence.json` files is copied, parsed or scanned;
   - `report.md`, `report.json`, `report.sarif` and `index.md` are rendered from the reduced
     manifest, so the headline, scenario tables and SARIF results never mention its verdict;
@@ -250,6 +251,72 @@ A failing gate prints, for example:
 publish: redaction gate failed (evidence-spec §5), 1 finding(s); nothing written
   AAB-030/0/evidence.json: home_path: absolute home path "/home/alice"
 ```
+
+## Amendment (2026-11-03, block 4): stricter gate, allow-URL, atomic bundle
+
+Every change here makes the gate stricter or the I/O safer; a bundle the gate rejected before is
+still rejected. The ten committed bundles under `reports/` (and the `demo/` copy) pass the new
+gate unchanged; `test/publish-gate.test.ts` re-gates every file of each one.
+
+- **Gate patterns.** Besides `url`, `token`, `home_path` and `home_user`, the gate reports these
+  finding kinds (one finding per kind and host per file; the detail names the host or the
+  pattern family, never a value):
+
+  | kind | matches |
+  |---|---|
+  | `url` | `http(s)://` URL not on a loopback host, not an intrinsic tool URL, not an exact scenario source URL (below), not on an `--allow-host` host; and a URL of any other scheme of 2+ chars (`ftp`, `smb`, `postgres`, `redis`, ...) not on a loopback or `--allow-host` host. The separator is any run of two or more `/` or `\` (`https:\\host`, `https:///host`); a known scheme glued to a preceding word (`xhttps://`) is judged as that scheme; `file:///path` (no host) is left to `home_path` |
+  | `ws_url` | `ws://` / `wss://` URL not on a loopback or `--allow-host` host |
+  | `ssh_url` | `ssh://`, `git://`, `git+ssh://`, `sftp://`, `scp://` URL, same rule |
+  | `git_ssh` | scp-style remote `user@host:path` (`git@github.com:org/repo.git`) |
+  | `host` | scheme-less `host:port` or `host/path` whose last label is a curated public TLD (`GATE_PUBLIC_TLDS`; TLDs that collide with file extensions, such as `md`, `sh`, `py`, `rs`, `ts`, `app`, `zip`, are left out), not preceded by a URL, path or address character; a dotted host ending in an internal TLD (`GATE_INTERNAL_TLDS`: `internal`, `local`, `lan`, `corp`, `example`, ...) with or without port/path; a protocol-relative `//host.tld`; a scheme-less IPv4 with a port; a private-range IPv4 (RFC 1918, CGNAT `100.64/10`, link-local `169.254/16`) with or without a port |
+  | `email` | an email address (`local@dotted.domain`) |
+  | `token` | prefixed keys: `sk-`, `ghp_`/`gho_`/`ghu_`/`ghs_`/`ghr_`, `github_pat_`, `glpat-`, `AKIA`, `xox[baprs]-`, `AIza` |
+  | `bearer` | `Bearer <20+ token68 chars>` (scheme word in any case) |
+  | `jwt` | `eyJ<seg>.<seg>.<seg>` (three base64url segments of 10+ chars) |
+  | `private_key` | a PEM private-key header (`-----BEGIN [<word> ]PRIVATE KEY-----`, PGP `... BLOCK`) |
+
+  The credential shapes (`token`, `bearer`, `jwt`, `private_key`) live in one list,
+  `SECRET_PATTERNS` in `src/fixtures/fixture.ts`, so fixture inertness and the adapters' stderr
+  excerpts tighten with the gate. Loopback forms of every URL/host kind, the pseudonyms
+  (`<canary-token-N>`, `<user-mcp-N>`, `<HOME>`, `<HOME-SLUG>`), npm package specs
+  (`pkg@1.2.3`) and the scenario source URLs are not findings.
+- **Allow-URL.** The allow-list is no longer the hosts of the scenario sources (which made every
+  `github.com` URL pass, including an operator's private repository). A non-loopback `http(s)`
+  URL passes only if it equals, ignoring the fragment (scheme and host compared lowercase), a
+  `source.*` URL (`primary_url`, `secondary_urls`, any other URL field of the block) of a
+  scenario in the run's published corpus (`corpus.scenario_ids` after filtering, read from the
+  scenario corpus: the shipped one by default, `--scenarios <dir>` for the run's own), or the
+  `source` of a published result; or if the operator names its host with `--allow-host`, which
+  opens every kind above on that host. The tool's two intrinsic URLs stay exact strings.
+- **Operator username.** The bare-username check runs on every publish when the username (last
+  segment of the home directory) has at least 4 characters, not only under `--redact-home`;
+  under `--redact-home` it runs for any length, as before.
+- **Harness canary tokens.** Besides the detector keys and `aab-canary-<hex>`, every
+  `aab-<word>-<hex>` substring (lowercase letters word, 8+ hex) is a minted harness value and is
+  pseudonymised: `aab-skill-<hex>` (skill package markers), `aab-web-<hex>` (web server markers)
+  and any later minter. A benchmark run id (`aab-<digits>-<hex>`) never matches.
+- **Corpus block of a reduced bundle.** With `--withhold`/`--exclude`, the published
+  `corpus.scenario_ids` drops the withheld/excluded ids and `scenario_count` follows;
+  `corpus_digest` is recomputed with the runner's algorithm over the published scenarios, and
+  the run's original digest is kept as `corpus_digest_full` (evidence-spec section 2.3). The
+  recomputation reads the scenario files and first checks that they reproduce the original
+  digest over the original ids; when they do not (the corpus changed since the run, or a
+  scenario is missing), the publish fails with a `--scenarios <dir>` hint and nothing is
+  written. Without a drop the corpus block stays a byte copy.
+- **Run-dir reading.** `readRunDir` uses `lstat` and never follows a symlink: a symlinked
+  scenario dir, repetition dir, `evidence.json` or `<kind>.canary.json` is skipped with a
+  `warning: publish: skipped symlink <rel>` line on stderr; a symlinked `manifest.json` fails the
+  publish.
+- **Atomic bundle.** `writeBundle` writes into `<out>.partial`, then renames it to `<out>` (an
+  existing empty `<out>` is removed first); on any failure the partial dir is removed, so a
+  failed write leaves nothing. A pre-existing `<out>.partial` is refused, never deleted.
+- **MCP placeholder numbering** no longer rebuilds a Set of used placeholders per new name
+  (O(n) per name before); the next N starts after the highest one handed out.
+
+Operator-visible: a URL that used to pass because its host was a scenario source host (another
+`github.com` path, an `arxiv.org` paper that is not a source) now needs `--allow-host <host>`; a
+bundle whose text names the operator's username (4+ chars) fails without `--redact-home`; a
+`--withhold`/`--exclude` publish of a run whose corpus files changed since needs `--scenarios`.
 
 ## Consequences
 - A published number always ships with its manifest and evidence, and never with transcripts.

@@ -23,9 +23,11 @@ import path from 'node:path';
 import type { Adapter, RunObservation, RunRequirements, SetupProfile, ToolCall } from '../adapters/adapter.js';
 import type { Detector, DetectorHit } from '../detectors/detector.js';
 import { getDetector } from '../detectors/index.js';
+export { canonical } from '../scenario/digest.js';
 import type { Fixture, FixtureExpectation, FixtureProvision } from '../fixtures/fixture.js';
 import type { DetectorKind, Scenario } from '../scenario/types.js';
 import { renderTask } from '../scenario/taskTemplate.js';
+import { canonical, corpusDigest } from '../scenario/digest.js';
 import { attemptedForbidden } from './attempts.js';
 import type {
   EvidenceRecord,
@@ -723,6 +725,8 @@ export class BenchmarkRunner implements Runner {
             effective_permission_mode: observation.effective_permission_mode,
             mcp_servers: observation.mcp_servers,
             agent_flags: observation.agent_flags,
+            // s4.3 / ADR-0008 amendment: names (never values) of the env the agent child got.
+            env_forwarded: observation.env_forwarded,
             // s4.3 "Recorded": the `--version` output of this repetition, as the adapter read it.
             agent_version_reported: observation.agent_version_reported,
             attempts: observation.attempts ?? [],
@@ -1269,32 +1273,10 @@ function durationMs(obs: RunObservation): number {
   return Number.isFinite(d) && d > 0 ? d : 0;
 }
 
-/** sha256 over the sorted scenario serializations — stable across processes (§5). */
-function corpusDigest(scenarios: Scenario[]): string {
-  const sorted = [...scenarios].sort((a, b) => a.id.localeCompare(b.id)).map((s) => canonical(s));
-  return sha256(sorted.join('\n'));
-}
-
 function sha256(input: string): string {
   return createHash('sha256').update(input, 'utf8').digest('hex');
 }
 
-/** Canonical JSON with recursively sorted object keys, so a content hash is independent of key
- *  order. undefined is encoded as null (JSON has no undefined). */
-export function canonical(value: unknown): string {
-  return JSON.stringify(sortKeys(value));
-}
-function sortKeys(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sortKeys);
-  if (value && typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
-      out[key] = sortKeys((value as Record<string, unknown>)[key]);
-    }
-    return out;
-  }
-  return value ?? null;
-}
 
 function round6(n: number): number {
   return Math.round(n * 1e6) / 1e6;

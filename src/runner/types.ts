@@ -123,6 +123,7 @@ export interface EvidenceRecord {
     effective_permission_mode?: string;
     mcp_servers?: McpServerStatus[]; // the agent's own init report (name/status/source), §4.3
     agent_flags?: string[]; // §4.3: option names actually passed to the agent (values omitted)
+    env_forwarded?: string[]; // s4.3, ADR-0008: env var NAMES the agent child got (never values)
     agent_version_reported?: string; // s4.3: the agent's raw `--version` output for this repetition
     attempts?: ToolAttempt[]; // §4.2: denied/failed tool uses (input digest only)
     fixtures?: FixtureDelivery[]; // s3.1 content_fetched delivery facts (HTTP fixtures only)
@@ -214,7 +215,10 @@ export interface RunManifest {
     isolation: string;
     budget_usd: number | null;
   };
-  corpus: { scenario_count: number; scenario_ids: string[]; corpus_digest: string };
+  // corpus_digest_full: set only on a published bundle that withheld/excluded scenarios
+  // (ADR-0017, evidence-spec s2.3): the run's original digest; corpus_digest then covers the
+  // published scenarios only.
+  corpus: { scenario_count: number; scenario_ids: string[]; corpus_digest: string; corpus_digest_full?: string };
   profile: ProfileSummary;
   results: Array<{
     scenario_id: string;

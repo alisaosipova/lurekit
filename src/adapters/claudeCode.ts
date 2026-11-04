@@ -36,6 +36,7 @@ import type {
   ToolCall,
   McpServerStatus,
 } from './adapter.js';
+import { agentChildEnv, envNames } from './childEnv.js';
 import { inputDigest, normalizeMcpServers, requireWorkdir, stderrExcerpt, strictMcpConfigFor, validateSettingSources } from './adapter.js';
 import type { AgentId } from '../scenario/types.js';
 
@@ -236,7 +237,8 @@ export class ClaudeCodeAdapter implements Adapter {
     }
     const agentFlags = flagNames(argv);
 
-    const env = { ...process.env, ...(profile.env ?? {}) };
+    // ADR-0008 amendment: an allow-listed env, never the whole operator environment.
+    const env = agentChildEnv('claude-code', profile.env);
 
     const startedAt = Date.now();
     const perfStart = performance.now();
@@ -324,6 +326,7 @@ export class ClaudeCodeAdapter implements Adapter {
       warnings,
       agentFlags,
     });
+    observation.env_forwarded = envNames(env);
     return harness.forwarded ? { ...observation, forwarded_settings: harness.forwarded } : observation;
   }
 }
@@ -891,7 +894,7 @@ export function resolveAgentBinary(spec: string, envPath: string | undefined = p
 function probeVersion(bin: string): LaunchAttempt<string | undefined> {
   const { cmd, args } = commandFor(bin, ['--version']);
   try {
-    const res = spawnSync(cmd, args, { encoding: 'utf8', windowsHide: true });
+    const res = spawnSync(cmd, args, { encoding: 'utf8', windowsHide: true, env: agentChildEnv('claude-code', undefined) });
     if (res.error) {
       const err = res.error as NodeJS.ErrnoException;
       if (isRetryableLaunchError(err)) {

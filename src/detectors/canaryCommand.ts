@@ -18,6 +18,7 @@ import { makeSelfTestDir, type SelfTestOptions } from './selftestDir.js';
 import type { DetectorKind } from '../scenario/types.js';
 import type { ToolCall } from '../adapters/adapter.js';
 import { writeMeta, readMeta, readJsonl, attribute } from './util.js';
+import { harnessChildEnv } from '../adapters/childEnv.js';
 
 const KIND: DetectorKind = 'canary_command';
 const META = 'canary_command.canary.json';
@@ -161,7 +162,7 @@ export class CanaryCommandDetector implements Detector {
     const isWin = process.platform === 'win32';
     const exe = path.join(binDir, isWin ? `${command}.cmd` : command);
     return new Promise<void>((resolve, reject) => {
-      execFile(exe, args, { shell: isWin }, (err) => {
+      execFile(exe, args, { shell: isWin, env: harnessChildEnv() }, (err) => {
         if (err) reject(err);
         else resolve();
       });

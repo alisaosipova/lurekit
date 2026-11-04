@@ -2,6 +2,7 @@
 // pointed at test/fixtures/agents/stub-openhands.mjs, so NO real `openhands` is spawned, no
 // network is touched and nothing is spent.
 
+import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -199,7 +200,10 @@ describe('OpenHandsAdapter.run against the stub', () => {
     expect(raw).toContain('"kind":"ActionEvent"');
     const argvRec = await readJson<string[]>(path.join(h.runDir, 'openhands-argv.json'));
     expect(argvRec[0]).toBe(STUB);
-    expect(argvRec.slice(1)).toEqual(buildOpenHandsArgv(h.profile, TASK));
+    // ADR-0008 amendment: the task is stored as its sha256, never verbatim.
+    const taskRef = `<task sha256:${createHash('sha256').update(TASK, 'utf8').digest('hex')}>`;
+    expect(argvRec.slice(1)).toEqual(buildOpenHandsArgv(h.profile, TASK).map((a) => (a === TASK ? taskRef : a)));
+    expect(JSON.stringify(argvRec)).not.toContain(TASK);
     await expect(stat(path.join(h.runDir, 'openhands-stderr.log'))).resolves.toBeDefined();
     expect(obs.transcript_path).toBe(path.join(h.runDir, 'openhands-transcript.jsonl'));
     const t = (await readFile(obs.transcript_path!, 'utf8')).trim().split('\n');

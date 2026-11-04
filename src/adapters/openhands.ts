@@ -23,6 +23,7 @@ import { StringDecoder } from 'node:string_decoder';
 
 import type { Adapter, ObservationSource, RunObservation, RunOptions, SetupProfile, ToolCall } from './adapter.js';
 import { requireWorkdir } from './adapter.js';
+import { agentChildEnv, argvRecord, CappedStderr, envNames } from './childEnv.js';
 import type { AgentId } from '../scenario/types.js';
 
 export const OPENHANDS_STREAM_FILE = 'openhands-stream.jsonl';
@@ -127,7 +128,8 @@ export function buildOpenHandsEnv(
 ): OpenHandsEnvResult {
   const base = opts.baseEnv ?? process.env;
   const penv = profile.env ?? {};
-  const env: NodeJS.ProcessEnv = { ...base, ...penv };
+  // ADR-0008 amendment: an allow-listed env, never the whole operator environment.
+  const env: NodeJS.ProcessEnv = agentChildEnv('openhands', penv, base);
   const warnings: string[] = [];
 
   const home = path.join(runDir, OPENHANDS_HOME_DIR);
@@ -246,13 +248,13 @@ export class OpenHandsAdapter implements Adapter {
       warnings.push(`agent version mismatch: profile names ${profile.agent_version}, binary reports ${versionBefore}`);
     }
 
-    await writeFile(path.join(runDir, OPENHANDS_ARGV_FILE), JSON.stringify([bin, ...argv]), 'utf8');
+    await writeFile(path.join(runDir, OPENHANDS_ARGV_FILE), JSON.stringify(argvRecord(bin, argv, task)), 'utf8');
 
     const startedAt = Date.now();
     const perfStart = performance.now();
     const state = newOpenHandsStreamState();
     const stdoutChunks: Buffer[] = [];
-    const stderrChunks: Buffer[] = [];
+    const stderrCap = new CappedStderr();
     let lineBuffer = '';
     const decoder = new StringDecoder('utf8');
     const handleLine = (line: string): void => {
@@ -278,7 +280,7 @@ export class OpenHandsAdapter implements Adapter {
           handleLine(line);
         }
       });
-      child.stderr.on('data', (buf: Buffer) => stderrChunks.push(buf));
+      child.stderr.on('data', (buf: Buffer) => stderrCap.push(buf));
       child.on('error', () => {
         warnings.push(`failed to spawn agent binary "${bin}"`);
         resolve(-1);
@@ -296,7 +298,7 @@ export class OpenHandsAdapter implements Adapter {
 
     const rawPath = path.join(runDir, OPENHANDS_STREAM_FILE);
     await writeFile(rawPath, Buffer.concat(stdoutChunks));
-    await writeFile(path.join(runDir, OPENHANDS_STDERR_FILE), Buffer.concat(stderrChunks));
+    await writeFile(path.join(runDir, OPENHANDS_STDERR_FILE), stderrCap.fileContent());
 
     const versionAfter = probeVersion(bin, env);
     if (versionBefore && versionAfter && versionAfter !== versionBefore) {
@@ -315,7 +317,7 @@ export class OpenHandsAdapter implements Adapter {
     }
     warnings.push(...persisted.warnings);
 
-    return assembleOpenHandsObservation(state, {
+    const observation = assembleOpenHandsObservation(state, {
       rawEventsPath: rawPath,
       transcriptPath,
       transcriptEvents: persisted.eventTexts,
@@ -329,6 +331,8 @@ export class OpenHandsAdapter implements Adapter {
       agentFlags: openhandsFlagNames(argv),
       warnings,
     });
+    observation.env_forwarded = envNames(env);
+    return observation;
   }
 }
 

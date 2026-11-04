@@ -177,7 +177,7 @@ interface Flags {
 const STRING_FLAGS = new Set([
   'model', 'agent', 'agent-version', 'mode', 'vulnerable-if', 'isolation',
   'results', 'workdir', 'format', 'output', 'permission-mode', 'settings', 'mcp', 'hooks',
-  'replay', 'out', 'setting-sources',
+  'replay', 'out', 'setting-sources', 'scenarios',
 ]);
 const NUMBER_FLAGS = new Set(['k', 'budget']);
 const MULTI_FLAGS = new Set(['skill', 'allow-host', 'withhold', 'exclude']);
@@ -857,13 +857,35 @@ export function cmdPublish(flags: Flags, deps: CliDeps): number {
     deps.stderr('publish: --exclude needs a scenario id; nothing written\n');
     return 1;
   }
-  const plan = planPublish(readRunDir(runDir), {
+  // ADR-0017 "Allow-URL" / "Corpus block of a reduced bundle": the scenario corpus whose source
+  // URLs the gate passes and over which a reduced bundle's corpus_digest is recomputed. Default:
+  // the corpus shipped with this lurekit version; --scenarios <dir> names the run's own corpus.
+  const scenariosFlag = flags.str.get('scenarios');
+  const corpusDir = scenariosFlag !== undefined ? path.resolve(deps.cwd(), scenariosFlag) : path.join(packageRoot(), 'scenarios');
+  if (scenariosFlag !== undefined && !existsSync(corpusDir)) {
+    deps.stderr(`publish: --scenarios ${scenariosFlag}: no such directory; nothing written\n`);
+    return 1;
+  }
+  const loaded = loadScenarioDir(corpusDir);
+  if (scenariosFlag !== undefined && loaded.errors.length > 0) {
+    deps.stderr(`warning: ${loaded.errors.length} scenario file(s) in ${scenariosFlag} failed to load (run 'validate')\n`);
+  }
+  let contents;
+  try {
+    contents = readRunDir(runDir);
+  } catch (e) {
+    deps.stderr(`${(e as Error).message}; nothing written\n`);
+    return 1;
+  }
+  for (const w of contents.warnings) deps.stderr(`warning: ${w}\n`);
+  const plan = planPublish(contents, {
     allowHosts: flags.multi.get('allow-host') ?? [],
     withhold,
     exclude,
     homeDir: deps.homeDir ? deps.homeDir() : homedir(),
     redactHome: flags.bool.has('redact-home'),
-    surfaceOf: shippedSurfaceLookup(),
+    surfaceOf: surfaceLookupFrom(loaded.scenarios),
+    corpus: loaded.scenarios,
   });
   if (!plan.ok) {
     deps.stderr(formatPlanFailure(plan));
@@ -1088,6 +1110,9 @@ Commands:
                                   an id may not be given to both --withhold and --exclude
                    --redact-home  replace YOUR home dir with <HOME> in the published copies (opt-in;
                                   run dir untouched; other home paths still fail the gate)
+                   --scenarios <dir>  the run's scenario corpus (default: the shipped corpus): its
+                                  source URLs pass the gate; with --withhold/--exclude the
+                                  published corpus_digest is recomputed from it
   demo             Print a published run that ships with the package (no agent, no auth, no cost),
                    rendered exactly like 'report', with a banner saying it is not your setup.
                    --format json|markdown|sarif (default markdown)  --output <file>

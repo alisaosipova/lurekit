@@ -254,9 +254,36 @@ denial record). Only the Claude Code adapter records `observation.attempts`
 The replay adapter re-drives a recorded Claude Code run through the same parse/merge function
 (ADR-0015).
 
+**Amendment (2026-11-03, block 4): child env allow-list, bounded stderr, hashed task.**
+- *Child env allow-list.* No adapter passes the whole `process.env` to the agent. The child env
+  is built (`src/adapters/childEnv.ts`) from: the process basics (`PATH`, `PATHEXT`, `HOME`,
+  `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `SYSTEMROOT`, `WINDIR`, `COMSPEC`, `TMPDIR`/`TEMP`/`TMP`,
+  `LANG`, `LANGUAGE`, `LC_*`, `TERM`, `SHELL`, `USER`/`LOGNAME`/`USERNAME`), the Node.js knobs a
+  node-based child needs (`NODE_OPTIONS`, `NODE_PATH`, `NODE_EXTRA_CA_CERTS`,
+  `NODE_NO_WARNINGS`; not `NODE_AUTH_TOKEN`), the harness's `AAB_*` variables, the agent's own
+  declared auth/config variables (claude-code: `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
+  `ANTHROPIC_BASE_URL`, `DISABLE_AUTOUPDATER`, `CLAUDE_*`; cursor-cli: `CURSOR_API_KEY`,
+  `CURSOR_AUTH_TOKEN`, `CURSOR_API_ENDPOINT`; codex-cli: `CODEX_API_KEY`, `CODEX_HOME`;
+  openhands: `LLM_API_KEY`, `LLM_MODEL`, `LLM_BASE_URL`, `OPENHANDS_*`; NOTES), and every
+  `profile.env` entry (operator-declared, always wins). Names match case-insensitively (Windows
+  spellings). The adapter then applies its own isolation overrides (run-scoped `CODEX_HOME`,
+  OpenHands `HOME`/state dirs) as before. The version probes use the same env. The sorted NAMES
+  of the final child env (never values) are recorded as `observation.env_forwarded`
+  (evidence-spec section 2.2 / 4.3). The MCP fixture server, the `canary_mcp_tool` control
+  server and the `canary_command` self-test get the same basics plus their own harness values,
+  and no agent credential.
+- *Bounded stderr.* The Codex, Cursor and OpenHands adapters keep at most 1 MiB
+  (`STDERR_FILE_MAX`) of the agent's stderr in `<agent>-stderr.log`; past that a final line
+  `[lurekit: stderr truncated at 1048576 bytes; N more bytes dropped]` is written. Excerpts are
+  taken from the kept bytes. (Claude Code keeps no stderr file, only a capped in-memory excerpt.)
+- *Hashed task.* `<agent>-argv.json` stores the task as `<task sha256:HEX>` (the same digest as
+  evidence `task_sha256`), never verbatim.
+
 ### Consequences
 - A new agent adapter is one file plus a `NOTES-verified-facts.md` entry citing how its headless
   mode and observation work today — no engine change.
+- An agent that needs an operator variable outside the allow-list (a proxy setting, a
+  provider-specific key) gets it only when the operator declares it in `profile.env`.
 - Observation fidelity is per-agent and recorded; a scenario can declare `headless_fidelity:
   reduced` where an agent cannot be observed as precisely, rather than silently mis-scoring.
 

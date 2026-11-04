@@ -16,6 +16,8 @@ import { main, type CliDeps } from '../src/cli.js';
 import type { EvidenceRecord, ProfileSummary, RunManifest } from '../src/runner/types.js';
 import { collectCanaryTokens, findUsernameTokens, pseudonymizeMcpServers, redactHomeDir, redactHomeEncoded, replaceCanaryTokens } from '../src/report/publish.js';
 import { mkScratchSync } from './helpers/scratch.js';
+import { loadScenarioDir } from '../src/scenario/load.js';
+import { corpusDigest } from '../src/scenario/digest.js';
 
 type AjvCtor = new (opts: Record<string, unknown>) => { compile(schema: unknown): ValidateFunction };
 const Ajv2020 = ((_Ajv2020 as unknown as { default?: AjvCtor }).default ?? _Ajv2020) as AjvCtor;
@@ -24,6 +26,20 @@ const validateManifest = new Ajv2020({ strict: false, allErrors: true }).compile
 );
 
 const FAKE_HOME = '/srv/aab-fake-home/maintainer';
+
+// ADR-0017 "Corpus block of a reduced bundle": the synthetic run's corpus is AAB-001 + AAB-002 of
+// the shipped corpus, so publish (which reads the shipped corpus by default) can verify the
+// run's corpus_digest and recompute it over the published scenarios.
+const SHIPPED = loadScenarioDir(fileURLToPath(new URL('../scenarios', import.meta.url))).scenarios;
+const digestOf = (ids: string[]): string => corpusDigest(SHIPPED.filter((sc) => ids.includes(sc.id)));
+const CORPUS_DIGEST = digestOf(['AAB-001', 'AAB-002']);
+/** The published corpus block after dropping `dropped` from the AAB-001/AAB-002 corpus. */
+const reducedCorpus = (kept: string[]): RunManifest['corpus'] => ({
+  scenario_count: kept.length,
+  scenario_ids: kept,
+  corpus_digest: digestOf(kept),
+  corpus_digest_full: CORPUS_DIGEST,
+});
 const RUN_ID = 'aab-publish-test';
 
 let tmp: string;
@@ -66,7 +82,7 @@ function manifest(): RunManifest {
     tool_version: '0.0.0',
     mode: 'full',
     config: { k: 2, vulnerable_if: 'any', isolation: 'container', budget_usd: null },
-    corpus: { scenario_count: 2, scenario_ids: ['AAB-001', 'AAB-002'], corpus_digest: 'deadbeef' },
+    corpus: { scenario_count: 2, scenario_ids: ['AAB-001', 'AAB-002'], corpus_digest: CORPUS_DIGEST },
     profile: PROFILE,
     results: [
       { scenario_id: 'AAB-001', name: 'Decoy tool', source: 'https://disclosure.example.org/advisory/1', detector: 'canary_mcp_tool', verdict: 'vulnerable', confidence: '1/2 vulnerable', runs: 2, spend_usd: 0 },
@@ -442,12 +458,16 @@ describe('publish (ADR-0017)', () => {
 
     it('a bare username token left after --redact-home fails, naming the file but not the value', async () => {
       writeRun({ note: 'owner=opuser;' });
-      expect(await run([])).toBe(0); // no home path: the username check is part of --redact-home
-      rmSync(defaultOut(), { recursive: true, force: true });
+      // The username check runs on every publish when the name has >= 4 chars (ADR-0017
+      // "Operator username"), with or without --redact-home.
+      expect(await run([])).toBe(1);
+      expect(err.join('')).toContain('AAB-002/1/evidence.json: home_user: operator username present (value redacted)');
+      expect(existsSync(defaultOut())).toBe(false);
+      err.length = 0;
 
       expect(await run(['--redact-home'])).toBe(1);
       const e = err.join('');
-      expect(e).toContain('AAB-002/1/evidence.json: home_user: operator username still present after --redact-home (value redacted)');
+      expect(e).toContain('AAB-002/1/evidence.json: home_user: operator username present (value redacted)');
       expect(e).not.toContain('opuser');
       expect(existsSync(defaultOut())).toBe(false);
     });
@@ -493,10 +513,11 @@ describe('publish (ADR-0017)', () => {
       });
       const homeRoot = (): CliDeps => ({ ...deps(), homeDir: () => '/root' });
       writeRun({ note: text });
-      expect(await main(['publish', path.join('.aab-runs', RUN_ID)], homeRoot())).toBe(0);
-      // Known limitation (ADR-0017 Consequences): under --redact-home the blunt username check
-      // still fails on the word itself.
-      rmSync(defaultOut(), { recursive: true, force: true });
+      // Known limitation (ADR-0017 Consequences): the blunt username check (4+ chars: `root`)
+      // fails on the word itself, with or without --redact-home.
+      expect(await main(['publish', path.join('.aab-runs', RUN_ID)], homeRoot())).toBe(1);
+      expect(err.join('')).toContain('home_user');
+      expect(existsSync(defaultOut())).toBe(false);
       expect(await main(['publish', path.join('.aab-runs', RUN_ID), '--redact-home'], homeRoot())).toBe(1);
       expect(err.join('')).toContain('home_user');
     });
@@ -704,8 +725,10 @@ describe('publish (ADR-0017)', () => {
       expect(m.results.map((r) => r.scenario_id)).toEqual(['AAB-002']);
       // AAB-001 was the only vulnerable scenario: the count drops to 0.
       expect(m.totals).toEqual({ resisted: 1, vulnerable: 0, degraded: 0, inconclusive: 0, spend_usd: 0 });
-      // The corpus block describes what ran and is kept as is (digest must keep matching).
-      expect(m.corpus).toEqual(manifest().corpus);
+      // The corpus block covers the published scenarios only; the run's digest is kept as
+      // corpus_digest_full (ADR-0017 "Corpus block of a reduced bundle").
+      expect(m.corpus).toEqual(reducedCorpus(['AAB-002']));
+      expect(validateManifest(m), JSON.stringify(validateManifest.errors)).toBe(true);
 
       expect(existsSync(path.join(defaultOut(), 'AAB-001'))).toBe(false);
       for (const rep of [0, 1]) expect(existsSync(path.join(defaultOut(), 'AAB-002', String(rep), 'evidence.json'))).toBe(true);
@@ -713,9 +736,9 @@ describe('publish (ADR-0017)', () => {
       for (const f of ['report.md', 'report.json', 'report.sarif']) {
         let t = read(f);
         if (f === 'report.json') {
-          // report.json embeds the manifest; its corpus block (kept as is) lists every run id.
+          // report.json embeds the same reduced manifest.
           const j = JSON.parse(t) as { manifest: { corpus: unknown } };
-          expect(j.manifest.corpus).toEqual(manifest().corpus);
+          expect(j.manifest.corpus).toEqual(reducedCorpus(['AAB-002']));
           j.manifest.corpus = null;
           t = JSON.stringify(j);
         }
@@ -736,14 +759,13 @@ describe('publish (ADR-0017)', () => {
       expect(out.join('')).toContain('withheld (ADR-0014): AAB-001');
 
       // Every written file: no name or source URL of the withheld scenario; its id only in the
-      // index.md Withheld line and the kept corpus.scenario_ids (manifest.json, report.json).
+      // index.md Withheld line (corpus.scenario_ids is filtered too).
       for (const rel of hashTree(defaultOut()).keys()) {
         const t = read(rel);
         expect(t, rel).not.toContain('disclosure.example.org');
         expect(t, rel).not.toContain('Decoy tool');
         const hits = t.split('\n').filter((l) => l.includes('AAB-001'));
         if (rel === 'index.md') expect(hits, rel).toEqual(['- AAB-001: withheld pending coordinated disclosure (ADR-0014)']);
-        else if (rel === 'manifest.json' || rel === 'report.json') expect(hits.map((l) => l.trim()), rel).toEqual(['"AAB-001",']);
         else expect(hits, rel).toEqual([]);
       }
 
@@ -852,7 +874,7 @@ describe('publish (ADR-0017)', () => {
       expect(m.results.map((r) => r.scenario_id)).toEqual(['AAB-001']);
       // AAB-002 was the only resisted scenario: it must not be published as "resisted".
       expect(m.totals).toEqual({ resisted: 0, vulnerable: 1, degraded: 0, inconclusive: 0, spend_usd: 0 });
-      expect(m.corpus).toEqual(manifest().corpus);
+      expect(m.corpus).toEqual(reducedCorpus(['AAB-001']));
       expect(m.excluded).toEqual(['AAB-002']);
       expect(validateManifest(m), JSON.stringify(validateManifest.errors)).toBe(true);
 
@@ -893,8 +915,8 @@ describe('publish (ADR-0017)', () => {
         const hits = t.split('\n').filter((l) => l.includes('AAB-002'));
         if (rel === 'index.md') expect(hits, rel).toEqual([EXCLUDED_LINE]);
         else if (rel === 'manifest.json' || rel === 'report.json') {
-          // corpus.scenario_ids (kept) plus the excluded array.
-          expect(hits.map((l) => l.trim()), rel).toEqual(['"AAB-002"', '"AAB-002"']);
+          // Only the excluded array (corpus.scenario_ids is filtered).
+          expect(hits.map((l) => l.trim()), rel).toEqual(['"AAB-002"']);
         } else expect(hits, rel).toEqual([]);
       }
 

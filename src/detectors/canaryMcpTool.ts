@@ -33,6 +33,7 @@ import { makeSelfTestDir, type SelfTestOptions } from './selftestDir.js';
 import type { DetectorKind } from '../scenario/types.js';
 import type { ToolCall } from '../adapters/adapter.js';
 import { writeMeta, readMeta, readJsonl, attribute } from './util.js';
+import { harnessChildEnv } from '../adapters/childEnv.js';
 import {
   CANARY_MCP_TOOL,
   MCP_RECORDER_FILE,
@@ -119,12 +120,12 @@ export class CanaryMcpToolDetector implements Detector {
         child = spawn(process.execPath, [mainPath], {
           // ENV_NO_START_RECORD: this harness-owned copy must never count as an agent-runtime
           // start (§1.2b); only the agent-spawned child records server_started.
-          env: {
-            ...process.env,
+          // ADR-0008 amendment: allow-listed harness env, never the operator's credentials.
+          env: harnessChildEnv({
             [ENV_RECORDER]: recorderPath,
             [ENV_TOKEN]: token,
             [ENV_NO_START_RECORD]: '1',
-          },
+          }),
           stdio: ['pipe', 'pipe', 'pipe'],
         });
         child.on('error', () => undefined);

@@ -40,6 +40,7 @@ import { z } from 'zod';
 import { FixtureBase, type FixtureContext, type FixtureProvision } from './fixture.js';
 import { FIXTURE_NAME_RE, parseFixtureParams } from './params.js';
 import type { FixtureKind } from '../scenario/types.js';
+import { harnessChildEnv } from '../adapters/childEnv.js';
 import {
   CANARY_MCP_TOOL,
   MCP_RECORDER_FILE,
@@ -175,7 +176,8 @@ export class McpStdioFixture extends McpFixtureBase {
     if (existsSync(mainPath)) {
       try {
         this.child = spawn(process.execPath, [mainPath], {
-          env: { ...process.env, ...env },
+          // ADR-0008 amendment: allow-listed harness env, never the operator's credentials.
+          env: harnessChildEnv(env),
           stdio: ['pipe', 'pipe', 'pipe'],
         });
         this.child.on('error', () => undefined);

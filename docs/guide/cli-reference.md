@@ -157,7 +157,7 @@ your own `--settings`/`--mcp`/`--hooks`/`--skill` flags (ADR-0021 amendment). Of
 ### publish
 
 ```
-lurekit publish <runDir> [--out <dir>] [--allow-host <host>]... [--withhold <id>]... [--exclude <id>]... [--redact-home]
+lurekit publish <runDir> [--out <dir>] [--allow-host <host>]... [--withhold <id>]... [--exclude <id>]... [--redact-home] [--scenarios <dir>]
 ```
 
 Run the redaction gate and write a shareable bundle (manifest, each scenario's
@@ -277,10 +277,11 @@ the body would be digested into evidence yet never reach the agent.
 | Flag | Type | Default | Notes |
 |------|------|---------|-------|
 | `--out <dir>` | string | `<runDir>/bundle` (`<results>/<benchmark_run_id>/bundle`) | bundle destination |
-| `--allow-host <host>` | string (repeatable) | *(none)* | whitelist a host for the gate |
+| `--allow-host <host>` | string (repeatable) | *(none)* | allow every URL, host reference, email and git remote on a host; otherwise only exact scenario source URLs and loopback pass |
 | `--withhold <scenario-id>` | string (repeatable) | *(none)* | leave a scenario out of the bundle; totals recomputed |
 | `--exclude <scenario-id>` | string (repeatable) | *(none)* | leave out a scenario whose result is not a measurement (own `index.md` note, manifest `excluded`); same handling as `--withhold`; an id may not be given to both |
 | `--redact-home` | boolean | off | replace your home dir with `<HOME>` in the published copies (run dir untouched) |
+| `--scenarios <dir>` | string | the shipped corpus | the run's scenario corpus: its source URLs pass the gate; with `--withhold`/`--exclude` the published `corpus_digest` is recomputed from it |
 
 ### Global flags
 

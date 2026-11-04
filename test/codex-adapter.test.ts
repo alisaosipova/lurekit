@@ -2,6 +2,7 @@
 // pointed at test/fixtures/agents/stub-codex.mjs, so NO real `codex` is spawned, no network is
 // touched and nothing is spent.
 
+import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -200,7 +201,10 @@ describe('CodexCliAdapter.run against the stub', () => {
     expect(await readFile(path.join(ok.runDir, 'codex-stderr.log'), 'utf8')).toContain('progress goes to stderr');
     const argvRec = await readJson<string[]>(path.join(ok.runDir, 'codex-argv.json'));
     expect(argvRec[0]).toBe(STUB);
-    expect(argvRec.slice(1)).toEqual(buildCodexArgv(ok.profile, TASK));
+    // ADR-0008 amendment: the task is stored as its sha256, never verbatim.
+    const taskRef = `<task sha256:${createHash('sha256').update(TASK, 'utf8').digest('hex')}>`;
+    expect(argvRec.slice(1)).toEqual(buildCodexArgv(ok.profile, TASK).map((a) => (a === TASK ? taskRef : a)));
+    expect(JSON.stringify(argvRec)).not.toContain(TASK);
   });
 
   it('points CODEX_HOME at a run-scoped dir and installs nothing into the workdir', async () => {

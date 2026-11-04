@@ -24,6 +24,7 @@ import { StringDecoder } from 'node:string_decoder';
 
 import type { Adapter, ObservationSource, RunObservation, RunOptions, SetupProfile, ToolCall } from './adapter.js';
 import { requireWorkdir, stderrExcerpt } from './adapter.js';
+import { agentChildEnv, argvRecord, CappedStderr, envNames } from './childEnv.js';
 import type { AgentId } from '../scenario/types.js';
 
 export const CODEX_STREAM_FILE = 'codex-stream.jsonl';
@@ -181,7 +182,8 @@ export class CodexCliAdapter implements Adapter {
 
     const warnings: string[] = [];
     const bin = this.bin();
-    const env: NodeJS.ProcessEnv = { ...process.env, ...(profile.env ?? {}) };
+    // ADR-0008 amendment: an allow-listed env, never the whole operator environment.
+    const env: NodeJS.ProcessEnv = agentChildEnv('codex-cli', profile.env);
     if (profile.env?.CODEX_HOME !== undefined) {
       warnings.push('profile.env sets CODEX_HOME; the run uses that home, not a run-scoped one');
     } else if (this.isolateCodexHome) {
@@ -225,13 +227,13 @@ export class CodexCliAdapter implements Adapter {
       warnings.push(`agent version mismatch: profile names ${profile.agent_version}, binary reports ${versionBefore}`);
     }
 
-    await writeFile(path.join(runDir, CODEX_ARGV_FILE), JSON.stringify([bin, ...argv]), 'utf8');
+    await writeFile(path.join(runDir, CODEX_ARGV_FILE), JSON.stringify(argvRecord(bin, argv, task)), 'utf8');
 
     const startedAt = Date.now();
     const perfStart = performance.now();
     const state = newCodexStreamState();
     const stdoutChunks: Buffer[] = [];
-    const stderrChunks: Buffer[] = [];
+    const stderrCap = new CappedStderr();
     let lineBuffer = '';
     const decoder = new StringDecoder('utf8');
     const handleLine = (line: string): void => {
@@ -257,8 +259,8 @@ export class CodexCliAdapter implements Adapter {
           handleLine(line);
         }
       });
-      // stderr is kept verbatim: exec writes progress and errors there (NOTES).
-      child.stderr.on('data', (buf: Buffer) => stderrChunks.push(buf));
+      // stderr is kept verbatim up to STDERR_FILE_MAX: exec writes progress and errors there (NOTES).
+      child.stderr.on('data', (buf: Buffer) => stderrCap.push(buf));
       child.on('error', () => {
         warnings.push(`failed to spawn agent binary "${bin}"`);
         resolve(-1);
@@ -276,15 +278,15 @@ export class CodexCliAdapter implements Adapter {
 
     const rawPath = path.join(runDir, CODEX_STREAM_FILE);
     await writeFile(rawPath, Buffer.concat(stdoutChunks));
-    const stderrBuf = Buffer.concat(stderrChunks);
-    await writeFile(path.join(runDir, CODEX_STDERR_FILE), stderrBuf);
+    const stderrBuf = stderrCap.head();
+    await writeFile(path.join(runDir, CODEX_STDERR_FILE), stderrCap.fileContent());
 
     const versionAfter = probeVersion(bin, env);
     if (versionBefore && versionAfter && versionAfter !== versionBefore) {
       warnings.push(`agent version drifted during the run: ${versionBefore} -> ${versionAfter}`);
     }
 
-    return assembleCodexObservation(state, {
+    const observation = assembleCodexObservation(state, {
       rawEventsPath: rawPath,
       exitCode,
       startedAt,
@@ -294,6 +296,8 @@ export class CodexCliAdapter implements Adapter {
       stderr: stderrBuf.toString('utf8'),
       warnings,
     });
+    observation.env_forwarded = envNames(env);
+    return observation;
   }
 }
 

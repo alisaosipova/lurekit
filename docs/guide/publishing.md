@@ -32,17 +32,18 @@ Related guides: [interpreting-results.md](interpreting-results.md) (what the fie
 ## Usage
 
 ```
-lurekit publish <runDir> [--out <dir>] [--allow-host <host>]... [--withhold <scenario-id>]... [--exclude <scenario-id>]... [--redact-home]
+lurekit publish <runDir> [--out <dir>] [--allow-host <host>]... [--withhold <scenario-id>]... [--exclude <scenario-id>]... [--redact-home] [--scenarios <dir>]
 ```
 
 | option | default | effect |
 |---|---|---|
 | `<runDir>` | (required) | The benchmark run directory, `<results>/<benchmark_run_id>`, containing `manifest.json`. |
-| `--out <dir>` | `<runDir>/bundle`, i.e. `<results>/<benchmark_run_id>/bundle` for a run under `--results` (inside the run directory, never the cwd) | Output directory. It must be absent or empty; a non-empty directory is refused so stale, unscanned files cannot ride along. |
+| `--out <dir>` | `<runDir>/bundle`, i.e. `<results>/<benchmark_run_id>/bundle` for a run under `--results` (inside the run directory, never the cwd) | Output directory. It must be absent or empty; a non-empty directory is refused so stale, unscanned files cannot ride along. The bundle is written to `<dir>.partial` and renamed when complete; a failed write leaves neither. |
 | `--allow-host <host>` | none | Repeatable. Allow URLs on one more host (see [--allow-host](#--allow-host)). |
 | `--withhold <scenario-id>` | none | Repeatable. Leave one scenario out of the bundle (see [Withholding a scenario](#withholding-a-scenario)). |
 | `--exclude <scenario-id>` | none | Repeatable. Leave out a scenario whose result is not a measurement (see [Excluding a scenario](#excluding-a-scenario)). An id may not be given to both `--withhold` and `--exclude`. |
 | `--redact-home` | off | Replace your own home directory with `<HOME>` in the published copies (see [--redact-home](#--redact-home)). |
+| `--scenarios <dir>` | the corpus shipped with lurekit | The scenario directory the run used. Its scenarios' source URLs pass the gate, and with `--withhold`/`--exclude` the published `corpus_digest` is recomputed from it (it must reproduce the run's digest first). |
 
 Flags are strict: pass each flag and its value as separate arguments. `--withhold=AAB-003` or the
 single token `"--withhold AAB-003"` is an error, not a silently ignored flag.
@@ -145,7 +146,7 @@ Each detector mints random per-run values (a 32-hex token or marker, an `aab-can
 or package name). They are control-sensor bookkeeping, not findings, but a published
 `"token": "<32 hex>"` reads as a live credential to a secret scanner. LureKit therefore collects
 every value with a canary shape from the `token`, `marker`, `command` and `package` keys of the
-manifest and evidence, every `aab-canary-<hex>` substring, and the same keys of each published
+manifest and evidence, every `aab-<word>-<hex>` substring (`aab-canary-`, `aab-skill-`, `aab-web-`, ...; a run id `aab-<digits>-<hex>` never matches), and the same keys of each published
 scenario's `*.canary.json`, and replaces every occurrence across the whole bundle with
 `<canary-token-N>`, including where it is embedded in a URL, a command line or a path. Integrity
 digests (`scenario_version`, `task_sha256`, `settings_digest`, `input_digest`, `corpus_digest`),
@@ -187,11 +188,24 @@ a space, so a value right after an escaped newline in a JSON string is still cau
 
 | finding kind | rule | detail printed |
 |---|---|---|
-| `url` | An `http(s)` URL whose host is not loopback (`localhost`, `*.localhost`, `127.0.0.0/8`, `::1`) and not allowlisted. The allowlist is the hosts of the published scenarios' `source` URLs plus every `--allow-host`. The SARIF `$schema` URL and the repository `informationUri` are allowed as exact strings. The host is taken after stripping path, query, fragment and then userinfo, so `https://a.example/x@github.com` has host `a.example`. | `non-allowlisted host "<host>"` |
-| `token` | A match of one of the fixture inertness token shapes: OpenAI/Anthropic-style `sk-` keys, GitHub tokens (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`), GitHub fine-grained PATs (`github_pat_`), AWS access key ids (`AKIA`), Slack tokens (`xox*`), Google API keys (`AIza`). | the pattern family and `(value redacted)`; the value is never echoed |
+| `url` | An `http(s)` URL that is not on a loopback host (`localhost`, `*.localhost`, `127.0.0.0/8`, `::1`), is not one of the two intrinsic tool URLs (the SARIF `$schema` URL and the repository `informationUri`, exact strings), is not exactly (ignoring the `#fragment`) a `source` URL (`primary_url`, `secondary_urls`) of a published scenario of the run's corpus, and is not on an `--allow-host` host. A source URL opens only itself, never its host: another `github.com` URL fails. The host is taken after stripping path, query, fragment and then userinfo, so `https://a.example/x@github.com` has host `a.example`. A URL of any other scheme (`ftp://`, `smb://`, `postgres://`, ...) not on a loopback or `--allow-host` host is a `url` finding too; `\\` or `///` in place of `//` does not hide a URL. `file:///path` has no host and is judged by the home-path rule only. | `non-allowlisted host "<host>" (not a scenario source URL)` |
+| `ws_url` | A `ws://` or `wss://` URL not on a loopback or `--allow-host` host. | `<scheme>:// URL on non-allowlisted host "<host>"` |
+| `ssh_url` | An `ssh://`, `git://`, `git+ssh://`, `sftp://` or `scp://` URL not on a loopback or `--allow-host` host. | `<scheme>:// URL on non-allowlisted host "<host>"` |
+| `git_ssh` | An scp-style git remote `user@host:path` (`git@github.com:org/repo.git`) not on an `--allow-host` host. | `scp-style git remote on host "<host>"` |
+| `host` | A scheme-less `host:port` or `host/path` whose last label is a public TLD from a curated list (`com`, `net`, `org`, `io`, `dev`, `ai`, `co`, `cloud`, country codes, ...; file-extension look-alikes such as `md`, `sh`, `py`, `rs`, `ts`, `app`, `zip` are not in it), not preceded by a URL, path or address character, not loopback and not on an `--allow-host` host. Also: a host ending in an internal TLD (`.internal`, `.local`, `.lan`, `.corp`, `.example`, ...), a protocol-relative `//host.tld`, an IPv4 address with a port, and a private-range IPv4 address (`10/8`, `172.16/12`, `192.168/16`, `100.64/10`, `169.254/16`) with or without a port. | `scheme-less host reference "<host>"` (or `internal host name`, `protocol-relative host reference`, `scheme-less IP address with port`, `private IP address`) |
+| `email` | An email address not on an `--allow-host` host. | `email address at "<host>" (value redacted)` |
+| `token` | A prefixed key or token shape (shared with fixture inertness): OpenAI/Anthropic-style `sk-` keys, GitHub tokens (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`), GitHub fine-grained PATs (`github_pat_`), GitLab tokens (`glpat-`), AWS access key ids (`AKIA`), Slack tokens (`xoxb-`, `xoxp-`, `xox*`), Google API keys (`AIza`). | the pattern family and `(value redacted)`; the value is never echoed |
+| `bearer` | `Bearer ` (any case) followed by a 20+ character token68 value. | the pattern family and `(value redacted)` |
+| `jwt` | A JSON Web Token: `eyJ...` and two more dot-separated base64url segments. | the pattern family and `(value redacted)` |
+| `private_key` | A PEM private-key header (`-----BEGIN RSA PRIVATE KEY-----`, `-----BEGIN OPENSSH PRIVATE KEY-----`, `-----BEGIN PRIVATE KEY-----`, ...). Public keys and certificates are not findings. | the pattern family and `(value redacted)` |
 | `home_path` | An absolute path under your home directory or any conventional home root (`/home/<u>`, `/Users/<u>`, `/root`, `<drive>:\Users\<u>`), in plain, JSON-escaped and forward- or back-slash spellings; your home's dash-encoded project slug (every separator or non-alphanumeric replaced by `-`, as the agent runtime names its project directories, e.g. `-home-<u>-...`); your home percent-encoded (`%2Fhome%2F<u>`, either hex case); and a percent-encoded
 `/home/<u>` or `/Users/<u>` of any user. | `absolute home path "..."`, `home directory slug "..."` or `percent-encoded home path "..."` |
-| `home_user` | Only with `--redact-home`, as a final check: your bare username (the last segment of your home directory) still appears anywhere as a token bounded by non-alphanumerics. Case-sensitive. | `operator username still present after --redact-home (value redacted)` |
+| `home_user` | Your bare username (the last segment of your home directory) appears anywhere as a token bounded by non-alphanumerics. Checked on every publish when the username has 4 or more characters, and for any length with `--redact-home`. Case-sensitive. | `operator username present (value redacted)` |
+
+Not findings: loopback forms of every URL and host kind, the pseudonyms the rewrites produce
+(`<canary-token-N>`, `<user-mcp-N>`, `<HOME>`, `<HOME-SLUG>`), npm package specs such as
+`pkg@1.2.3`, and the scenario source URLs. The scenario corpus is the one shipped with lurekit
+unless you pass `--scenarios <dir>` (the directory the run used).
 
 The `home_user` check is deliberately blunt. A username that is also a common word or part of a
 version string fails the publish even where it is not a path (with home `/root`, the word `root`
@@ -247,14 +261,17 @@ date the maintainer owns, so withholding is your explicit choice per publish.
   is written, so a typo cannot publish the scenario it meant to hold back. A repeated id counts
   once.
 - The scenario is removed from the published `manifest.results`; `manifest.totals` is recomputed
-  from the remaining results. The `corpus` block (count, ids, digest) is kept unchanged: it
-  describes what was run, and its digest must keep matching.
+  from the remaining results. The `corpus` block covers the published scenarios only:
+  `scenario_ids` drops the id, `scenario_count` follows, `corpus_digest` is recomputed over the
+  published scenarios, and the run's original digest is kept as `corpus_digest_full`. The
+  recomputation reads the scenario files (shipped corpus, or `--scenarios <dir>`) and first checks
+  they reproduce the run's digest; if the corpus changed since the run, the publish fails and
+  asks for `--scenarios`. (Bundles published before this change kept the full corpus block.)
 - Its files are read from the run dir like every other scenario's, then dropped: none of its
   `evidence.json` files is parsed, scanned or copied, and none of its `*.canary.json` values is
   used.
 - The renders and `index.md` are built from the reduced manifest, so the headline, tables and SARIF
-  never mention its verdict. Its source host is no longer allowlisted (unless another published
-  scenario cites the same host).
+  never mention its verdict. Its source URLs are no longer allowed by the gate.
 - `index.md` gains a `## Withheld` section with no name, source or verdict. The exact wording, from
   the example bundle:
 
@@ -268,8 +285,9 @@ date the maintainer owns, so withholding is your explicit choice per publish.
 
 - stdout prints `withheld (ADR-0014): <id>[, <id>...]`.
 
-The headline then covers the published scenarios only. In the example bundle the corpus lists 25
-ids and the headline reads "Vulnerable to 4 of 24 scenarios".
+The headline then covers the published scenarios only. In the example bundle (published before
+the corpus block was filtered) the corpus lists 25 ids and the headline reads "Vulnerable to 4 of
+24 scenarios".
 
 Once the window closes, re-publish the same run dir without the flag (to a new or emptied `--out`)
 to get the full bundle; the run dir was never changed.
@@ -321,15 +339,18 @@ lurekit publish .aab-runs/<benchmark_run_id> --redact-home --exclude AAB-056
 
 ## --allow-host
 
-A URL in a bundle is allowed only if its host is loopback, a published scenario's source host, or
-named with `--allow-host`. Use the flag for a deliberate, reviewed exception, for example a vendor
+A URL in a bundle is allowed only if its host is loopback, it is exactly a published scenario's
+source URL (another URL on the same host is not), or its host is named with `--allow-host`.
+Before the stricter gate (CHANGELOG, Unreleased) a scenario source host allowed every URL on it; such a bundle now needs
+`--allow-host`. Use the flag for a deliberate, reviewed exception, for example a vendor
 documentation host that an evidence record legitimately cites:
 
 ```bash
 lurekit publish .aab-runs/<benchmark_run_id> --allow-host docs.vendor.example
 ```
 
-The flag takes a host, not a URL, and allows every URL on that host. Before using it, read the
+The flag takes a host, not a URL, and allows every URL, scheme-less host reference, email address
+and git remote on that host. Before using it, read the
 finding: a URL to a host you did not expect in a tool-call input can mean the agent tried to reach
 the network, which is a result worth investigating rather than allowlisting.
 
@@ -354,7 +375,8 @@ Fix the run artefacts, or pass --allow-host <host> for a deliberate URL exceptio
 | `home_path` naming another home, a sibling or a non-segment-ending occurrence | Inspect the evidence file. The run captured an unexpected path; fix the cause or do not publish that run. |
 | `home_user` | Find the remaining username occurrence in the named file (the local run dir has the same text). If it is a coincidental word, the run cannot be published as is with this account; re-run under a different home or results location. |
 | `token` | Inspect the evidence. A real credential shape in a run is a finding about the setup (a live key in the environment or in a file the agent read). Rotate the credential, fix the setup, re-run. Never allowlist it. |
-| `url` | Decide whether the host is a deliberate citation (`--allow-host`) or evidence of unexpected network use (investigate). |
+| `url`, `ws_url`, `ssh_url`, `git_ssh`, `host`, `email` | Decide whether the host is a deliberate citation (`--allow-host`) or evidence of unexpected network use or an operator identity in the evidence (investigate). |
+| `bearer`, `jwt`, `private_key` | As for `token`: a live credential reached the run. Rotate it, fix the setup, re-run. |
 
 See also [troubleshooting.md](troubleshooting.md#publish-says-redaction-gate-failed).
 

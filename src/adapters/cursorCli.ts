@@ -30,6 +30,7 @@ import type {
   McpServerStatus,
 } from './adapter.js';
 import { normalizeMcpServers, requireWorkdir, stderrExcerpt } from './adapter.js';
+import { agentChildEnv, argvRecord, CappedStderr, envNames } from './childEnv.js';
 import type { AgentId } from '../scenario/types.js';
 
 export const CURSOR_STREAM_FILE = 'cursor-stream.jsonl';
@@ -166,7 +167,8 @@ export class CursorCliAdapter implements Adapter {
 
     const warnings: string[] = [];
     const bin = this.bin();
-    const env = { ...process.env, ...(profile.env ?? {}) };
+    // ADR-0008 amendment: an allow-listed env, never the whole operator environment.
+    const env = agentChildEnv('cursor-cli', profile.env);
 
     if (options.bare === true) {
       warnings.push('--bare is a Claude Code option; cursor-cli has no equivalent and it was not applied');
@@ -186,13 +188,13 @@ export class CursorCliAdapter implements Adapter {
       warnings.push(`agent version mismatch: profile names ${profile.agent_version}, binary reports ${versionBefore} (cursor-cli cannot pin a version)`);
     }
 
-    await writeFile(path.join(runDir, CURSOR_ARGV_FILE), JSON.stringify([bin, ...argv]), 'utf8');
+    await writeFile(path.join(runDir, CURSOR_ARGV_FILE), JSON.stringify(argvRecord(bin, argv, task)), 'utf8');
 
     const startedAt = Date.now();
     const perfStart = performance.now();
     const state = newCursorStreamState();
     const stdoutChunks: Buffer[] = [];
-    const stderrChunks: Buffer[] = [];
+    const stderrCap = new CappedStderr();
     let lineBuffer = '';
     // Decode across chunk boundaries so a multi-byte UTF-8 char split between chunks is not
     // mangled in the parsed view (the raw file is written from the Buffers, verbatim).
@@ -225,8 +227,8 @@ export class CursorCliAdapter implements Adapter {
           handleLine(line);
         }
       });
-      // stderr is kept verbatim: on failure Cursor writes its error there (NOTES).
-      child.stderr.on('data', (buf: Buffer) => stderrChunks.push(buf));
+      // stderr is kept verbatim up to STDERR_FILE_MAX: on failure Cursor writes its error there (NOTES).
+      child.stderr.on('data', (buf: Buffer) => stderrCap.push(buf));
       child.on('error', () => {
         warnings.push(`failed to spawn agent binary "${bin}"`);
         resolve(-1);
@@ -244,8 +246,8 @@ export class CursorCliAdapter implements Adapter {
 
     const rawPath = path.join(runDir, CURSOR_STREAM_FILE);
     await writeFile(rawPath, Buffer.concat(stdoutChunks));
-    const stderrBuf = Buffer.concat(stderrChunks);
-    await writeFile(path.join(runDir, CURSOR_STDERR_FILE), stderrBuf);
+    const stderrBuf = stderrCap.head();
+    await writeFile(path.join(runDir, CURSOR_STDERR_FILE), stderrCap.fileContent());
     const failure = cursorFailureWarning(exitCode, stderrBuf.toString('utf8'));
     if (failure) warnings.push(failure);
 
@@ -254,7 +256,7 @@ export class CursorCliAdapter implements Adapter {
       warnings.push(`agent version drifted during the run: ${versionBefore} -> ${versionAfter} (auto-update)`);
     }
 
-    return assembleCursorObservation(state, {
+    const observation = assembleCursorObservation(state, {
       requestedModel: profile.model,
       rawEventsPath: rawPath,
       exitCode,
@@ -263,6 +265,8 @@ export class CursorCliAdapter implements Adapter {
       agentVersionReported: versionBefore,
       warnings,
     });
+    observation.env_forwarded = envNames(env);
+    return observation;
   }
 }
 
