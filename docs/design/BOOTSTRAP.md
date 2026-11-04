@@ -139,6 +139,16 @@ Steps 9+ record what shipped after step 8 (all 2026-11-02), driven by the first 
 Also landed in the same period, each under its own ADR: replay adapter (ADR-0015), Cursor CLI
 adapter (ADR-0016), `publish` (ADR-0017), Codex CLI adapter (ADR-0018, `8c53c74`).
 
+19. **Run lifecycle hardening (ADR-0024).** SPECCED and IMPLEMENTED (2026-11-04):
+    `--run-timeout` (default 180 s) with a per-run `AbortController`, the lifecycle as a strict
+    state machine with teardown in `finally` and the `canScoreResisted` guard, the new
+    inconclusive reason `run_timeout`, evidence fields `timed_out` / `elapsed_ms` /
+    `teardown_error`, manifest `config.run_timeout_ms`, and a shared process-group kill helper
+    in `src/adapters/` for all four live adapters. Spec: `adr-0024-run-lifecycle.md`,
+    evidence-spec s2.2, s2.3, s3.1. Code: `src/runner/deadline.ts`, `src/runner/runner.ts`,
+    `src/adapters/childProcess.ts`, `src/cli.ts`, `src/diagnose.ts`; tests
+    `test/run-lifecycle.test.ts`, `test/child-process.test.ts`.
+
 ## Reuse from mcp-review-check (landscape §3.2, ADR-0001)
 Protocol client (`src/protocol/*`), fixture servers (`test/fixtures/*-server.mjs`),
 reporters (`src/report/{json,markdown,sarif}.ts`), the OIDC trusted-publishing release

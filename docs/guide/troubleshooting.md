@@ -44,9 +44,12 @@ each problem. Then match what `run` printed (ADR-0022):
 | `what went wrong:` ... `could not reach its model API` | network or DNS failure | check the network or proxy the agent uses |
 | `what went wrong:` ... `not run: the next repetition could have exceeded --budget` | the budget cap stopped the run | raise `--budget` as the `next:` line suggests |
 
-A run that measured nothing because of such a failure exits 1. A Codex CLI run with no network
-retries forever ("Reconnecting... waiting for network") and lurekit has no per-repetition timeout
-yet: the `[i/N]` progress line shows which scenario is stuck; press Ctrl-C.
+A run that measured nothing because of such a failure exits 1. A repetition that hangs (a Codex
+CLI run with no network retries forever: "Reconnecting... waiting for network"; a stuck
+permission prompt; a provider outage) is stopped after `--run-timeout` (default 180 s) and
+scored `inconclusive(run_timeout)`; the `[i/N]` progress line shows which scenario is running.
+Ctrl-C stops the current repetition and skips the rest; the manifest is still written and the
+stopped repetitions are marked `inconclusive(adapter_error)` with `run aborted by operator`.
 
 ## The agent binary vanished in the middle of a batch
 

@@ -45,7 +45,8 @@ export type InconclusiveReason =
   | 'detector_unverified' // the detector's selfTest has not passed this session (§1.3)
   | 'budget_exhausted' // the next run could exceed budget_usd (§3.3)
   | 'isolation_failure' // egress escaped the sink (§1.4) — reserved, not raised in 0.1
-  | 'precondition_failed'; // a fixture's declared `expect` was not observed in the run (§3.1)
+  | 'precondition_failed' // a fixture's declared `expect` was not observed in the run (s3.1)
+  | 'run_timeout'; // ADR-0024: the per-run timer (--run-timeout) fired before the adapter returned
 
 export interface RunConfig {
   k: number; // runs per scenario
@@ -54,6 +55,8 @@ export interface RunConfig {
   isolation: 'container' | 'container+netns';
   resultsRoot: string; // directory under which per-run dirs are written (§2.1)
   budget_usd?: number; // hard cost cap; the runner stops when the next run could exceed it
+  // ADR-0024 D1: per-run wall-clock cap in ms; undefined arms no timer (replay, direct runner use).
+  run_timeout_ms?: number;
 }
 
 /** Deterministic id source injected by the caller. The runner never generates ids or reads
@@ -151,6 +154,11 @@ export interface EvidenceRecord {
   // default, absolute when the caller set an explicit base. Absent when the repetition never
   // reached provisioning (detector unverified, budget exhausted).
   workdir?: string;
+  // ADR-0024 D4, all three written only when true / present / non-empty, so a completed run's
+  // record is byte-identical to one written before ADR-0024.
+  timed_out?: true; // the per-run timer fired
+  elapsed_ms?: number; // wall-clock ms from the adapter call to the abort; non-completed runs only
+  teardown_error?: string[]; // "<who>: <message>" per detector/fixture teardown that threw
 }
 
 /** One repetition's in-memory result (extends the original sketch). */
@@ -169,6 +177,9 @@ export interface SingleRun {
   isolation?: IsolationMarker; // §4.3 (absent for a repetition that never reached the adapter)
   attempted_forbidden?: boolean; // §3.1 (absent for a repetition that never reached the adapter)
   resisted_kind?: ResistedKind; // §3.1 (only when outcome is resisted)
+  // ADR-0024: in-memory only, set when the evidence record could not be written (the warnings
+  // then exist nowhere else); the CLI diagnosis reads them from here.
+  warnings?: string[];
 }
 
 /** Aggregated per-scenario result over k runs (extends the original sketch). */
@@ -214,6 +225,9 @@ export interface RunManifest {
     vulnerable_if: 'any' | 'majority';
     isolation: string;
     budget_usd: number | null;
+    // ADR-0024 D4: the per-run cap the results were obtained under; null for --replay (no
+    // timer). Optional in the type so manifests written before ADR-0024 stay valid.
+    run_timeout_ms?: number | null;
   };
   // corpus_digest_full: set only on a published bundle that withheld/excluded scenarios
   // (ADR-0017, evidence-spec s2.3): the run's original digest; corpus_digest then covers the

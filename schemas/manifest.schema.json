@@ -31,7 +31,12 @@
         "k": { "type": "integer", "minimum": 1 },
         "vulnerable_if": { "enum": ["any", "majority"] },
         "isolation": { "type": "string" },
-        "budget_usd": { "type": ["number", "null"] }
+        "budget_usd": { "type": ["number", "null"] },
+        "run_timeout_ms": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "ADR-0024: per-run wall-clock cap (--run-timeout) the results were obtained under; null for --replay (no timer); absent in bundles written before ADR-0024."
+        }
       }
     },
     "corpus": {

@@ -13,9 +13,7 @@
 // Determinism (§4.5): the parse step is the exported pure `observeCursorRun`; tests drive an
 // offline stub binary (test/fixtures/agents/stub-cursor.mjs). No live agent, network or spend.
 
-import { spawn, spawnSync } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { constants as osConstants } from 'node:os';
 import { performance } from 'node:perf_hooks';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
@@ -31,6 +29,7 @@ import type {
 } from './adapter.js';
 import { normalizeMcpServers, requireWorkdir, stderrExcerpt } from './adapter.js';
 import { agentChildEnv, argvRecord, CappedStderr, envNames } from './childEnv.js';
+import { killTree, probeVersionCapped, spawnAgent, waitExit } from './childProcess.js';
 import type { AgentId } from '../scenario/types.js';
 
 export const CURSOR_STREAM_FILE = 'cursor-stream.jsonl';
@@ -204,43 +203,35 @@ export class CursorCliAdapter implements Adapter {
     };
 
     const { cmd, args } = command(bin, argv);
-    const child = spawn(cmd, args, {
-      cwd: workdir,
-      env,
-      windowsHide: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    // ADR-0024 D5: own process group (POSIX), tracked, killed as a tree on abort.
+    const child = spawnAgent(cmd, args, { cwd: workdir, env });
     const onAbort = (): void => {
-      child.kill('SIGKILL');
+      // SIGTERM to the whole tree first (the final event can still be flushed), then SIGKILL.
+      void killTree(child);
     };
     if (signal.aborted) onAbort();
     else signal.addEventListener('abort', onAbort, { once: true });
 
-    const exitCode: number = await new Promise<number>((resolve) => {
-      child.stdout.on('data', (buf: Buffer) => {
-        stdoutChunks.push(buf);
-        lineBuffer += decoder.write(buf);
-        let idx: number;
-        while ((idx = lineBuffer.indexOf('\n')) >= 0) {
-          const line = lineBuffer.slice(0, idx);
-          lineBuffer = lineBuffer.slice(idx + 1);
-          handleLine(line);
-        }
-      });
-      // stderr is kept verbatim up to STDERR_FILE_MAX: on failure Cursor writes its error there (NOTES).
-      child.stderr.on('data', (buf: Buffer) => stderrCap.push(buf));
-      child.on('error', () => {
-        warnings.push(`failed to spawn agent binary "${bin}"`);
-        resolve(-1);
-      });
-      child.on('close', (code, sig) => {
-        lineBuffer += decoder.end();
-        if (lineBuffer.length > 0) handleLine(lineBuffer);
-        if (code !== null) resolve(code);
-        else if (sig) resolve(128 + (signalNumber(sig) ?? 0));
-        else resolve(-1);
-      });
+    child.stdout!.on('data', (buf: Buffer) => {
+      stdoutChunks.push(buf);
+      lineBuffer += decoder.write(buf);
+      let idx: number;
+      while ((idx = lineBuffer.indexOf('\n')) >= 0) {
+        const line = lineBuffer.slice(0, idx);
+        lineBuffer = lineBuffer.slice(idx + 1);
+        handleLine(line);
+      }
     });
+    // stderr is kept verbatim up to STDERR_FILE_MAX: on failure Cursor writes its error there (NOTES).
+    child.stderr!.on('data', (buf: Buffer) => stderrCap.push(buf));
+    // Resolves on `exit`, then waits for `close` at most STDIO_DRAIN_MS (ADR-0024 D5): a
+    // grandchild holding the stdout pipe cannot keep this adapter from returning.
+    const exit = await waitExit(child);
+    if (exit.error) warnings.push(`failed to spawn agent binary "${bin}"`);
+    if (exit.drainTimedOut) warnings.push('agent stdio did not close after exit (a child process of the agent may still hold it); output read so far is kept');
+    lineBuffer += decoder.end();
+    if (lineBuffer.length > 0) handleLine(lineBuffer);
+    const exitCode: number = exit.exitCode;
     signal.removeEventListener('abort', onAbort);
     const endedAt = Date.now();
 
@@ -421,14 +412,11 @@ function command(bin: string, argv: string[]): { cmd: string; args: string[] } {
   return isNodeScript ? { cmd: process.execPath, args: [bin, ...argv] } : { cmd: bin, args: argv };
 }
 
-/** Upper bound for `--version`: a probe that blocks (e.g. on an update) must not hang the run,
- *  which the abort signal cannot interrupt while spawnSync is blocking. */
-const VERSION_PROBE_TIMEOUT_MS = 15_000;
-
 function probeVersion(bin: string, env: NodeJS.ProcessEnv): string | undefined {
   const { cmd, args } = command(bin, ['--version']);
   try {
-    const res = spawnSync(cmd, args, { encoding: 'utf8', windowsHide: true, env, timeout: VERSION_PROBE_TIMEOUT_MS, killSignal: 'SIGKILL' });
+    // ADR-0024 D5: capped (VERSION_PROBE_TIMEOUT_MS, SIGKILL on expiry) so a blocking probe cannot hang the run.
+    const res = probeVersionCapped(cmd, args, env);
     if (res.error || res.status !== 0 || typeof res.stdout !== 'string') return undefined;
     const out = res.stdout.trim();
     return out.length > 0 ? out : undefined;
@@ -453,7 +441,3 @@ function versionMatches(pinned: string, reported: string): boolean {
   return a !== undefined && a === b;
 }
 
-function signalNumber(sig: NodeJS.Signals): number | undefined {
-  const n = (osConstants.signals as Record<string, number>)[sig];
-  return typeof n === 'number' ? n : undefined;
-}

@@ -336,6 +336,13 @@ describe('post-run diagnosis (pure)', () => {
     expect(classifyRep(rep(['error item: Model metadata for `x` not found. Defaulting to fallback metadata']))!.category).toBe('model');
     expect(classifyRep(rep(['adapter run failed: openhands: ... the profile must state permission_mode: always-approve to run it']))!.category).toBe('permission');
     expect(classifyRep(rep(['budget_usd=1 would be exceeded by the next run'], 'budget_exhausted'))!.category).toBe('budget');
+    // ADR-0024: a timed-out repetition is its own category, even when the partial stream carries a network line.
+    const timedOut = classifyRep(rep(['error event: waiting for network', 'run timed out after 180004 ms (limit 180000 ms)'], 'run_timeout'))!;
+    expect(timedOut.category).toBe('timeout');
+    expect(timedOut.example).toBe('run timed out after 180004 ms (limit 180000 ms)');
+    const [timeoutLine] = diagnoseRun([rep(['run timed out after 180004 ms (limit 180000 ms)'], 'run_timeout')], { agent: 'claude-code', model: 'm', spentUsd: 0, runTimeoutMs: 180_000 });
+    expect(timeoutLine.what).toContain('per-run timeout (180 s)');
+    expect(timeoutLine.next).toContain('--run-timeout 360');
     expect(classifyRep(rep(['something odd']))!.category).toBe('adapter');
     expect(classifyRep(rep(['precondition failed: x'], 'precondition_failed'))).toBeUndefined();
     expect(classifyRep(rep([], undefined, 'resisted'))).toBeUndefined();

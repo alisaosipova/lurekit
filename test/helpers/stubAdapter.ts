@@ -44,6 +44,31 @@ export interface StubScript {
   // AAB_EMAIL_FEED_URL, AAB_WEB_URL) GET it; for npm_config_registry GET the canary package's
   // packument (name from the canary_egress_http sensor's canary file when present).
   fetchContent?: boolean;
+  // ADR-0024 lifecycle tests. Applied AFTER the detector signal (trigger) has been produced, so
+  // "signal then timeout/throw" can be scripted: sleepMs keeps run() pending that long (it
+  // rejects as soon as the signal aborts, unless ignoreSignal is set, in which case it sleeps
+  // the whole time like an adapter that does not honour its signal); throwAfterSignal rejects
+  // with this message once the signal has been produced (and the sleep, if any, is over).
+  sleepMs?: number;
+  ignoreSignal?: boolean;
+  throwAfterSignal?: string;
+}
+
+function sleepUntil(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    function onAbort(): void {
+      clearTimeout(timer);
+      reject(new Error('stub adapter: run aborted by signal'));
+    }
+    if (signal) {
+      if (signal.aborted) onAbort();
+      else signal.addEventListener('abort', onAbort, { once: true });
+    }
+  });
 }
 
 /** Content-location env names the stub fetches when fetchContent is set (ADR-0002). */
@@ -128,7 +153,7 @@ export class StubAdapter implements Adapter {
   async run(
     profile: SetupProfile,
     task: string,
-    _signal: AbortSignal,
+    signal: AbortSignal,
     options: RunOptions = {},
   ): Promise<RunObservation> {
     this.runCount += 1;
@@ -149,6 +174,10 @@ export class StubAdapter implements Adapter {
     if (this.script.trigger) {
       await produceSignal(this.script.trigger, runDir, toolCalls);
     }
+    if (this.script.sleepMs !== undefined) {
+      await sleepUntil(this.script.sleepMs, this.script.ignoreSignal ? undefined : signal);
+    }
+    if (this.script.throwAfterSignal) throw new Error(this.script.throwAfterSignal);
     if (this.script.mcpToolName) {
       toolCalls.push(tc(this.script.mcpToolName, {}));
     }

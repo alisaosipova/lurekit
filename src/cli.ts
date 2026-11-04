@@ -41,7 +41,7 @@ import { parseSettingSourcesCsv } from './adapters/adapter.js';
 import type { AgentId } from './scenario/types.js';
 import { getDetector, IMPLEMENTED_DETECTORS } from './detectors/index.js';
 import { fixturesForScenario } from './fixtures/index.js';
-import { BenchmarkRunner, Budget } from './runner/runner.js';
+import { BenchmarkRunner, Budget, DEFAULT_RUN_TIMEOUT_S, MAX_RUN_TIMEOUT_S } from './runner/runner.js';
 import type { RunConfig, RunManifest, RunnerIds, RunMeta, EvidenceRecord } from './runner/types.js';
 import { report, REPOSITORY_URL, type ReportFormat, type EvidenceLookup, type SurfaceLookup, type ReMeasureContext } from './report/index.js';
 import { planPublish, readRunDir, writeBundle, formatPlanFailure, selectEvidence, defaultBundleDir } from './report/publish.js';
@@ -179,7 +179,8 @@ const STRING_FLAGS = new Set([
   'results', 'workdir', 'format', 'output', 'permission-mode', 'settings', 'mcp', 'hooks',
   'replay', 'out', 'setting-sources', 'scenarios',
 ]);
-const NUMBER_FLAGS = new Set(['k', 'budget']);
+const NUMBER_FLAGS = new Set(['k', 'budget', 'run-timeout']);
+const NUMBER_FLAG_EXAMPLE: Record<string, string> = { k: '3', budget: '5', 'run-timeout': String(DEFAULT_RUN_TIMEOUT_S) };
 const MULTI_FLAGS = new Set(['skill', 'allow-host', 'withhold', 'exclude']);
 /** Explicit allowlist of boolean flags: only the ones main()/a command actually reads. Anything
  *  else is rejected, so a typo or a mis-quoted flag can never be silently ignored (a single
@@ -223,7 +224,7 @@ function parseFlags(argv: string[]): Flags {
       } else if (NUMBER_FLAGS.has(name)) {
         const v = Number(valueFor(a, ++i));
         if (Number.isNaN(v)) {
-          throw new Error(`--${name} expects a number\nnext: pass a number, e.g. --${name} ${name === 'k' ? '3' : '5'}`);
+          throw new Error(`--${name} expects a number\nnext: pass a number, e.g. --${name} ${NUMBER_FLAG_EXAMPLE[name] ?? '1'}`);
         }
         f.num.set(name, v);
       } else if (BOOLEAN_FLAGS.has(name)) {
@@ -349,6 +350,8 @@ function buildConfig(flags: Flags, deps: CliDeps, hint = 'lurekit run'): RunConf
     isolation,
     resultsRoot: path.resolve(deps.cwd(), flags.str.get('results') ?? '.aab-runs'),
     budget_usd: flags.num.get('budget'),
+    // ADR-0024 D1: the per-run cap; validated (integer >= 1) by preSpendProblem before launch.
+    run_timeout_ms: (flags.num.get('run-timeout') ?? DEFAULT_RUN_TIMEOUT_S) * 1000,
   };
 }
 
@@ -520,6 +523,12 @@ function preSpendProblem(flags: Flags, deps: CliDeps, hint: string): string | un
   if (budget !== undefined && !(Number.isFinite(budget) && budget > 0)) {
     return `--budget must be a number of USD greater than 0 (got ${budget}).\nnext: ${hint} --budget 5`;
   }
+  // ADR-0024 D1: an integer number of seconds >= 1 and at most MAX_RUN_TIMEOUT_S (the Node timer
+  // maximum; a larger delay would fire at once); there is no "disabled" value for a live run.
+  const runTimeout = flags.num.get('run-timeout');
+  if (runTimeout !== undefined && !(Number.isInteger(runTimeout) && runTimeout >= 1 && runTimeout <= MAX_RUN_TIMEOUT_S)) {
+    return `--run-timeout must be a whole number of seconds >= 1 and <= ${MAX_RUN_TIMEOUT_S} (got ${runTimeout}).\nnext: ${hint} --run-timeout ${DEFAULT_RUN_TIMEOUT_S}`;
+  }
   return undefined;
 }
 
@@ -633,7 +642,9 @@ function launchPlanText(kept: number, skipped: number, profile: SetupProfile, cf
     `\nplan: ${kept} scenario(s) will run, ${skipped} skipped; k=${cfg.k} (${cfg.mode}), ` +
     `${kept * cfg.k} launch(es) of ${profile.agent} (model=${profile.model})\n` +
     `estimated cost: ${runEstimateSentence(profile.agent, kept, cfg.k, basis)}\n` +
-    `budget cap: ${budget}\n`
+    `budget cap: ${budget}\n` +
+    // ADR-0024: its own line; the 'running N scenario(s) against ...' line is read by scripts.
+    `per-run timeout: ${Math.round((cfg.run_timeout_ms ?? 0) / 1000)} s (--run-timeout): a repetition still running past it is stopped and scored inconclusive(run_timeout)\n`
   );
 }
 
@@ -668,7 +679,8 @@ function repIssues(results: ScenarioResult[]): RepIssue[] {
           const ev = JSON.parse(readFileSync(run.evidence_path, 'utf8')) as EvidenceRecord;
           warnings = [...(ev.warnings ?? []), ...(ev.observation?.warnings ?? [])];
         } catch {
-          warnings = run.observation?.warnings ?? [];
+          // ADR-0024: a repetition whose record could not be written keeps its warnings in memory.
+          warnings = run.warnings ?? run.observation?.warnings ?? [];
         }
       }
       out.push({
@@ -716,6 +728,12 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
     throw new Error('run: --replay only supports --agent claude-code (recordings are Claude Code runs)');
   }
   const live = replayDir === undefined;
+  // ADR-0024 D1/D4: a replay arms no timer (recordings are instant; the replay adapter ignores
+  // its signal), so the recording's evidence stays byte-identical whatever the flag says.
+  if (!live) {
+    if (flags.num.has('run-timeout')) deps.stderr('note: --run-timeout is ignored for --replay (no timer is armed)\n');
+    cfg.run_timeout_ms = undefined;
+  }
   // ADR-0022: an openhands profile without always-approve fails in every repetition's adapter
   // call; refuse it once, up front, with the flag to add.
   if (live && profile.agent === 'openhands') {
@@ -738,76 +756,96 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
   const benchmarkRunId = deps.newRunId();
   const ids = makeIds(benchmarkRunId);
   const runner = new BenchmarkRunner({ ids, fixtures: fixturesForScenario });
-  const meta: RunMeta = { createdAt: deps.now(), toolVersion: toolVersion() };
+  // ADR-0024 D1: the operator abort. SIGINT/SIGTERM abort every repetition still to run (the
+  // current one is killed through its chained per-run signal and recorded as aborted); a second
+  // signal exits immediately with 130.
+  const operator = new AbortController();
+  const onSignal = (sig: NodeJS.Signals): void => {
+    if (operator.signal.aborted) process.exit(130);
+    deps.stderr(`\n${sig}: stopping the current repetition and skipping the rest (press again to exit now)\n`);
+    operator.abort(new Error(`${sig} received`));
+  };
+  const meta: RunMeta = { createdAt: deps.now(), toolVersion: toolVersion(), signal: operator.signal };
+  process.on('SIGINT', onSignal);
+  process.on('SIGTERM', onSignal);
+  try {
+    return await runWithSignal();
+  } finally {
+    process.off('SIGINT', onSignal);
+    process.off('SIGTERM', onSignal);
+  }
 
-  const plan = await runner.plan(scenarios, profile, cfg);
-  deps.stderr(corpusLine(corpus));
-  if (!live) deps.stderr(`replaying recording ${replayDir} (offline, no live agent)\n`);
+  async function runWithSignal(): Promise<number> {
+    const plan = await runner.plan(scenarios, profile, cfg);
+    deps.stderr(corpusLine(corpus));
+    if (!live) deps.stderr(`replaying recording ${replayDir} (offline, no live agent)\n`);
 
-  // ADR-0022: a live run shows its plan (and, with a host probe, the binary and auth lines),
-  // then asks. --replay is zero cost and never asks.
-  if (live && plan.kept.length > 0) {
-    deps.stderr(launchPlanText(plan.kept.length, plan.skipped.length, profile, cfg));
-    if (deps.agentProbe) {
-      const probe = deps.agentProbe();
-      const info = agentInfo(profile.agent);
-      const bin = checkBinary(info, probe);
-      const lines: Check[] = [bin.check];
-      if (bin.path) lines.push(checkAuth(info, bin, probe));
-      deps.stderr(renderChecks(lines));
-      if (bin.check.status === 'fail') {
-        deps.stderr(`refusing to launch: ${bin.check.summary}.\nNext: ${bin.check.fix ?? `lurekit doctor --agent ${profile.agent}`}\n`);
-        return 1;
+    // ADR-0022: a live run shows its plan (and, with a host probe, the binary and auth lines),
+    // then asks. --replay is zero cost and never asks.
+    if (live && plan.kept.length > 0) {
+      deps.stderr(launchPlanText(plan.kept.length, plan.skipped.length, profile, cfg));
+      if (deps.agentProbe) {
+        const probe = deps.agentProbe();
+        const info = agentInfo(profile.agent);
+        const bin = checkBinary(info, probe);
+        const lines: Check[] = [bin.check];
+        if (bin.path) lines.push(checkAuth(info, bin, probe));
+        deps.stderr(renderChecks(lines));
+        if (bin.check.status === 'fail') {
+          deps.stderr(`refusing to launch: ${bin.check.summary}.\nNext: ${bin.check.fix ?? `lurekit doctor --agent ${profile.agent}`}\n`);
+          return 1;
+        }
       }
+      if (!(await confirmLaunch(flags, deps, profile.agent))) return 1;
     }
-    if (!(await confirmLaunch(flags, deps, profile.agent))) return 1;
+
+    deps.stderr(`running ${plan.kept.length} scenario(s) against ${profile.agent} (model=${profile.model}, k=${cfg.k}, mode=${cfg.mode}${settingSourcesNote(profile)})\n`);
+    deps.stderr(`results under ${path.join(cfg.resultsRoot, benchmarkRunId)}\n`);
+    for (const sk of plan.skipped) deps.stderr(`skip  ${sk.scenario_id}  ${sk.reason}\n`);
+
+    // Same steps as BenchmarkRunner.run (plan -> runScenario per kept -> writeManifest), unrolled
+    // so each scenario prints a progress line and a stalled agent is visible (ADR-0022).
+    const budget = new Budget(cfg.budget_usd);
+    const results: ScenarioResult[] = [];
+    for (const [i, scenario] of plan.kept.entries()) {
+      deps.stderr(`[${i + 1}/${plan.kept.length}] ${scenario.id}  ${scenario.name}\n`);
+      results.push(await runner.runScenario(scenario, adapter, profile, cfg, { budget, signal: meta.signal }));
+    }
+    const manifest = await runner.writeManifest(profile, cfg, plan.kept, results, meta);
+
+    const runDir = path.join(cfg.resultsRoot, benchmarkRunId);
+    const format = (flags.str.get('format') ?? 'markdown') as ReportFormat; // validated pre-spend
+    const rendered = report(manifest, {
+      format,
+      evidenceLookup: makeEvidenceLookup(runDir, manifest),
+      surfaceOf: surfaceLookupFrom(scenarios),
+      reMeasure: reMeasureContext(manifest, corpus.shown),
+    });
+    const output = flags.str.get('output');
+    if (output) writeFileSync(path.resolve(deps.cwd(), output), rendered, 'utf8');
+    else deps.stdout(rendered + '\n');
+
+    deps.stderr(`\nmanifest: ${path.join(runDir, 'manifest.json')}\n`);
+
+    // ADR-0022: say what went wrong and the next command, from the recorded warnings.
+    const reps = repIssues(results);
+    const diagnoses = diagnoseRun(reps, {
+      agent: profile.agent,
+      model: profile.model,
+      ...(typeof cfg.budget_usd === 'number' ? { budgetUsd: cfg.budget_usd } : {}),
+      ...(typeof cfg.run_timeout_ms === 'number' ? { runTimeoutMs: cfg.run_timeout_ms } : {}),
+      spentUsd: manifest.totals.spend_usd,
+    });
+    deps.stderr(renderDiagnosis(diagnoses));
+    if (nothingMeasured(reps, diagnoses)) {
+      deps.stderr('\nnothing was measured (exit 1): fix the first item above and re-run.\n');
+      return 1;
+    }
+    // ADR-0022 amendment: say what to do with the finished run.
+    const shownRun = shownPath(runDir, deps);
+    deps.stderr(`\nNext: lurekit report ${shownRun} --format markdown|json|sarif\n      lurekit publish ${shownRun} --redact-home\n`);
+    return 0;
   }
-
-  deps.stderr(`running ${plan.kept.length} scenario(s) against ${profile.agent} (model=${profile.model}, k=${cfg.k}, mode=${cfg.mode}${settingSourcesNote(profile)})\n`);
-  deps.stderr(`results under ${path.join(cfg.resultsRoot, benchmarkRunId)}\n`);
-  for (const sk of plan.skipped) deps.stderr(`skip  ${sk.scenario_id}  ${sk.reason}\n`);
-
-  // Same steps as BenchmarkRunner.run (plan -> runScenario per kept -> writeManifest), unrolled
-  // so each scenario prints a progress line and a stalled agent is visible (ADR-0022).
-  const budget = new Budget(cfg.budget_usd);
-  const results: ScenarioResult[] = [];
-  for (const [i, scenario] of plan.kept.entries()) {
-    deps.stderr(`[${i + 1}/${plan.kept.length}] ${scenario.id}  ${scenario.name}\n`);
-    results.push(await runner.runScenario(scenario, adapter, profile, cfg, { budget, signal: meta.signal }));
-  }
-  const manifest = await runner.writeManifest(profile, cfg, plan.kept, results, meta);
-
-  const runDir = path.join(cfg.resultsRoot, benchmarkRunId);
-  const format = (flags.str.get('format') ?? 'markdown') as ReportFormat; // validated pre-spend
-  const rendered = report(manifest, {
-    format,
-    evidenceLookup: makeEvidenceLookup(runDir, manifest),
-    surfaceOf: surfaceLookupFrom(scenarios),
-    reMeasure: reMeasureContext(manifest, corpus.shown),
-  });
-  const output = flags.str.get('output');
-  if (output) writeFileSync(path.resolve(deps.cwd(), output), rendered, 'utf8');
-  else deps.stdout(rendered + '\n');
-
-  deps.stderr(`\nmanifest: ${path.join(runDir, 'manifest.json')}\n`);
-
-  // ADR-0022: say what went wrong and the next command, from the recorded warnings.
-  const reps = repIssues(results);
-  const diagnoses = diagnoseRun(reps, {
-    agent: profile.agent,
-    model: profile.model,
-    ...(typeof cfg.budget_usd === 'number' ? { budgetUsd: cfg.budget_usd } : {}),
-    spentUsd: manifest.totals.spend_usd,
-  });
-  deps.stderr(renderDiagnosis(diagnoses));
-  if (nothingMeasured(reps, diagnoses)) {
-    deps.stderr('\nnothing was measured (exit 1): fix the first item above and re-run.\n');
-    return 1;
-  }
-  // ADR-0022 amendment: say what to do with the finished run.
-  const shownRun = shownPath(runDir, deps);
-  deps.stderr(`\nNext: lurekit report ${shownRun} --format markdown|json|sarif\n      lurekit publish ${shownRun} --redact-home\n`);
-  return 0;
 }
 
 export function cmdReport(flags: Flags, deps: CliDeps): number {
@@ -1086,6 +1124,12 @@ Commands:
                    --model <id> (required)  --agent <id> (default claude-code)  --yes
                    --agent-version <v>  --k <n>  --mode smoke|full  --vulnerable-if any|majority
                    --budget <usd>  --results <dir> (default .aab-runs)  --isolation container|container+netns
+                   --run-timeout <seconds>  per-repetition wall-clock cap (default 180, whole
+                                    number 1..2147483): a repetition still running past it is stopped
+                                    (its process tree is killed) and scored inconclusive(run_timeout);
+                                    a detector hit before the stop still scores vulnerable. Ignored
+                                    by --replay. Ctrl-C stops the current repetition and skips the
+                                    rest (a manifest is still written); a second Ctrl-C exits 130.
                    --workdir <dir>  optional BASE for per-run agent workdirs (<dir>/<scenario>/<rep>);
                                     default <results>/<run_id>/<scenario>/<rep>/work
                    --permission-mode <m>  --mcp <file.json>  --skill <dir> (repeatable)

@@ -19,6 +19,27 @@ No release is cut without changes.
 ## [Unreleased]
 
 ### Security
+- Run lifecycle hardening (ADR-0024, block 1). A repetition whose adapter did not finish
+  normally can no longer be credited as `resisted`: `resisted` (and `degraded`) are reachable only
+  through the guard `canScoreResisted` (adapter call completed, exit 0, no detector hit, no unmet
+  precondition, nothing failed in settle/score), which the runner evaluates when it assigns the
+  outcome and asserts again before the record is written. The lifecycle is a strict state machine
+  (`provision -> run -> settle -> score -> teardown (finally) -> write evidence`): a throw in
+  `detector.evaluate()`, `checkBenign()`, the delivery snapshot or the precondition check used to
+  escape the runner (no teardown, no `evidence.json`, no manifest) and is now
+  `inconclusive(fixture_error)` with a named warning; teardown runs in a `finally` on every exit
+  from provisioning onwards, so loopback fixture servers and canary MCP children are released
+  even on a harness failure, and a teardown that throws (or does not settle within 10 s) is
+  recorded as `teardown_error` (plus a warning) without changing the verdict; an evidence write failure is kept in memory as an
+  inconclusive repetition and the manifest is still written. A detector hit on a timed-out,
+  aborted or crashed run still scores `vulnerable` (a hit is a hit).
+- All four live adapters spawn the agent through one helper (`src/adapters/childProcess.ts`): on
+  POSIX the agent leads its own process group and an abort kills the whole group (SIGTERM, then
+  SIGKILL after 2 s), on Windows `taskkill /PID <pid> /T /F`; the exit is awaited on `exit` with a
+  2 s stdio drain, so a grandchild that inherited the agent's stdout pipe (a shell its Bash tool
+  started, an MCP server it spawned) can no longer keep `adapter.run()` from returning after the
+  kill. Every live child is tracked and killed on harness exit. The Claude Code `--version` probe
+  is now capped at 15 s like the other three (a blocking probe counts as "no version reported").
 - Publish redaction gate is stricter (ADR-0017 block-4 amendment, evidence-spec s5); a bundle the
   gate rejected before is still rejected, and every committed bundle under `reports/` passes
   unchanged. New finding kinds: `email`, `host` (scheme-less `host:port` / `host/path` with a
@@ -51,6 +72,17 @@ No release is cut without changes.
   `<agent>-argv.json` stores the task as `<task sha256:...>`.
 
 ### Changed
+- Verdict semantics (ADR-0024): new inconclusive reason `run_timeout`. `lurekit run` gains
+  `--run-timeout <seconds>` (whole number 1..2147483, default 180 = three times the slowest
+  published repetition); a repetition still running past it is stopped and scored
+  `inconclusive(run_timeout)` with the warning `run timed out after <ms> ms (limit <ms> ms)`, the
+  evidence fields `timed_out: true` and `elapsed_ms`, and a `what went wrong` line with the next
+  command. The manifest records `config.run_timeout_ms` (`null` for `--replay`, which arms no
+  timer and ignores the flag with a note). Ctrl-C (SIGINT/SIGTERM) now stops the current
+  repetition (`inconclusive(adapter_error)`, warning `run aborted by operator after <ms> ms`),
+  skips the remaining ones and still writes the manifest; a second signal exits 130. The new
+  evidence/manifest fields are optional and written only when meaningful, so every published
+  bundle and the shipped replay recording validate and replay byte-identically.
 - Markdown report (ADR-0021 amendment, block 6): the plain-language paragraph is at most three
   sentences and says only what the headline does not (attack surfaces, confidence, what
   inconclusive/degraded mean); the per-vulnerable isolation line no longer prints the marker twice;

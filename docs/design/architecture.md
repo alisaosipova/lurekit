@@ -35,6 +35,10 @@ The design is split across several files so each piece stays small and reviewabl
 - `adr-0023-generated-docs.md` - generated docs: the scenario catalog, the verified-against matrix
   and the demo image, each regenerated and diffed in CI and in `npm test`. **Proposed, implemented;
   awaiting approval.**
+- `adr-0024-run-lifecycle.md` - run lifecycle hardening: `--run-timeout` with a per-run
+  `AbortController`, the lifecycle as a strict state machine with a `resisted` guard
+  (`canScoreResisted`), teardown in `finally`, `inconclusive(run_timeout)`, process-group kill in a
+  shared child-process helper. **Proposed, implemented; awaiting approval.**
 - `evidence-spec.md` — the detector/evidence/verdict/adapter/reporting contract in detail
   (§1 detectors, §2 evidence+manifest, §3 verdicts, §4 adapter+observation, §5 redaction,
   §6 reporting). The ADRs below reference it rather than restating it.
@@ -532,3 +536,4 @@ plumbing, keep decisions in ADRs; codified in `CLAUDE.md`. This document was ass
 | 0021 | Demo command and prescriptive report layer (`adr-0021-demo-and-prescriptive-report.md`) | proposed, implemented; awaiting approval |
 | 0022 | Doctor, smoke default and newcomer error paths (`adr-0022-doctor-smoke-default-and-error-paths.md`) | proposed, implemented; awaiting approval |
 | 0023 | Generated docs: catalog, verified-against matrix, demo image (`adr-0023-generated-docs.md`) | proposed, implemented; awaiting approval |
+| 0024 | Run lifecycle: per-run timeout, strict state machine, process-group kill (`adr-0024-run-lifecycle.md`) | proposed, implemented; awaiting approval |

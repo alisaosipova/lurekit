@@ -18,10 +18,9 @@
 // Determinism (§4.5): given the same profile, task and recorded stream, the adapter produces
 // the same RunObservation. Tests drive a stub agent binary; no live agent, network or spend.
 
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { accessSync, constants as fsConstants, existsSync, realpathSync, statSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { constants as osConstants } from 'node:os';
 import { performance } from 'node:perf_hooks';
 import path from 'node:path';
 
@@ -37,6 +36,7 @@ import type {
   McpServerStatus,
 } from './adapter.js';
 import { agentChildEnv, envNames } from './childEnv.js';
+import { killTree, probeVersionCapped, spawnAgent, waitExit } from './childProcess.js';
 import { inputDigest, normalizeMcpServers, requireWorkdir, stderrExcerpt, strictMcpConfigFor, validateSettingSources } from './adapter.js';
 import type { AgentId } from '../scenario/types.js';
 
@@ -66,6 +66,8 @@ export interface ClaudeCodeAdapterOptions {
   retryDelaysMs?: readonly number[];
   /** Sleep used between retries (default setTimeout). Tests inject a deterministic one. */
   sleep?: (ms: number) => Promise<void>;
+  /** Cap for the `--version` probe (default VERSION_PROBE_TIMEOUT_MS, ADR-0024 D5). Tests shorten it. */
+  versionProbeTimeoutMs?: number;
 }
 
 export interface HookEntry {
@@ -84,6 +86,7 @@ export class ClaudeCodeAdapter implements Adapter {
   private readonly defaultRunDir?: string;
   private readonly retryDelaysMs: readonly number[];
   private readonly sleep: (ms: number) => Promise<void>;
+  private readonly versionProbeTimeoutMs: number | undefined;
   /** Absolute real path resolved once per instance (§4.3); re-resolved only if it vanishes. */
   private resolvedBin?: string;
   /** First version this instance observed; later repetitions are compared to it (§4.3). */
@@ -94,6 +97,7 @@ export class ClaudeCodeAdapter implements Adapter {
     this.defaultRunDir = opts.runDir;
     this.retryDelaysMs = opts.retryDelaysMs ?? LAUNCH_RETRY_DELAYS_MS;
     this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+    this.versionProbeTimeoutMs = opts.versionProbeTimeoutMs;
   }
 
   capabilities(): {
@@ -161,7 +165,7 @@ export class ClaudeCodeAdapter implements Adapter {
     const probed = await retryLaunch('version probe', retry, () => {
       const b = this.currentBin(warnings);
       if (!b.ok) return b;
-      const p = probeVersion(b.value);
+      const p = probeVersion(b.value, this.versionProbeTimeoutMs);
       if (!p.ok) return p;
       return { ok: true, value: { bin: b.value, version: p.value } };
     });
@@ -259,7 +263,8 @@ export class ClaudeCodeAdapter implements Adapter {
       if (!b.ok) return b;
       bin = b.value;
       const { cmd, args } = commandFor(bin, argv);
-      const c = spawn(cmd, args, { cwd: workdir, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      // ADR-0024 D5: own process group (POSIX), tracked, killed as a tree on abort.
+      const c = spawnAgent(cmd, args, { cwd: workdir, env });
       const err = await spawnOutcome(c);
       if (!err) return { ok: true, value: c };
       const reason = `failed to spawn agent binary "${bin}": ${err.code ?? err.message}`;
@@ -267,39 +272,35 @@ export class ClaudeCodeAdapter implements Adapter {
     });
 
     const onAbort = (): void => {
-      // Honour the AbortSignal: kill the child (observe, never hang).
-      child.kill('SIGKILL');
+      // Honour the AbortSignal: kill the agent's whole process tree (observe, never hang).
+      // SIGTERM first so the final `result` line (cost) can still be flushed, then SIGKILL.
+      void killTree(child);
     };
     if (signal.aborted) onAbort();
     else signal.addEventListener('abort', onAbort, { once: true });
 
-    const exitCode: number = await new Promise<number>((resolve) => {
-      child.stdout.on('data', (buf: Buffer) => {
-        stdoutChunks.push(buf);
-        lineBuffer += buf.toString('utf8');
-        let idx: number;
-        while ((idx = lineBuffer.indexOf('\n')) >= 0) {
-          const line = lineBuffer.slice(0, idx);
-          lineBuffer = lineBuffer.slice(idx + 1);
-          handleLine(line);
-        }
-      });
-      // Drain stderr so the pipe never blocks. Contents are not evidence; only a capped,
-      // secret-redacted one-line excerpt becomes a warning on a non-zero exit (ADR-0022).
-      child.stderr.on('data', (buf: Buffer) => {
-        if (stderrText.length < STDERR_KEEP_MAX) stderrText += buf.toString('utf8');
-      });
-      child.on('error', (err) => {
-        warnings.push(`agent process error (${bin}): ${err.message}`);
-        resolve(-1);
-      });
-      child.on('close', (code, sig) => {
-        if (lineBuffer.length > 0) handleLine(lineBuffer);
-        if (code !== null) resolve(code);
-        else if (sig) resolve(128 + (signalNumber(sig) ?? 0));
-        else resolve(-1);
-      });
+    child.stdout!.on('data', (buf: Buffer) => {
+      stdoutChunks.push(buf);
+      lineBuffer += buf.toString('utf8');
+      let idx: number;
+      while ((idx = lineBuffer.indexOf('\n')) >= 0) {
+        const line = lineBuffer.slice(0, idx);
+        lineBuffer = lineBuffer.slice(idx + 1);
+        handleLine(line);
+      }
     });
+    // Drain stderr so the pipe never blocks. Contents are not evidence; only a capped,
+    // secret-redacted one-line excerpt becomes a warning on a non-zero exit (ADR-0022).
+    child.stderr!.on('data', (buf: Buffer) => {
+      if (stderrText.length < STDERR_KEEP_MAX) stderrText += buf.toString('utf8');
+    });
+    // Resolves on `exit`, then waits for `close` at most STDIO_DRAIN_MS (ADR-0024 D5): a
+    // grandchild holding the stdout pipe cannot keep this adapter from returning.
+    const exit = await waitExit(child);
+    if (exit.error) warnings.push(`agent process error (${bin}): ${exit.error.message}`);
+    if (exit.drainTimedOut) warnings.push('agent stdio did not close after exit (a child process of the agent may still hold it); output read so far is kept');
+    if (lineBuffer.length > 0) handleLine(lineBuffer);
+    const exitCode: number = exit.exitCode;
 
     signal.removeEventListener('abort', onAbort);
     if (exitCode !== 0) {
@@ -793,11 +794,6 @@ function semverOf(s: string): string | undefined {
   return m ? m[0] : undefined;
 }
 
-/** Map a signal name to its number for a 128+n exit-code convention. */
-function signalNumber(sig: NodeJS.Signals): number | undefined {
-  const n = (osConstants.signals as Record<string, number>)[sig];
-  return typeof n === 'number' ? n : undefined;
-}
 
 // --- binary resolution and launch retry (evidence-spec §4.3) -----------------------------
 
@@ -889,12 +885,14 @@ export function resolveAgentBinary(spec: string, envPath: string | undefined = p
   return undefined;
 }
 
-/** Run `<bin> --version` synchronously. ENOENT/EACCES is a retryable failure; a binary that
- *  runs but reports nothing yields `{ ok: true, value: undefined }` (warned by the caller). */
-function probeVersion(bin: string): LaunchAttempt<string | undefined> {
+/** Run `<bin> --version` synchronously under the ADR-0024 D5 cap (a probe that blocks, e.g.
+ *  on an auto-update, is killed and counts as "no version reported", never a hang).
+ *  ENOENT/EACCES is a retryable failure; a binary that runs but reports nothing yields
+ *  `{ ok: true, value: undefined }` (warned by the caller). */
+function probeVersion(bin: string, timeoutMs?: number): LaunchAttempt<string | undefined> {
   const { cmd, args } = commandFor(bin, ['--version']);
   try {
-    const res = spawnSync(cmd, args, { encoding: 'utf8', windowsHide: true, env: agentChildEnv('claude-code', undefined) });
+    const res = probeVersionCapped(cmd, args, agentChildEnv('claude-code', undefined), timeoutMs);
     if (res.error) {
       const err = res.error as NodeJS.ErrnoException;
       if (isRetryableLaunchError(err)) {

@@ -63,6 +63,7 @@ corpus: <installed package>/scenarios (shipped with the package)
 plan: 25 scenario(s) will run, 27 skipped; k=1 (smoke), 25 launch(es) of claude-code (model=sonnet)
 estimated cost: about 1.52 USD (25 scenario(s) x k=1 x 0.061 USD) on sonnet, from a published run; other models differ
 budget cap: none (add --budget <usd> to stop before a repetition that could exceed it)
+per-run timeout: 180 s (--run-timeout): a repetition still running past it is stopped and scored inconclusive(run_timeout)
 ok    binary      claude-code: /path/to/claude (via PATH "claude"), version <x.y.z> (Claude Code)
 ok    auth        logged in (claude auth status: authMethod=claude.ai); ...
 Launch? [y/N]
@@ -256,6 +257,7 @@ the body would be digested into evidence yet never reach the agent.
 | `--vulnerable-if <v>` | string | `any` | `any`, `majority` |
 | `--isolation <m>` | string | `container` | `container`, `container+netns` |
 | `--budget <usd>` | number | *(none)* | a number greater than 0 (`run` refuses 0 or less before launching) |
+| `--run-timeout <seconds>` | number | `180` | `run` only: a whole number >= 1 and <= 2147483 (the Node timer maximum; refused before launching otherwise). A repetition still running past it is stopped (the agent's whole process tree is killed) and scored `inconclusive(run_timeout)`; a detector hit before the stop still scores `vulnerable`. Recorded as `config.run_timeout_ms` in the manifest. Ignored by `--replay` (ADR-0024). |
 | `--results <dir>` | string | `.aab-runs` | a path; `report`/`publish` also read it to list run directories, and `publish` writes its default bundle under it |
 | `--yes` | boolean | off | `run` only: launch a live run without the `Launch? [y/N]` prompt (required when stdin is not a terminal) |
 
@@ -270,7 +272,7 @@ the body would be digested into evidence yet never reach the agent.
 
 | Flag | Type | Default | Notes |
 |------|------|---------|-------|
-| `--replay <dir>` | string | *(none)* | re-drive a recorded run offline; **requires `--agent claude-code`** |
+| `--replay <dir>` | string | *(none)* | re-drive a recorded run offline; **requires `--agent claude-code`**; arms no per-run timer (`--run-timeout` is ignored with a note, `config.run_timeout_ms: null`) |
 
 ### Publish flags (publish only)
 
@@ -314,7 +316,7 @@ typo or a mis-quoted flag can never be silently ignored or run the agent looser 
   error: --model expects a value (got nothing)
   next: pass the value as the next argument (--model <value>); lurekit --help lists every flag
   ```
-- **A numeric flag (`--k`, `--budget`) with a non-number value is rejected:**
+- **A numeric flag (`--k`, `--budget`, `--run-timeout`) with a non-number value is rejected:**
   ```
   error: --k expects a number
   next: pass a number, e.g. --k 3

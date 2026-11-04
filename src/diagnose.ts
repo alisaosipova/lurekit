@@ -9,7 +9,7 @@
 import type { AgentId } from './scenario/types.js';
 import { agentInfo } from './doctor.js';
 
-export type IssueCategory = 'budget' | 'binary' | 'permission' | 'auth' | 'network' | 'model' | 'adapter';
+export type IssueCategory = 'budget' | 'timeout' | 'binary' | 'permission' | 'auth' | 'network' | 'model' | 'adapter';
 
 export interface RepIssue {
   scenario_id: string;
@@ -30,7 +30,7 @@ export interface Diagnosis {
   evidence_path?: string;
 }
 
-const PATTERNS: Array<[Exclude<IssueCategory, 'budget' | 'adapter'>, RegExp]> = [
+const PATTERNS: Array<[Exclude<IssueCategory, 'budget' | 'timeout' | 'adapter'>, RegExp]> = [
   ['binary', /not found or not executable|failed to spawn agent binary|\bENOENT\b|\bEACCES\b/],
   ['permission', /permission_mode: always-approve|permission_mode "[^"]*" is not available|unknown permission_mode token/],
   [
@@ -44,7 +44,7 @@ const PATTERNS: Array<[Exclude<IssueCategory, 'budget' | 'adapter'>, RegExp]> = 
   ['model', /Model metadata for .* not found|unknown model|invalid model|model_not_found|\bmodel\b.*\b(does not exist|not found)/i],
 ];
 
-export const CATEGORY_ORDER: readonly IssueCategory[] = ['budget', 'binary', 'permission', 'auth', 'network', 'model', 'adapter'];
+export const CATEGORY_ORDER: readonly IssueCategory[] = ['budget', 'timeout', 'binary', 'permission', 'auth', 'network', 'model', 'adapter'];
 
 /** Category of one repetition, or undefined when it measured something / needs no advice. */
 export function classifyRep(rep: RepIssue): { category: IssueCategory; example: string } | undefined {
@@ -52,6 +52,12 @@ export function classifyRep(rep: RepIssue): { category: IssueCategory; example: 
     return { category: 'budget', example: rep.warnings[0] ?? 'budget_exhausted' };
   }
   if (rep.outcome !== 'inconclusive') return undefined;
+  // ADR-0024 D3: a timed-out repetition is reported on its own line, before the pattern scan
+  // (the partial stream may also carry a network or auth line, which is not why it stopped).
+  if (rep.inconclusive_reason === 'run_timeout') {
+    const why = rep.warnings.find((w) => /^run timed out after /.test(w));
+    return { category: 'timeout', example: why ?? rep.warnings[0] ?? 'run_timeout' };
+  }
   for (const [cat, re] of PATTERNS) {
     const hit = rep.warnings.find((w) => re.test(w));
     if (hit !== undefined) return { category: cat, example: hit };
@@ -69,6 +75,8 @@ export interface DiagnoseContext {
   model: string;
   budgetUsd?: number;
   spentUsd: number;
+  /** ADR-0024: the per-run cap in effect (ms), for the timeout line's advice. */
+  runTimeoutMs?: number;
 }
 
 function cap(s: string, n = 240): string {
@@ -86,6 +94,14 @@ function advice(cat: IssueCategory, ctx: DiagnoseContext): { what: string; next:
       return {
         what: `not run: the next repetition could have exceeded --budget ${b} USD (spent ${ctx.spentUsd.toFixed(2)} USD so far); they are inconclusive(budget_exhausted), not passes`,
         next: `re-run with a higher cap, e.g. --budget ${higher}, or narrow the scenario directory`,
+      };
+    }
+    case 'timeout': {
+      const s = typeof ctx.runTimeoutMs === 'number' ? Math.ceil(ctx.runTimeoutMs / 1000) : undefined;
+      const higher = s !== undefined ? s * 2 : 360;
+      return {
+        what: `the agent did not finish within the per-run timeout${s !== undefined ? ` (${s} s)` : ''} and was stopped; they are inconclusive(run_timeout), not passes`,
+        next: `inspect the stalled repetition's stream file, or re-run with a higher cap, e.g. --run-timeout ${higher}`,
       };
     }
     case 'binary':

@@ -255,6 +255,7 @@ corpus: <installed package>/scenarios (shipped with the package)
 plan: 25 scenario(s) will run, 27 skipped; k=1 (smoke), 25 launch(es) of claude-code (model=sonnet)
 estimated cost: about 1.52 USD (25 scenario(s) x k=1 x 0.061 USD) on sonnet, from a published run; other models differ
 budget cap: none (add --budget <usd> to stop before a repetition that could exceed it)
+per-run timeout: 180 s (--run-timeout): a repetition still running past it is stopped and scored inconclusive(run_timeout)
 ...
 Launch? [y/N]
 ```
