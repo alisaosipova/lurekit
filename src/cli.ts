@@ -878,18 +878,24 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
   // signal exits immediately with 130.
   const operator = new AbortController();
   const onSignal = (sig: NodeJS.Signals): void => {
-    if (operator.signal.aborted) process.exit(130);
-    deps.stderr(`\n${sig}: stopping the current repetition and skipping the rest (press again to exit now)\n`);
+    if (operator.signal.aborted) process.exit(sig === 'SIGHUP' ? 129 : 130);
+    try {
+      deps.stderr(`\n${sig}: stopping the current repetition and skipping the rest (press again to exit now)\n`);
+    } catch {
+      /* SIGHUP: the terminal may be gone (ADR-0024 B13a) */
+    }
     operator.abort(new Error(`${sig} received`));
   };
   const meta: RunMeta = { createdAt: deps.now(), toolVersion: toolVersion(), signal: operator.signal };
   process.on('SIGINT', onSignal);
   process.on('SIGTERM', onSignal);
+  process.on('SIGHUP', onSignal); // ADR-0024 B13a: closing the terminal is an abort
   try {
     return await runWithSignal();
   } finally {
     process.off('SIGINT', onSignal);
     process.off('SIGTERM', onSignal);
+    process.off('SIGHUP', onSignal);
   }
 
   async function runWithSignal(): Promise<number> {
@@ -929,6 +935,11 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
     for (const [i, scenario] of plan.kept.entries()) {
       deps.stderr(`[${i + 1}/${plan.kept.length}] ${scenario.id}  ${scenario.name}\n`);
       results.push(await runner.runScenario(scenario, adapter, profile, cfg, { budget, signal: meta.signal }));
+      // ADR-0024 B13a: a provisional manifest after every scenario but the last, so a killed
+      // run leaves a readable record of what finished.
+      if (i < plan.kept.length - 1) {
+        await runner.writeManifest(profile, cfg, plan.kept, results, meta, { completed_scenarios: i + 1, planned_scenarios: plan.kept.length });
+      }
     }
     const manifest = await runner.writeManifest(profile, cfg, plan.kept, results, meta);
 
@@ -983,7 +994,17 @@ export function cmdReport(flags: Flags, deps: CliDeps): number {
     return 1;
   }
   const manifestPath = path.join(runDir, 'manifest.json');
-  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as RunManifest;
+  let manifest: RunManifest;
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as RunManifest;
+  } catch (err) {
+    // ADR-0024 B13a: an empty or cut-off manifest (a run killed mid-write before durable writes).
+    deps.stderr(`report: ${manifestPath} is empty or not valid JSON (${(err as Error).message}); nothing rendered\n`);
+    return 1;
+  }
+  if (manifest.partial) {
+    deps.stderr(`note: partial run: ${manifest.partial.completed_scenarios} of ${manifest.partial.planned_scenarios} scenarios completed before it stopped; the report covers those only\n`);
+  }
   const output = flags.str.get('output');
   // ADR-0021 amendment (terminal view): without --format, stdout gets the terminal view and a
   // --output file gets the Markdown artifact; --format names the format explicitly.

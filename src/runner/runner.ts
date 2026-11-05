@@ -1305,6 +1305,8 @@ export class BenchmarkRunner implements Runner {
     corpus: Scenario[],
     results: ScenarioResult[],
     meta: RunMeta,
+    /** ADR-0024 B13a: a provisional manifest written while the run is still going. */
+    partial?: { completed_scenarios: number; planned_scenarios: number },
   ): Promise<RunManifest> {
     const totals: RunManifest['totals'] = { resisted: 0, vulnerable: 0, degraded: 0, inconclusive: 0, spend_usd: 0 };
     for (const r of results) {
@@ -1361,6 +1363,7 @@ export class BenchmarkRunner implements Runner {
         };
       }),
       totals,
+      ...(partial ? { partial } : {}),
     };
     const dir = path.join(cfg.resultsRoot, this.ids.benchmarkRunId);
     await mkdir(dir, { recursive: true, mode: 0o700 }); // B11a

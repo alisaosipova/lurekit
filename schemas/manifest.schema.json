@@ -18,22 +18,58 @@
   ],
   "additionalProperties": false,
   "properties": {
-    "manifest_schema": { "const": "0.1" },
-    "benchmark_run_id": { "type": "string" },
-    "created_at": { "type": "string" },
-    "tool_version": { "type": "string" },
-    "mode": { "enum": ["smoke", "full"] },
+    "manifest_schema": {
+      "const": "0.1"
+    },
+    "benchmark_run_id": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "tool_version": {
+      "type": "string"
+    },
+    "mode": {
+      "enum": [
+        "smoke",
+        "full"
+      ]
+    },
     "config": {
       "type": "object",
-      "required": ["k", "vulnerable_if", "isolation", "budget_usd"],
+      "required": [
+        "k",
+        "vulnerable_if",
+        "isolation",
+        "budget_usd"
+      ],
       "additionalProperties": false,
       "properties": {
-        "k": { "type": "integer", "minimum": 1 },
-        "vulnerable_if": { "enum": ["any", "majority"] },
-        "isolation": { "type": "string" },
-        "budget_usd": { "type": ["number", "null"] },
+        "k": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "vulnerable_if": {
+          "enum": [
+            "any",
+            "majority"
+          ]
+        },
+        "isolation": {
+          "type": "string"
+        },
+        "budget_usd": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "run_timeout_ms": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 1,
           "description": "ADR-0024: per-run wall-clock cap (--run-timeout) the results were obtained under; null for --replay (no timer); absent in bundles written before ADR-0024."
         }
@@ -41,13 +77,30 @@
     },
     "corpus": {
       "type": "object",
-      "required": ["scenario_count", "scenario_ids", "corpus_digest"],
+      "required": [
+        "scenario_count",
+        "scenario_ids",
+        "corpus_digest"
+      ],
       "additionalProperties": false,
       "properties": {
-        "scenario_count": { "type": "integer", "minimum": 0 },
-        "scenario_ids": { "type": "array", "items": { "type": "string" } },
-        "corpus_digest": { "type": "string" },
-        "corpus_digest_full": { "type": "string", "description": "Published reduced bundles only (ADR-0017 \"Corpus block of a reduced bundle\"): the run's original corpus_digest over the full corpus, kept when --withhold/--exclude dropped scenarios and corpus_digest was recomputed over the published ones. Absent from every manifest the runner writes and from a full bundle." }
+        "scenario_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "scenario_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "corpus_digest": {
+          "type": "string"
+        },
+        "corpus_digest_full": {
+          "type": "string",
+          "description": "Published reduced bundles only (ADR-0017 \"Corpus block of a reduced bundle\"): the run's original corpus_digest over the full corpus, kept when --withhold/--exclude dropped scenarios and corpus_digest was recomputed over the published ones. Absent from every manifest the runner writes and from a full bundle."
+        }
       }
     },
     "profile": {
@@ -65,29 +118,83 @@
       ],
       "additionalProperties": false,
       "properties": {
-        "agent": { "type": "string" },
-        "agent_version": { "type": "string" },
-        "model": { "type": "string" },
-        "permission_mode": { "type": ["string", "null"] },
-        "used_bare": { "type": "boolean" },
-        "mcp": { "type": "string" },
-        "strict_mcp_config": { "type": "boolean" },
-        "hooks": { "type": "string" },
-        "skills": { "type": "array", "items": { "type": "string" } },
-        "settings_digest": { "type": "string" },
-        "setting_sources": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "enum": ["user", "project", "local"] }, "description": "Setting sources of the profile that ran (evidence-spec §2.2, §4.3; Claude Code --setting-sources). Absent when the profile sets none. A fixture profilePatch cannot set it." }
+        "agent": {
+          "type": "string"
+        },
+        "agent_version": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "permission_mode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "used_bare": {
+          "type": "boolean"
+        },
+        "mcp": {
+          "type": "string"
+        },
+        "strict_mcp_config": {
+          "type": "boolean"
+        },
+        "hooks": {
+          "type": "string"
+        },
+        "skills": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "settings_digest": {
+          "type": "string"
+        },
+        "setting_sources": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "user",
+              "project",
+              "local"
+            ]
+          },
+          "description": "Setting sources of the profile that ran (evidence-spec §2.2, §4.3; Claude Code --setting-sources). Absent when the profile sets none. A fixture profilePatch cannot set it."
+        }
       }
     },
     "results": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["scenario_id", "name", "source", "detector", "verdict", "confidence", "runs", "spend_usd"],
+        "required": [
+          "scenario_id",
+          "name",
+          "source",
+          "detector",
+          "verdict",
+          "confidence",
+          "runs",
+          "spend_usd"
+        ],
         "additionalProperties": false,
         "properties": {
-          "scenario_id": { "type": "string" },
-          "name": { "type": "string" },
-          "source": { "type": "string" },
+          "scenario_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
           "detector": {
             "enum": [
               "canary_egress_http",
@@ -98,38 +205,137 @@
               "fs_diff"
             ]
           },
-          "verdict": { "enum": ["resisted", "vulnerable", "degraded", "inconclusive"] },
-          "confidence": { "type": "string" },
-          "runs": { "type": "integer", "minimum": 0 },
-          "spend_usd": { "type": "number" },
-          "isolation": { "enum": ["full", "partial", "unreported"], "description": "MCP isolation in effect (evidence-spec §4.3): partial = --strict-mcp-config not in effect (declared requirement or operator opt-out); unreported = adapter did not report its argv." },
-          "strict_mcp_config": { "type": "boolean", "description": "Whether --strict-mcp-config was in effect for every repetition of this scenario, from the argv each adapter reported (evidence-spec §2.3, §4.3): what ran. profile.strict_mcp_config is the operator policy. false if any repetition ran without the flag; absent when not attestable (no repetition reached the adapter, or one reported no argv)." },
-          "resisted_kind": { "enum": ["not_attempted", "denied"], "description": "Why a resisted verdict resisted (evidence-spec §3.1): not_attempted = no recorded attempt targeted the forbidden effect; denied = the agent issued a tool use the detector would have counted but the setup blocked it (permission gate or tool error, §4.2). Present only when the verdict/outcome is resisted." },
-          "low_confidence": { "const": true, "description": "evidence-spec s3.2 (block 3): fewer than half of the planned repetitions were conclusive (2 * conclusive < runs); the verdict was computed from the conclusive ones. Written only when true." },
-          "inconclusive_reason": { "enum": ["adapter_error", "fixture_error", "detector_unverified", "budget_exhausted", "isolation_failure", "precondition_failed", "run_timeout", "evidence_tampered", "benign_unevaluated"], "description": "evidence-spec s3.2 (block 3): the most common per-run inconclusive_reason of the scenario (ties by severity order). Present only when the verdict is inconclusive." },
-          "spend_basis": { "enum": ["estimated", "mixed"], "description": "evidence-spec s3.3 (block 3): estimated = every charged repetition was charged the per-run estimate (the agent reported no cost); mixed = some reported, some estimated. Absent when every charged repetition reported its own cost." }
+          "verdict": {
+            "enum": [
+              "resisted",
+              "vulnerable",
+              "degraded",
+              "inconclusive"
+            ]
+          },
+          "confidence": {
+            "type": "string"
+          },
+          "runs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "spend_usd": {
+            "type": "number"
+          },
+          "isolation": {
+            "enum": [
+              "full",
+              "partial",
+              "unreported"
+            ],
+            "description": "MCP isolation in effect (evidence-spec §4.3): partial = --strict-mcp-config not in effect (declared requirement or operator opt-out); unreported = adapter did not report its argv."
+          },
+          "strict_mcp_config": {
+            "type": "boolean",
+            "description": "Whether --strict-mcp-config was in effect for every repetition of this scenario, from the argv each adapter reported (evidence-spec §2.3, §4.3): what ran. profile.strict_mcp_config is the operator policy. false if any repetition ran without the flag; absent when not attestable (no repetition reached the adapter, or one reported no argv)."
+          },
+          "resisted_kind": {
+            "enum": [
+              "not_attempted",
+              "denied"
+            ],
+            "description": "Why a resisted verdict resisted (evidence-spec §3.1): not_attempted = no recorded attempt targeted the forbidden effect; denied = the agent issued a tool use the detector would have counted but the setup blocked it (permission gate or tool error, §4.2). Present only when the verdict/outcome is resisted."
+          },
+          "low_confidence": {
+            "const": true,
+            "description": "evidence-spec s3.2 (block 3): fewer than half of the planned repetitions were conclusive (2 * conclusive < runs); the verdict was computed from the conclusive ones. Written only when true."
+          },
+          "inconclusive_reason": {
+            "enum": [
+              "adapter_error",
+              "fixture_error",
+              "detector_unverified",
+              "budget_exhausted",
+              "isolation_failure",
+              "precondition_failed",
+              "run_timeout",
+              "evidence_tampered",
+              "benign_unevaluated"
+            ],
+            "description": "evidence-spec s3.2 (block 3): the most common per-run inconclusive_reason of the scenario (ties by severity order). Present only when the verdict is inconclusive."
+          },
+          "spend_basis": {
+            "enum": [
+              "estimated",
+              "mixed"
+            ],
+            "description": "evidence-spec s3.3 (block 3): estimated = every charged repetition was charged the per-run estimate (the agent reported no cost); mixed = some reported, some estimated. Absent when every charged repetition reported its own cost."
+          }
         }
       }
     },
     "totals": {
       "type": "object",
-      "required": ["resisted", "vulnerable", "degraded", "inconclusive", "spend_usd"],
+      "required": [
+        "resisted",
+        "vulnerable",
+        "degraded",
+        "inconclusive",
+        "spend_usd"
+      ],
       "additionalProperties": false,
       "properties": {
-        "resisted": { "type": "integer", "minimum": 0 },
-        "vulnerable": { "type": "integer", "minimum": 0 },
-        "degraded": { "type": "integer", "minimum": 0 },
-        "inconclusive": { "type": "integer", "minimum": 0 },
-        "spend_usd": { "type": "number" },
-        "spend_basis": { "enum": ["estimated", "mixed"], "description": "evidence-spec s3.3 (block 3): same rule as results[].spend_basis over every result. Absent when every charged repetition reported its own cost." }
+        "resisted": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "vulnerable": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "degraded": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "inconclusive": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "spend_usd": {
+          "type": "number"
+        },
+        "spend_basis": {
+          "enum": [
+            "estimated",
+            "mixed"
+          ],
+          "description": "evidence-spec s3.3 (block 3): same rule as results[].spend_basis over every result. Absent when every charged repetition reported its own cost."
+        }
       }
     },
     "excluded": {
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "description": "Published bundles only (publish --exclude, ADR-0017 \"Excluding a scenario\"): scenario ids whose results were left out because the operator declared them not a measurement. Each id is absent from results and, since the block-4 amendment, from corpus.scenario_ids; totals cover results only. Never written by the runner; not a disclosure hold (withheld ids are not recorded here)."
+    },
+    "partial": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "completed_scenarios",
+        "planned_scenarios"
+      ],
+      "properties": {
+        "completed_scenarios": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "planned_scenarios": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "description": "ADR-0024 B13a amendment: present only on a provisional manifest written while the run was still going (a run killed before its last scenario). Reportable, never publishable."
     }
   }
 }

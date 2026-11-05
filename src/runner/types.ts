@@ -277,6 +277,8 @@ export interface PlanResult {
 
 /** The per-benchmark run manifest written as manifest.json (evidence-spec §2.3). */
 export interface RunManifest {
+  /** ADR-0024 B13a: present only on a provisional manifest of a run still going (or killed). */
+  partial?: { completed_scenarios: number; planned_scenarios: number };
   manifest_schema: string;
   benchmark_run_id: string;
   created_at: string; // ISO, injected by the caller (never generated in the runner)

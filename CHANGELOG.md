@@ -18,6 +18,17 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+### Changed (block B13a)
+
+- `lurekit run` writes a provisional `manifest.json` after every scenario (`partial: {completed,
+  planned}` until the last), so a run killed by SIGKILL, OOM or a power loss leaves a readable
+  record; `report` renders a partial run with a note, `publish` refuses it (ENGINE-02).
+- SIGHUP (closing the terminal) aborts like SIGINT: the current repetition is killed, the rest
+  skipped, the manifest written; before, lurekit died and the agent kept running and billing
+  (ENGINE-04).
+- Harness files are synced to disk before their atomic rename, and `report` names an empty or
+  cut-off manifest instead of crashing (ENGINE-10).
+
 ### Fixed (block B10a)
 
 - After an agent exits normally, anything it left running in its process group is killed, so a

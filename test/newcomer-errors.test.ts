@@ -556,3 +556,44 @@ describe('ADR-0008 amendment B11b: --profile and dropped variables', () => {
     expect(checkDroppedEnv(agentInfo('claude-code'), probe({ PATH: '/bin' }))).toBeUndefined();
   });
 });
+
+describe('ADR-0024 amendment B13a: provisional manifest, partial runs', () => {
+  it('a provisional manifest exists after the first of two scenarios; the final one drops partial', async () => {
+    const dir = path.join(work, 'two');
+    mkdirSync(dir, { recursive: true });
+    for (const id of ['AAB-003', 'AAB-012']) copyFileSync(path.join(realScenarios, `${id}.yaml`), path.join(dir, `${id}.yaml`));
+    const fs = await import('node:fs');
+    const mf = path.join(work, 'r', 'aab-test-newcomer', 'manifest.json');
+    const seen: unknown[] = [];
+    const stub = new StubAdapter({});
+    const orig = stub.run.bind(stub);
+    stub.run = async (p, t, s, o) => {
+      seen.push(fs.existsSync(mf) ? JSON.parse(fs.readFileSync(mf, 'utf8')).partial : 'none');
+      return orig(p, t, s, o);
+    };
+    expect(await main(['run', dir, '--model', 'm', '--mode', 'full', '--k', '1', '--yes', '--results', 'r'], deps({ adapter: () => stub, interactive: true }))).toBe(0);
+    expect(seen).toHaveLength(2); // both scenarios apply to claude-code
+    expect(seen[0]).toBe('none');
+    expect(seen[1]).toEqual({ completed_scenarios: 1, planned_scenarios: 2 });
+    expect(JSON.parse(fs.readFileSync(mf, 'utf8')).partial).toBeUndefined();
+  });
+  it('report renders a partial run with a note; publish refuses it; an empty manifest is a readable error', async () => {
+    const run = path.join(work, 'r', 'aab-test-newcomer');
+    await main(['run', corpus('AAB-003'), '--model', 'm', '--mode', 'full', '--k', '1', '--yes', '--results', 'r'], deps({ interactive: true }));
+    const fs = await import('node:fs');
+    const mf = path.join(run, 'manifest.json');
+    const m = JSON.parse(fs.readFileSync(mf, 'utf8'));
+    m.partial = { completed_scenarios: 1, planned_scenarios: 3 };
+    fs.writeFileSync(mf, JSON.stringify(m));
+    const d1 = deps();
+    expect(await main(['report', run, '--format', 'json'], d1)).toBe(0);
+    expect(err.join('')).toMatch(/partial run: 1 of 3 scenarios completed/);
+    const d2 = deps();
+    expect(await main(['publish', run, '--out', path.join(work, 'b')], d2)).toBe(1);
+    expect(err.join('')).toMatch(/is partial \(1 of 3 scenarios completed\)/);
+    fs.writeFileSync(mf, '');
+    const d3 = deps();
+    expect(await main(['report', run], d3)).toBe(1);
+    expect(err.join('')).toMatch(/is empty or not valid JSON/);
+  });
+});

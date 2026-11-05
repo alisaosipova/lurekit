@@ -1333,6 +1333,15 @@ export function planPublish(contents: RunDirContents, policy: PublishPolicy = {}
   if (typeof id !== 'string' || !SAFE_SEGMENT.test(id) || !Array.isArray(manifest.results)) {
     return { ok: false, error: 'manifest.json has no usable benchmark_run_id/results', leaks: [] };
   }
+  if (manifest.partial) {
+    // ADR-0024 B13a: a provisional manifest of a run that did not finish is never a bundle.
+    return {
+      ok: false,
+      benchmarkRunId: id,
+      error: `run ${id} is partial (${manifest.partial.completed_scenarios} of ${manifest.partial.planned_scenarios} scenarios completed); a bundle must hold a finished measurement`,
+      leaks: [],
+    };
+  }
   for (const r of manifest.results) {
     if (typeof r.scenario_id !== 'string' || !SAFE_SEGMENT.test(r.scenario_id)) {
       return { ok: false, benchmarkRunId: id, error: `unsafe scenario id in manifest: ${JSON.stringify(r.scenario_id)}`, leaks: [] };

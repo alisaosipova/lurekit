@@ -620,3 +620,13 @@ Release 1.4.0 carries blocks 2, 3, B8, B9, B11a, B12, B15. B11b followed (`--pro
 profiles (UX-10), doctor dropped-variable warning, Claude Code transcript note); the opt-in
 run-scoped `CLAUDE_CONFIG_DIR` stays deferred. Remaining for 1.5.0: B10, B13, B14, B16, B17
 (with VERDICT-09), B18.
+
+## Status 2026-11-05 (B10a, B10b, B13a merged)
+
+B10a: serialised sink appends (ENGINE-05), loopback request limits and `closeServer` (ENGINE-11
+servers, ENGINE-15). B10b: group reaped after a normal exit (VERDICT-12, POSIX). B13a:
+provisional manifest and partial runs (ENGINE-02), SIGHUP abort (ENGINE-04), fsync before
+rename (ENGINE-10). Deferred from these blocks: per-run token in feed/web paths (VERDICT-12),
+atime probe (VERDICT-15), held `O_NOFOLLOW` sink descriptor (SECURITY-09), doctor filesystem
+probe (ENGINE-13), the stdio control child (ENGINE-11), abortable backoff and the async probe
+(ENGINE-16). Next: B14, B16, B17, B18.
