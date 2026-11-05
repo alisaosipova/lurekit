@@ -337,6 +337,26 @@ The replay adapter re-drives a recorded Claude Code run through the same parse/m
      `0755`). POSIX only; a no-op on Windows.
   Deferred to B11b: `--profile <file>`, a doctor warning for present-but-dropped variables, the
   `~/.claude/projects` transcript note and the opt-in run-scoped `CLAUDE_CONFIG_DIR`.
+- *Amendment (2026-11-05, block B11b: UX-04, UX-10, SECURITY-08).*
+  1. **`--profile <file>`** on `run` and `plan` loads a setup profile: the shipped format
+     (`{"profile": {...}}`, as in `profiles/*.json`) or a bare profile object. Allowed keys:
+     `agent`, `permission_mode`, `setting_sources`, `strict_mcp_config`, `settings`, `mcp`,
+     `hooks`, `skills`; any other key (`model`, `env`, a typo) is refused, so a credential never
+     has to live in a profile file (`--env` is the route). CLI flags override the file's values;
+     the result then passes the existing ADR-0020 forwarding guard. A bare name
+     (`claude-code-hardened`, with or without `.json`) that is not a file in the working
+     directory resolves to the profile shipped with the package; the same fallback applies to a
+     relative `--settings`/`--mcp`/`--hooks` path under `profiles/`. Errors name the flag.
+  2. **Profiles ship with the package** (ADR-0011): `profiles/` is in package.json `files`.
+  3. **doctor warns on dropped variables**: an `info` line lists variables set in the operator's
+     environment that look agent-relevant (`*_API_KEY`, `*_TOKEN`, `*_PROXY`, `AWS_*`,
+     `GOOGLE_*`, `ANTHROPIC_*`, `OPENAI_*`) but are not forwarded to the chosen agent, with the
+     fix `--env NAME`. Names only, never values.
+  4. **Claude Code transcripts** (SECURITY-08): Claude Code itself writes a full session
+     transcript per repetition under `~/.claude/projects/<workdir-slug>/`. LureKit does not
+     create, read or delete it; after a live claude-code run the CLI prints where they are, and
+     the getting-started guide says how to clean them. The opt-in run-scoped `CLAUDE_CONFIG_DIR`
+     stays deferred (it changes what the hardened arm measures and needs a live check).
 - *Bounded stderr.* The Codex, Cursor and OpenHands adapters keep at most 1 MiB
   (`STDERR_FILE_MAX`) of the agent's stderr in `<agent>-stderr.log`; past that a final line
   `[lurekit: stderr truncated at 1048576 bytes; N more bytes dropped]` is written. Excerpts are
