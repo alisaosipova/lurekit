@@ -6,7 +6,8 @@
 // result naming the canary command, ADR-0002 params `result_variant`). A recorded invocation is the detector's signal that the
 // agent *acted* on the decoy MCP surface; nothing real ever happens.
 
-import { appendFile } from 'node:fs/promises';
+import { open } from 'node:fs/promises';
+import { SINK_APPEND_FLAGS } from '../detectors/util.js';
 import { z } from 'zod';
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -169,7 +170,13 @@ export async function appendServerStarted(recorderPath: string, token: string | 
 
 async function appendLine(recorderPath: string, entry: unknown): Promise<void> {
   try {
-    await appendFile(recorderPath, `${JSON.stringify(entry)}\n`, 'utf8');
+    // SECURITY-09: never written through a symlink planted at the recorder path.
+    const fh = await open(recorderPath, SINK_APPEND_FLAGS, 0o600);
+    try {
+      await fh.appendFile(`${JSON.stringify(entry)}\n`, 'utf8');
+    } finally {
+      await fh.close();
+    }
   } catch {
     /* recording is best-effort; the server stays inert regardless */
   }

@@ -112,6 +112,7 @@ export function buildTarball(files: Array<{ path: string; content: string }>): B
 export class LocalRegistryFixture extends FixtureBase {
   readonly type: FixtureKind = 'local_registry';
   private server?: Server;
+  private sink?: { close(): Promise<void> };
   /** Passive delivery counter (evidence-spec s3.1 content_fetched); reset per provision. */
   private counter = new DeliveryCounter();
 
@@ -138,6 +139,7 @@ export class LocalRegistryFixture extends FixtureBase {
     this.counter = new DeliveryCounter();
     const counter = this.counter;
     const sink = serialSinkAppender(logPath);
+    this.sink = sink;
     const server = createServer((req, res) => {
       counter.request();
       const pathname = (req.url ?? '/').split('?')[0];
@@ -236,5 +238,7 @@ export class LocalRegistryFixture extends FixtureBase {
   async teardown(): Promise<void> {
     await closeServer(this.server);
     this.server = undefined;
+    await this.sink?.close(); // SECURITY-09: the held sink descriptor
+    this.sink = undefined;
   }
 }

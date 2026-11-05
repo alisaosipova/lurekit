@@ -39,3 +39,18 @@ describe('serialised sink appends (B10 ENGINE-05)', () => {
     }
   });
 });
+
+describe('SECURITY-09: sinks are never written through a symlink', () => {
+  it.skipIf(process.platform === 'win32')('a sink replaced by a symlink before the first append is not followed', async () => {
+    const { symlink, writeFile: wf, readFile: rf } = await import('node:fs/promises');
+    const victim = path.join(dir, 'victim.txt');
+    await wf(victim, 'untouched\n');
+    const sinkPath = path.join(dir, 'sink.log');
+    await symlink(victim, sinkPath);
+    const s = serialSinkAppender(sinkPath);
+    await expect(s.append('line\n')).rejects.toThrow();
+    expect(await rf(victim, 'utf8')).toBe('untouched\n');
+    expect(s.witness()).toBe('');
+    await s.close();
+  });
+});

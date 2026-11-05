@@ -20,6 +20,9 @@ No release is cut without changes.
 
 ### Fixed (blocks B10c, B13b)
 
+- Harness sinks and the canary MCP server's recorder are appended without following a symlink
+  (`O_NOFOLLOW`, one held descriptor per harness sink), so a planted link cannot redirect the
+  evidence (SECURITY-09, ADR-0025 amendment; POSIX).
 - The launch backoff between retries now ends as soon as the run is aborted, so Ctrl-C during a
   retry stops at once instead of after up to 4 s (ENGINE-16).
 - The harness-owned stdio MCP control child no longer pipes output nobody reads, and its

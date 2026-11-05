@@ -562,3 +562,13 @@ clean registry run `inconclusive(evidence_tampered)`. Control: 20 concurrent req
 witness equal to the file (`test/sink-order.test.ts`). The held `O_NOFOLLOW` descriptor
 (SECURITY-09) remains a follow-up.
 
+### Amendment (2026-11-05, SECURITY-09): no-follow sink appends
+
+The D7 follow-up is decided: the harness's own sinks (egress access log, registry log) append
+through one descriptor opened on the first append with `O_APPEND | O_NOFOLLOW` and held until
+teardown; the canary MCP server opens its recorder with the same flags for every append. A sink
+replaced by a symlink is therefore never written through (the append fails, the witness is not
+extended, verify reports the swap), and a sink unlinked and re-created after the first append
+keeps receiving lines on the old inode, which verify also reports. `O_NOFOLLOW` is POSIX; on
+Windows the plain append flags are used (recorded limit).
+

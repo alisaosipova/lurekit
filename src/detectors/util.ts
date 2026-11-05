@@ -5,7 +5,8 @@
 // identifier against the tool call's serialised input, never wall-clock vs monotonic time).
 
 import type { ToolCall } from '../adapters/adapter.js';
-import { appendFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { open, type FileHandle } from 'node:fs/promises';
 import { safeReadText, safeWriteFile } from '../runner/safeWrite.js';
 
 /** Persist per-run canary metadata next to the evidence, so evaluate() can recover the
@@ -75,18 +76,33 @@ export function attribute(toolCalls: ToolCall[], needles: string[]): ToolCall | 
  *  promise chain and the witness is extended inside the same chain, so the witness always equals
  *  the file's byte order even under concurrent requests (unordered `appendFile` calls could land
  *  in a different order than their `.then` callbacks, a spurious `modified` tamper finding). */
-export function serialSinkAppender(filePath: string): { append(line: string): Promise<void>; witness(): string } {
+/** Append flags that never follow a symlink at the sink path (SECURITY-09; O_NOFOLLOW is POSIX,
+ *  on Windows the plain append flags are used). */
+export const SINK_APPEND_FLAGS =
+  constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | ((constants as Record<string, number>).O_NOFOLLOW ?? 0);
+
+export function serialSinkAppender(filePath: string): { append(line: string): Promise<void>; witness(): string; close(): Promise<void> } {
   let chain: Promise<void> = Promise.resolve();
   let witnessed = '';
+  // ADR-0025 D7 follow-up (SECURITY-09): one descriptor, opened on the first append without
+  // following a symlink and held, so a sink swapped for a link or re-created afterwards is never
+  // written through (the verify step then sees the swap).
+  let fh: FileHandle | undefined;
   return {
     append(line: string): Promise<void> {
       const next = chain.then(async () => {
-        await appendFile(filePath, line);
+        fh ??= await open(filePath, SINK_APPEND_FLAGS, 0o600);
+        await fh.appendFile(line);
         witnessed += line;
       });
       chain = next.catch(() => undefined);
       return next;
     },
     witness: () => witnessed,
+    async close(): Promise<void> {
+      await chain;
+      await fh?.close().catch(() => undefined);
+      fh = undefined;
+    },
   };
 }

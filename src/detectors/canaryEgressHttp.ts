@@ -148,6 +148,7 @@ export class CanaryEgressHttpDetector implements Detector {
       canaries: { host, url, token },
       teardown: async () => {
         await closeServer(server); // B10 ENGINE-11: drops in-flight connections
+        await sink.close(); // SECURITY-09: the held sink descriptor
       },
       artefacts: [
         { path: META, kind: 'immutable' },
