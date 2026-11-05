@@ -308,6 +308,31 @@ The replay adapter re-drives a recorded Claude Code run through the same parse/m
   (evidence-spec section 2.2 / 4.3). The MCP fixture server, the `canary_mcp_tool` control
   server and the `canary_command` self-test get the same basics plus their own harness values,
   and no agent credential.
+- *Amendment (2026-11-05, block B11a: SECURITY-02/03/04/06, UX-04).*
+  1. **Harness variables are not an operator channel.** The `AAB_` prefix stays in the base
+     list (the `AAB_*_BIN` overrides and test-stub knobs), but names starting `AAB_MCP_` are
+     never taken from the parent environment for any child: they are the canary MCP server's
+     own settings and reach it only through the harness (the `--mcp-config` env block or the
+     fixture's `extra`). A shell `AAB_MCP_NO_START_RECORD=1` can therefore not blind a sensor.
+  2. **Network basics are forwarded.** `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `ALL_PROXY`
+     (any case), `SSL_CERT_FILE`, `SSL_CERT_DIR`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE` join the
+     base list: without them a proxied operator measured `adapter_error` on every repetition.
+     claude-code additionally gets its provider variables: `AWS_REGION`, `AWS_PROFILE`,
+     `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_BEARER_TOKEN_BEDROCK`,
+     `ANTHROPIC_VERTEX_PROJECT_ID`, `CLOUD_ML_REGION`, `GOOGLE_APPLICATION_CREDENTIALS`,
+     `ANTHROPIC_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL` and the `ANTHROPIC_FOUNDRY_` prefix
+     (`CLAUDE_CODE_USE_BEDROCK|VERTEX|FOUNDRY` are already under `CLAUDE_`).
+  3. **`--env NAME` (repeatable)** on `run` copies the named variable from lurekit's own
+     environment into `profile.env` (the operator-declared route ADR-0008 already defines). Only
+     the name is on the command line; an unset name is refused before anything is spent. Values
+     never enter argv, the manifest or a settings file; `env_forwarded` records the name.
+  4. **Doctor probes** (`--version`, `auth status`) run with `agentChildEnv(agent)`, not the
+     whole parent environment, so doctor sees what a run would see.
+  5. **Modes.** The benchmark dir, run dirs and per-run workdirs are created `0700`; harness
+     files written through `safeWriteFile` default to `0600` (launchers keep an explicit
+     `0755`). POSIX only; a no-op on Windows.
+  Deferred to B11b: `--profile <file>`, a doctor warning for present-but-dropped variables, the
+  `~/.claude/projects` transcript note and the opt-in run-scoped `CLAUDE_CONFIG_DIR`.
 - *Bounded stderr.* The Codex, Cursor and OpenHands adapters keep at most 1 MiB
   (`STDERR_FILE_MAX`) of the agent's stderr in `<agent>-stderr.log`; past that a final line
   `[lurekit: stderr truncated at 1048576 bytes; N more bytes dropped]` is written. Excerpts are
