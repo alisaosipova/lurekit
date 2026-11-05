@@ -372,8 +372,9 @@ The replay adapter re-drives a recorded Claude Code run through the same parse/m
   of tracked agent groups all rely on it; a future `--parallel` needs its own ADR first
   (reserve-then-settle budget, per-run tracking, async probes).
 - *Amendment (2026-11-05, ENGINE-01; closes ADR-0024 D6): Windows binary resolution.* On
-  win32 the PATHEXT candidates (`claude.cmd`, `claude.exe`, ...) are tried before the
-  extension-less POSIX shim npm also installs (which Windows cannot spawn). When the choice is an
+  win32 the PATHEXT candidates (`claude.cmd`, `claude.exe`, ...) are tried first; an
+  extension-less candidate comes last and counts only when it resolves to a Node script (a link to
+  `cli.js`), never as the POSIX sh shim npm also installs (which Windows cannot spawn). When the choice is an
   npm `.cmd` shim, the resolver reads the shim and returns the Node entry it calls
   (`%dp0%\node_modules\<pkg>\<entry>.js`, relative to the shim), which the adapters launch
   through `process.execPath` like any `.js` entry: no `cmd.exe`, no `shell: true`. A `.cmd` whose

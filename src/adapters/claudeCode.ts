@@ -911,10 +911,10 @@ export function resolveAgentBinary(
   } else {
     // ENGINE-01: on Windows the PATHEXT forms first; the extension-less file npm also installs
     // is a POSIX shell shim Windows cannot spawn.
-    // An extension-less file is never spawnable on Windows, so it is not a candidate there unless
-    // the spec already names an extension.
+    // On Windows the PATHEXT forms first; an extension-less file comes last and is accepted only
+    // when it resolves to a Node script (a link to cli.js), never as the POSIX sh shim.
     const exts =
-      platform === 'win32' && path.extname(spec) === '' ? (pathext ?? '.EXE;.CMD;.BAT').split(';').filter(Boolean) : [''];
+      platform === 'win32' && path.extname(spec) === '' ? [...(pathext ?? '.EXE;.CMD;.BAT').split(';').filter(Boolean), ''] : [''];
     for (const dir of (envPath ?? '').split(path.delimiter)) {
       if (!dir) continue;
       for (const ext of exts) candidates.push(path.resolve(dir, spec + ext));
@@ -925,6 +925,7 @@ export function resolveAgentBinary(
     try {
       const real = realpathSync(c);
       if (!launchable(real, platform)) continue;
+      if (platform === 'win32' && path.extname(real) === '' && !isNodeScript(real)) continue; // POSIX shim
       if (/\.(cmd|bat)$/i.test(real)) {
         // ENGINE-01: an npm cmd-shim runs `node <pkg entry>`; launch that entry through
         // process.execPath instead (no cmd.exe, no shell). A .cmd without one is skipped.

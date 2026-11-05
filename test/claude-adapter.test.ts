@@ -880,5 +880,12 @@ describe('ENGINE-01: Windows binary resolution (fake npm shim layout)', () => {
     await writeFile(path.join(bin, 'other.cmd'), '@echo off\r\nsomething.exe %*\r\n');
     await writeFile(path.join(bin, 'other'), '#!/bin/sh\n');
     expect(resolveAgentBinary('other', bin, 'win32', '.exe;.cmd')).toBeUndefined();
+    // An extension-less link to a Node script is still fine on Windows (it is launched via node).
+    const { symlink: sl } = await import('node:fs/promises');
+    const mjs = path.join(bin, 'real-agent.mjs');
+    await writeFile(mjs, '// agent');
+    await sl(mjs, path.join(bin, 'agentlink')).catch(() => undefined);
+    const viaLink = resolveAgentBinary('agentlink', bin, 'win32', '.exe;.cmd');
+    if (viaLink !== undefined) expect(viaLink).toBe(realpathSync(mjs));
   });
 });
