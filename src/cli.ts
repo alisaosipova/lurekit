@@ -340,6 +340,17 @@ export function cmdList(flags: Flags, deps: CliDeps): number {
   const corpus = resolveScenarioDir(flags._[0], deps);
   const dir = flags._[0] ?? corpus.shown;
   const { scenarios, errors } = loadScenarioDir(corpus.dir);
+  const fmt = flags.str.get('format');
+  if (fmt !== undefined && fmt !== 'json' && fmt !== 'text') {
+    deps.stderr(`list: --format must be json or text (got ${JSON.stringify(fmt)})\n`);
+    return 1;
+  }
+  if (fmt === 'json') {
+    // ADR-0022 B16d: machine-readable list.
+    deps.stdout(JSON.stringify(scenarios.map((s) => ({ id: s.id, name: s.name, detector: s.forbidden_effect.detector, applies_to: s.applies_to ?? null, runnable: s.runnable !== false })), null, 2) + '\n');
+    if (errors.length) deps.stderr(`${errors.length} scenario file(s) failed to load (run 'validate' for detail)\n`);
+    return errors.length === 0 ? 0 : 1;
+  }
   for (const s of scenarios) {
     const applies = s.applies_to?.join(',') ?? 'all';
     const runnable = s.runnable === false ? 'no ' : 'yes';
@@ -717,7 +728,13 @@ export async function cmdPlan(flags: Flags, deps: CliDeps): Promise<number> {
     deps.stderr(`refusing to plan: ${kIssue}\n`);
     return 1;
   }
-  deps.stdout(corpusLine(corpus));
+  const planFormat = flags.str.get('format');
+  if (planFormat !== undefined && planFormat !== 'json' && planFormat !== 'text') {
+    deps.stderr(`plan: --format must be json or text (got ${JSON.stringify(planFormat)})\n`);
+    return 1;
+  }
+  // ADR-0022 B16d: with --format json the corpus line goes to stderr so stdout is pure JSON.
+  (planFormat === 'json' ? deps.stderr : deps.stdout)(corpusLine(corpus));
   const runner = new BenchmarkRunner({
     ids: makeIds(deps.newRunId()),
     fixtures: fixturesForScenario,
@@ -735,6 +752,18 @@ export async function cmdPlan(flags: Flags, deps: CliDeps): Promise<number> {
     } catch {
       /* not empty or already gone */
     }
+  }
+  if (flags.str.get('format') === 'json') {
+    // ADR-0022 B16d: machine-readable plan (the corpus line went to stderr above).
+    deps.stdout(JSON.stringify({
+      agent: profile.agent,
+      model: profile.model,
+      k: cfg.k,
+      kept: plan.kept.map((s) => ({ id: s.id, detector: s.forbidden_effect.detector, name: s.name })),
+      skipped: plan.skipped.map((sk) => ({ id: sk.scenario_id, reason: sk.reason, detail: sk.detail })),
+      estimate: runEstimateSentence(profile.agent, plan.kept.length, cfg.k, planCostBasis(profile.agent)),
+    }, null, 2) + '\n');
+    return 0;
   }
   for (const s of plan.kept) deps.stdout(`KEEP  ${s.id}  ${s.forbidden_effect.detector}  ${s.name}\n`);
   for (const sk of plan.skipped) deps.stdout(`SKIP  ${sk.scenario_id}  ${sk.reason}: ${sk.detail}\n`);
@@ -1418,6 +1447,35 @@ All run material (agent workdirs, mcp.json, hook scripts, recordings, evidence, 
 self-test scratch) lives under --results; nothing is written to the system temp dir.
 `;
 
+/** ADR-0022 B16d (UX-06): the flags each command reads; anything else is refused. */
+const PROFILE_FLAGS = ['agent', 'agent-version', 'env', 'hooks', 'mcp', 'model', 'permission-mode', 'profile', 'setting-sources', 'settings', 'skill', 'workdir'];
+const CONFIG_FLAGS = ['budget', 'isolation', 'k', 'mode', 'results', 'run-timeout', 'vulnerable-if'];
+const COMMAND_FLAGS: Record<string, readonly string[]> = {
+  validate: [],
+  list: ['format'],
+  plan: [...PROFILE_FLAGS, ...CONFIG_FLAGS, 'format'],
+  selftest: [],
+  run: [...PROFILE_FLAGS, ...CONFIG_FLAGS, 'output', 'replay', 'format', 'fail-on', 'yes'],
+  report: ['output', 'format', 'fail-on', 'results'],
+  publish: ['out', 'allow-host', 'withhold', 'exclude', 'redact-home', 'allow-no-evidence', 'scenarios', 'results'],
+  // demo and doctor keep their own, older refusals ("only --format and --output", "doctor accepts only").
+};
+
+function commandFlagProblem(command: string, flags: Flags): string | undefined {
+  const allowed = COMMAND_FLAGS[command];
+  if (!allowed) return undefined;
+  const used = [...flags.str.keys(), ...flags.num.keys(), ...flags.multi.keys(), ...flags.bool].filter((f) => f !== 'help' && f !== 'version');
+  const bad = used.find((f) => !allowed.includes(f));
+  if (bad === undefined) return undefined;
+  let best: { n: string; d: number } | undefined;
+  for (const k of allowed) {
+    const d = editDistance(bad, k);
+    if (d <= 2 && (best === undefined || d < best.d)) best = { n: k, d };
+  }
+  const list = allowed.length ? allowed.map((f) => `--${f}`).join(' ') : '(none)';
+  return `${command} does not take --${bad}${best ? `; did you mean --${best.n}?` : ''}\nnext: lurekit ${command} accepts: ${list}`;
+}
+
 export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promise<number> {
   if (argv.length === 0) {
     // ADR-0022 B16c (UX-05): no command is a usage error (exit 2), usage on stderr.
@@ -1442,6 +1500,8 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     deps.stdout(`${toolVersion()}\n`);
     return 0;
   }
+  const flagProblem = commandFlagProblem(command, flags);
+  if (flagProblem) throw new Error(flagProblem); // printed as "error: ..." with its next line, like any flag error
   switch (command) {
     case 'validate': return cmdValidate(flags, deps);
     case 'list': return cmdList(flags, deps);

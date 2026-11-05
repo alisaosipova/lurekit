@@ -665,3 +665,27 @@ describe('ADR-0022 amendment B16c: no command, version aliases', () => {
     expect(await main(['--help'], deps())).toBe(0);
   });
 });
+
+describe('ADR-0022 amendment B16d: per-command flags, JSON list and plan', () => {
+  it("another command's flag is refused with that command's own list", async () => {
+    for (const [argv, re] of [
+      [['validate', '--k', '7'], /validate does not take --k/],
+      [['selftest', '--model', 'x'], /selftest does not take --model/],
+      [['list', '--yes'], /list does not take --yes/],
+      [['report', 'x', '--formt', 'json'], /unknown flag "--formt"/],
+    ] as const) {
+      await expect(main([...argv], deps())).rejects.toThrow(re);
+    }
+  });
+  it('list --format json and plan --format json print parseable JSON on stdout', async () => {
+    expect(await main(['list', '--format', 'json'], deps())).toBe(0);
+    const list = JSON.parse(out.join(''));
+    expect(list.length).toBeGreaterThan(40);
+    expect(list[0]).toHaveProperty('id');
+    expect(await main(['plan', '--model', 'm', '--format', 'json'], deps())).toBe(0);
+    const plan = JSON.parse(out.join(''));
+    expect(plan.agent).toBe('claude-code');
+    expect(plan.kept.length).toBeGreaterThan(0);
+    expect(plan.skipped[0]).toHaveProperty('reason');
+  });
+});

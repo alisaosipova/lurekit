@@ -235,3 +235,13 @@ changed directory. Informational lines (`52 scenarios valid in <path>`) still na
 that forgot the command fails instead of passing; `--help`, `-h` and `help` still print it on
 stdout with exit 0. `-V` and `version` are accepted besides `--version` and `-v`.
 
+## Amendment (2026-11-05, block B16d, UX-06): per-command flags, JSON for list and plan
+
+Flags are checked per command: a flag another command reads (`validate --k 7`,
+`selftest --model x`, `list --yes`) is refused with `<command> does not take --<flag>` and a
+suggestion among that command's own flags, instead of being parsed and silently ignored.
+`list --format json` prints an array of `{id, name, detector, applies_to, runnable}`;
+`plan --format json` prints `{agent, model, k, kept: [{id, detector, name}], skipped:
+[{id, reason, detail}], estimated_usd}` (the corpus line goes to stderr in that case). The text
+output is unchanged.
+

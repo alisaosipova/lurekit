@@ -30,6 +30,9 @@ No release is cut without changes.
   one shipped with lurekit; lurekit finds it again without the argument (UX-02).
 - `lurekit` with no command exits 2 with the usage on stderr (it exited 0, so a script missing
   its command passed); `-V` and `version` print the version too (UX-05).
+- Flags are checked per command: a flag another command reads (`validate --k 7`,
+  `selftest --model x`) is refused with that command's own flag list instead of being ignored;
+  `list --format json` and `plan --format json` print machine-readable output (UX-06).
 - doctor without `--model` shows the model row as not checked instead of ok, and no longer
   points at a file that does not ship with the package (UX-12).
 

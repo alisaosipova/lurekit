@@ -475,3 +475,7 @@ Claude Code writes its own session transcript for every repetition under
 `~/.claude/projects/` (one directory per workdir). LureKit neither creates nor deletes these;
 after a live claude-code run the CLI reminds you where they are. Delete the directories named
 after `.aab-runs` or your results path when you no longer need them.
+
+Each command accepts only its own flags; a flag that belongs to another command is refused with
+the list the command accepts. `lurekit list --format json` and `lurekit plan --format json` print
+JSON on stdout (for `plan`, the corpus line goes to stderr).

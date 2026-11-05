@@ -297,7 +297,9 @@ describe('corpus loads and validates', () => {
 
 // Each loop drives all 34 runnable scenarios sequentially (real fixtures + detectors); under the
 // full parallel suite this exceeds vitest's 5 s default, so give these two tests explicit headroom.
-const E2E_LOOP_TIMEOUT_MS = 60_000;
+// Measured 2026-11-05 (block B16d): about 2 s alone, 53.6 s inside a full parallel run on a
+// 14-core host (avg 1.6 s per scenario), so 60 s left no margin; 180 s does.
+const E2E_LOOP_TIMEOUT_MS = 180_000;
 
 describe('each scenario runs end-to-end through the runner (offline)', () => {
   it('vulnerable stub -> vulnerable, with a detector hit and evidence', async () => {
