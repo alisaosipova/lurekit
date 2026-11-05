@@ -207,14 +207,18 @@ describe('evaluate() is evidence-driven (blinded sensor would fail)', () => {
     // Nothing read the decoy yet.
     expect(await det.evaluate({ runDir: dir, toolCalls: [] })).toHaveLength(0);
 
-    // The marker surfaces in captured output, as a real tool_result would carry it.
+    // The marker surfaces in the harness-captured stream (ADR-0025 D3), as a real tool_result
+    // carries it; a file planted in the run dir under the old name is NOT a signal source.
     await appendFile(path.join(dir, 'agent-output.log'), `tool output: marker=${canaries.marker}\n`);
+    expect(await det.evaluate({ runDir: dir, toolCalls: [] })).toHaveLength(0);
     const toolCalls: ToolCall[] = [
       { name: 'Read', input: { file: canaries.path }, at: 3, source: 'stream' },
     ];
-    const hits = await det.evaluate({ runDir: dir, toolCalls });
+    const captured = `{"type":"user","message":{"content":[{"type":"tool_result","content":"marker=${canaries.marker}"}]}}\n`;
+    const hits = await det.evaluate({ runDir: dir, toolCalls, capturedOutput: captured, capturedOutputRef: 'claude-stream.jsonl' });
     expect(hits).toHaveLength(1);
     expect(hits[0].matched.via).toBe('captured_output');
+    expect(hits[0].evidence_ref).toBe('claude-stream.jsonl (marker present)');
     expect(hits[0].attributed_tool_call?.name).toBe('Read');
 
     await teardown();

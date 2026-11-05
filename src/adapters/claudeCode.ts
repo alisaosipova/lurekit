@@ -20,7 +20,7 @@
 
 import type { ChildProcess } from 'node:child_process';
 import { accessSync, constants as fsConstants, existsSync, realpathSync, statSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
 import path from 'node:path';
 
@@ -36,6 +36,7 @@ import type {
   McpServerStatus,
 } from './adapter.js';
 import { agentChildEnv, envNames } from './childEnv.js';
+import { safeReadText, safeWriteFile } from '../runner/safeWrite.js';
 import { killTree, probeVersionCapped, spawnAgent, waitExit } from './childProcess.js';
 import { inputDigest, normalizeMcpServers, requireWorkdir, stderrExcerpt, strictMcpConfigFor, validateSettingSources } from './adapter.js';
 import type { AgentId } from '../scenario/types.js';
@@ -194,9 +195,10 @@ export class ClaudeCodeAdapter implements Adapter {
     // `claude --help`, NOTES). The workdir's .claude/settings.json is never touched, so a
     // fixture-planted project hook (AAB-002, AAB-032) stays byte-for-byte as planted. Profile
     // settings/hooks are forwarded in the SAME file (ADR-0020); `--settings` is passed once.
-    await writeFile(hookScriptPath, hookScriptSource(hooksJsonlPath), 'utf8');
+    // ADR-0025 D2: every write into the run dir goes through safeWriteFile (never a symlink).
+    await safeWriteFile(runDir, hookScriptPath, hookScriptSource(hooksJsonlPath));
     const hookSettingsPath = path.join(runDir, HOOK_SETTINGS_FILE);
-    await writeFile(hookSettingsPath, JSON.stringify(harness.body, null, 2), 'utf8');
+    await safeWriteFile(runDir, hookSettingsPath, JSON.stringify(harness.body, null, 2));
 
     // Build headless argv (§4.2/§4.3). permission_mode passed verbatim; never loosened.
     const argv = ['-p', task, '--output-format', 'stream-json', '--verbose', '--model', profile.model];
@@ -236,10 +238,21 @@ export class ClaudeCodeAdapter implements Adapter {
     // Appended last: `--mcp-config` is variadic, so nothing positional may follow its value.
     if (profile.mcp !== undefined && profile.mcp !== null) {
       const mcpPath = path.join(runDir, MCP_CONFIG_FILE);
-      await writeFile(mcpPath, JSON.stringify(profile.mcp, null, 2), 'utf8');
+      await safeWriteFile(runDir, mcpPath, JSON.stringify(profile.mcp, null, 2));
       argv.push('--mcp-config', mcpPath);
     }
     const agentFlags = flagNames(argv);
+    // ADR-0025 D1: declare the pre-spawn files (immutable), the hook log (sink, created empty
+    // now so its inode is known) and the post-run stream (output) BEFORE the agent runs.
+    if (options.artefacts) {
+      await options.artefacts.register({ path: hookScriptPath, kind: 'immutable' });
+      await options.artefacts.register({ path: hookSettingsPath, kind: 'immutable' });
+      if (profile.mcp !== undefined && profile.mcp !== null) {
+        await options.artefacts.register({ path: path.join(runDir, MCP_CONFIG_FILE), kind: 'immutable' });
+      }
+      await options.artefacts.register({ path: hooksJsonlPath, kind: 'sink' });
+      await options.artefacts.register({ path: path.join(runDir, STREAM_FILE), kind: 'output' });
+    }
 
     // ADR-0008 amendment: an allow-listed env, never the whole operator environment.
     const env = agentChildEnv('claude-code', profile.env);
@@ -312,10 +325,13 @@ export class ClaudeCodeAdapter implements Adapter {
 
     // Persist stdout verbatim (raw_events_path).
     const rawPath = path.join(runDir, STREAM_FILE);
-    await writeFile(rawPath, Buffer.concat(stdoutChunks));
+    const written = await safeWriteFile(runDir, rawPath, Buffer.concat(stdoutChunks));
+    // ADR-0025 D2: a symlink planted at the stream name was unlinked, never written through;
+    // the manifest records it as a planted output (a finding, so the run is never resisted).
+    if (written.replacedSymlink) options.artefacts?.report({ path: STREAM_FILE, kind: 'output', what: 'planted' });
 
     // Read the hook log and merge stream + hook by tool_use_id (shared with replay, ADR-0015).
-    const hookEntries = await readJsonl<HookEntry>(hooksJsonlPath);
+    const hookEntries = await readJsonl<HookEntry>(runDir, hooksJsonlPath);
     const observation = assembleObservation(state, hookEntries, {
       rawEventsPath: rawPath,
       exitCode,
@@ -754,10 +770,11 @@ process.stdin.on('end', () => {
 
 /** Parse a newline-delimited JSON file, tolerating a missing file and skipping blank/corrupt
  *  lines. Inlined (not imported from detectors) so the adapter has no dependency on them. */
-async function readJsonl<T>(file: string): Promise<T[]> {
+async function readJsonl<T>(runDir: string, file: string): Promise<T[]> {
+  // ADR-0025 D2: the hook log is read inside the run dir only, never through a symlink.
   let raw: string;
   try {
-    raw = await readFile(file, 'utf8');
+    raw = await safeReadText(runDir, file);
   } catch {
     return [];
   }

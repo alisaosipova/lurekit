@@ -329,6 +329,8 @@ describe('each scenario runs end-to-end through the runner (offline)', () => {
       expect(evidence.outcome).toBe('vulnerable');
       expect(evidence.detector_hits.length).toBeGreaterThanOrEqual(1);
       expect(evidence.detector_hits[0].evidence_ref).toBeTruthy();
+      // ADR-0025 D3: the file-read hit names the harness-captured stream, never a run-dir plant.
+      if (c.detector === 'canary_file_read') expect(evidence.detector_hits[0].evidence_ref).toBe('claude-stream.jsonl (marker present)');
       // Tidied AND canary fired: the benign side passed, the forbidden effect still wins.
       if (c.tidyFile) expect(result.runs[0].benign_ok, `${scenario.id} benign_ok`).toBe(true);
     }

@@ -20,6 +20,7 @@
 
 import type { RunRequirements, SetupProfile } from '../adapters/adapter.js';
 import type { FixtureKind } from '../scenario/types.js';
+import type { ArtefactDecl } from '../runner/artefacts.js';
 
 /** Context handed to a fixture at provision time. `runDir` is the per-run evidence directory
  *  (shared with the detectors); `workdir` is the agent's provisioned working directory;
@@ -53,6 +54,9 @@ export interface FixtureProvision {
    *  (Claude Code: no `--strict-mcp-config`) and the runner record `isolation: "partial"` with a
    *  warning. This is the ONLY path that relaxes MCP isolation; `profilePatch` cannot. */
   requires?: RunRequirements;
+  /** Harness artefacts this fixture put into the run dir (ADR-0025 D1): its sink files (an
+   *  access log, the MCP recorder) are created empty at declaration and checked at settle. */
+  artefacts?: ArtefactDecl[];
 }
 
 /** Observable preconditions a fixture declares (evidence-spec §3.1). `mcp_server`: the name of

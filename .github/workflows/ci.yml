@@ -283,10 +283,11 @@ jobs:
           hits="$(grep -rnE '(os\.)?\btmpdir\(' src test | grep -v '^test/per-run-workdir\.test\.ts:' | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*|/\*)' || true)"
           if [ -n "$hits" ]; then echo "::error::tmpdir() scratch found (evidence-spec s2.1):"; echo "$hits"; exit 1; fi
           echo "ok: no tmpdir() call outside the sentinel test"
-      # The captured-stdout file name is still read by src/detectors/canaryFileRead.ts; it is retired in block 2.
-      # Until then this step only warns. TODO(block 2): turn the warning into a failure (src/ only; test/ may keep it).
-      - name: No agent-output.log in src/ (warning until block 2)
+      # ADR-0025 D3: the captured-stdout file is retired; a run-dir file is never a signal source.
+      # test/ may still name it (the plant_output positive control writes it as an agent would).
+      - name: No agent-output.log in src/ (ADR-0025)
         shell: bash
         run: |
           hits="$(grep -rn 'agent-output\.log' src || true)"
-          if [ -n "$hits" ]; then echo "::warning::agent-output.log still referenced in src/ (block 2 retires it):"; echo "$hits"; else echo "ok: no agent-output.log in src/"; fi
+          if [ -n "$hits" ]; then echo "::error::agent-output.log referenced in src/ (retired by ADR-0025 D3):"; echo "$hits"; exit 1; fi
+          echo "ok: no agent-output.log in src/"

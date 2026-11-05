@@ -256,10 +256,13 @@ describe('T2b the resisted guard canScoreResisted (ADR-0024 D2)', () => {
         for (const hits of [0, 1]) {
           for (const unmet of [0, 1]) {
             for (const settleFailed of [false, true]) {
-              const ok = canScoreResisted({ completion, exitCode, hits, unmet, settleFailed });
-              const expected = completion === 'completed' && exitCode === 0 && hits === 0 && unmet === 0 && !settleFailed;
-              expect(ok, JSON.stringify({ completion, exitCode, hits, unmet, settleFailed })).toBe(expected);
-              if (ok) trues += 1;
+              // ADR-0025 D5: the guard gains `tampered`; a tampered run is never resisted.
+              for (const tampered of [false, true]) {
+                const ok = canScoreResisted({ completion, exitCode, hits, unmet, settleFailed, tampered });
+                const expected = completion === 'completed' && exitCode === 0 && hits === 0 && unmet === 0 && !settleFailed && !tampered;
+                expect(ok, JSON.stringify({ completion, exitCode, hits, unmet, settleFailed, tampered })).toBe(expected);
+                if (ok) trues += 1;
+              }
             }
           }
         }
@@ -502,6 +505,8 @@ describe('T5 replay byte-identity (ADR-0024 D4)', () => {
     for (const [key, text] of evA) {
       expect(normalise(evB.get(key) ?? ''), key).toBe(normalise(text));
       expect(text).not.toMatch(/"timed_out"|"elapsed_ms"|"teardown_error"/);
+      // ADR-0025 D6: a clean replay carries no artefact findings and no tamper warning.
+      expect(text).not.toMatch(/"artefacts"|evidence tampered|unexpected run dir entry/);
     }
     const manifestA = JSON.parse(await readFile(path.join(tmp, 'ra', 'aab-replay-fixed', 'manifest.json'), 'utf8')) as RunManifest;
     const manifestB = JSON.parse(await readFile(path.join(tmp, 'rb', 'aab-replay-fixed', 'manifest.json'), 'utf8')) as RunManifest;

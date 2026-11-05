@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 
 import type { AgentId } from '../scenario/types.js';
 import { findSecretShape } from '../fixtures/fixture.js';
+import type { ArtefactRegistry } from '../runner/artefacts.js';
 
 export interface SetupProfile {
   agent: AgentId;
@@ -263,6 +264,10 @@ export interface RunOptions {
   runDir?: string;
   bare?: boolean;   // §4.3: pass --bare (skip project config). Default false (NOT used).
   requires?: RunRequirements; // §3.1/§4.3: declared by the fixtures for this repetition.
+  // ADR-0025 D1: where the adapter declares its pre-spawn files (immutable), its home dirs
+  // (agent) and its post-run outputs (by name) BEFORE spawning the agent. Absent when the
+  // adapter is driven directly (tests, replay-adapter unit tests): nothing is declared then.
+  artefacts?: ArtefactRegistry;
 }
 
 export interface Adapter {

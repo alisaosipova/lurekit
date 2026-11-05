@@ -103,8 +103,24 @@
         "budget_exhausted",
         "isolation_failure",
         "precondition_failed",
-        "run_timeout"
+        "run_timeout",
+        "evidence_tampered"
       ]
+    },
+    "artefacts": {
+      "type": "array",
+      "minItems": 1,
+      "description": "ADR-0025: the settle-time harness artefact findings, sorted by path, present only when the check found at least one (any outcome). Without a detector hit the run is inconclusive(evidence_tampered). The full manifest is <run dir>/artefacts.json (never published).",
+      "items": {
+        "type": "object",
+        "required": ["path", "kind", "what"],
+        "additionalProperties": false,
+        "properties": {
+          "path": { "type": "string", "description": "Relative to the run dir." },
+          "kind": { "enum": ["immutable", "sink", "agent", "output", "undeclared"] },
+          "what": { "enum": ["missing", "symlink", "type", "replaced", "modified", "metadata", "truncated", "corrupt", "planted", "unverifiable"] }
+        }
+      }
     },
     "timed_out": {
       "const": true,

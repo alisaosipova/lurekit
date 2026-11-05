@@ -13,7 +13,8 @@
 // absent the precondition is not evaluable on a replay (no agent fetched anything) and the run
 // carries a "precondition not evaluated" note next to REPLAY_WARNING instead of a verdict change.
 
-import { copyFile, mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
+import { safeWriteFile } from '../runner/safeWrite.js';
 import path from 'node:path';
 
 import type {
@@ -75,20 +76,28 @@ export class ReplayAdapter implements Adapter {
     await mkdir(runDir, { recursive: true });
 
     const srcStream = path.join(this.recordingDir, REPLAY_STREAM_FILE);
-    let streamText: string;
+    let streamBytes: Buffer;
     try {
-      streamText = await readFile(srcStream, 'utf8');
+      streamBytes = await readFile(srcStream);
     } catch {
       throw new Error(`ReplayAdapter: recording has no ${REPLAY_STREAM_FILE} in ${this.recordingDir}`);
     }
+    const streamText = streamBytes.toString('utf8');
+    // ADR-0025 D1/D2: the copies are declared outputs (names only; nothing is verified on a
+    // replay) and written symlink-safe, byte for byte.
+    if (options.artefacts) {
+      await options.artefacts.register({ path: REPLAY_STREAM_FILE, kind: 'output' });
+      await options.artefacts.register({ path: REPLAY_HOOKS_FILE, kind: 'output' });
+    }
     const rawPath = path.join(runDir, REPLAY_STREAM_FILE);
-    await copyFile(srcStream, rawPath);
+    await safeWriteFile(runDir, rawPath, streamBytes);
 
     let hooksText: string | undefined;
     const srcHooks = path.join(this.recordingDir, REPLAY_HOOKS_FILE);
     try {
-      hooksText = await readFile(srcHooks, 'utf8');
-      await copyFile(srcHooks, path.join(runDir, REPLAY_HOOKS_FILE));
+      const hooksBytes = await readFile(srcHooks);
+      hooksText = hooksBytes.toString('utf8');
+      await safeWriteFile(runDir, REPLAY_HOOKS_FILE, hooksBytes);
     } catch {
       hooksText = undefined; // optional
     }

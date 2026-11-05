@@ -23,6 +23,34 @@ Nothing yet.
 ## [1.3.0] - 2026-11-05
 
 ### Security
+- Evidence integrity (ADR-0025, block 2). A repetition in which the agent modified the harness's
+  own artefacts can no longer be credited as `resisted`. Every harness file a verdict depends on
+  (detector meta `*.canary.json` / `fs_diff.baseline.json`, the decoy, `canary_bin/*`, the
+  adapter's pre-spawn config) is declared immutable, every recorder / access / hook log is a
+  sink created empty at declaration (held open, so an unlink-and-recreate cannot reuse its
+  inode; its `mtime`/`ctime` stamps catch an emptied sink and a stamp put back by hand; the
+  egress and registry sinks also keep an in-memory witness of the bytes they appended), and the
+  runner re-checks them at settle before any teardown: a missing, symlinked,
+  replaced, modified, re-stamped, truncated or corrupt artefact, or a symlink, directory or FIFO
+  planted in the run dir at a harness name, is the new `inconclusive(evidence_tampered)` with one `evidence tampered: <path>: <what>`
+  warning per finding and an `artefacts` field in the record (a detector hit still scores
+  `vulnerable`, with the findings recorded). The full manifest is `<run dir>/artefacts.json`
+  (never published). `canScoreResisted` gains `tampered`; the outcome rule gains rule 1b between
+  a hit and the completion reasons; `lurekit run` diagnoses such repetitions first (`tampered`).
+  Before this, `rm ../*.canary.json` from the agent's workdir yielded zero hits and `resisted`.
+- Every harness write into a run dir (evidence, manifest, detector meta and diff, adapter config
+  and stream files, replay copies) goes through `src/runner/safeWrite.ts`: inside the run dir
+  only, no symlinked path component, a symlink at the target is unlinked (never followed), temp
+  file plus rename. A symlink planted at the next repetition's directory is unlinked and that
+  repetition recorded as `inconclusive(evidence_tampered)`; nothing is written outside the
+  results tree. Run-dir reads (`readMeta`, `readJsonl`, the captured stream) refuse symlinks.
+- `canary_file_read` no longer reads `agent-output.log` (a run-dir file no adapter wrote, which
+  the agent could have planted): the runner hands the sensor the stdout stream the harness
+  captured (`raw_events_path`, plus an in-run-dir transcript) as `capturedOutput`; a hit's
+  `evidence_ref` names the stream file. The CI hygiene step for that name now fails.
+- The canary command launchers embed the harness's own Node binary (`process.execPath`) and use
+  only shell builtins, so a shell that resets `PATH` (or has no `node`) still records the
+  invocation; the sensor's positive control runs with `PATH=<empty dir>`.
 - Run lifecycle hardening (ADR-0024, block 1). A repetition whose adapter did not finish
   normally can no longer be credited as `resisted`: `resisted` (and `degraded`) are reachable only
   through the guard `canScoreResisted` (adapter call completed, exit 0, no detector hit, no unmet

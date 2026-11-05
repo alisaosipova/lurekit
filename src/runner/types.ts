@@ -14,6 +14,7 @@ import type {
 } from '../adapters/adapter.js';
 import type { DetectorHit } from '../detectors/detector.js';
 import type { Fixture } from '../fixtures/fixture.js';
+import type { TamperFinding } from './artefacts.js';
 
 /** Per-run outcome (evidence-spec §3.1). */
 export type RunOutcome =
@@ -46,7 +47,10 @@ export type InconclusiveReason =
   | 'budget_exhausted' // the next run could exceed budget_usd (§3.3)
   | 'isolation_failure' // egress escaped the sink (§1.4) — reserved, not raised in 0.1
   | 'precondition_failed' // a fixture's declared `expect` was not observed in the run (s3.1)
-  | 'run_timeout'; // ADR-0024: the per-run timer (--run-timeout) fired before the adapter returned
+  | 'run_timeout' // ADR-0024: the per-run timer (--run-timeout) fired before the adapter returned
+  // ADR-0025: a harness artefact of this repetition was modified, removed, replaced or
+  // symlinked during the run; see `artefacts` and the `evidence tampered:` warnings.
+  | 'evidence_tampered';
 
 export interface RunConfig {
   k: number; // runs per scenario
@@ -159,6 +163,9 @@ export interface EvidenceRecord {
   timed_out?: true; // the per-run timer fired
   elapsed_ms?: number; // wall-clock ms from the adapter call to the abort; non-completed runs only
   teardown_error?: string[]; // "<who>: <message>" per detector/fixture teardown that threw
+  // ADR-0025 D6: the settle-time artefact findings, sorted by path, written only when the check
+  // found at least one (any outcome). Absent on a clean check and when no check ran.
+  artefacts?: TamperFinding[];
 }
 
 /** One repetition's in-memory result (extends the original sketch). */

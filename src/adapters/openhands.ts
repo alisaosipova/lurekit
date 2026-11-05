@@ -14,7 +14,8 @@
 // Determinism (§4.5): the parse step is the exported pure `observeOpenHandsRun`; tests drive an
 // offline stub binary (test/fixtures/agents/stub-openhands.mjs). No live agent, network or spend.
 
-import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, stat } from 'node:fs/promises';
+import { isInside, safeWriteFile } from '../runner/safeWrite.js';
 import { performance } from 'node:perf_hooks';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
@@ -247,7 +248,19 @@ export class OpenHandsAdapter implements Adapter {
       warnings.push(`agent version mismatch: profile names ${profile.agent_version}, binary reports ${versionBefore}`);
     }
 
-    await writeFile(path.join(runDir, OPENHANDS_ARGV_FILE), JSON.stringify(argvRecord(bin, argv, task)), 'utf8');
+    // ADR-0025 D1/D2: argv record symlink-safe and immutable; the run-scoped home and the
+    // persistence dirs (when inside the run dir) are agent-owned; stream, stderr and the
+    // transcript are declared outputs.
+    await safeWriteFile(runDir, OPENHANDS_ARGV_FILE, JSON.stringify(argvRecord(bin, argv, task)));
+    if (options.artefacts) {
+      await options.artefacts.register({ path: OPENHANDS_ARGV_FILE, kind: 'immutable' });
+      for (const dir of [built.home, persistenceDir, conversationsDir]) {
+        if (dir && isInside(runDir, dir)) await options.artefacts.register({ path: dir, kind: 'agent' });
+      }
+      await options.artefacts.register({ path: OPENHANDS_STREAM_FILE, kind: 'output' });
+      await options.artefacts.register({ path: OPENHANDS_STDERR_FILE, kind: 'output' });
+      await options.artefacts.register({ path: OPENHANDS_TRANSCRIPT_FILE, kind: 'output' });
+    }
 
     const startedAt = Date.now();
     const perfStart = performance.now();
@@ -293,8 +306,11 @@ export class OpenHandsAdapter implements Adapter {
     const endedAt = Date.now();
 
     const rawPath = path.join(runDir, OPENHANDS_STREAM_FILE);
-    await writeFile(rawPath, Buffer.concat(stdoutChunks));
-    await writeFile(path.join(runDir, OPENHANDS_STDERR_FILE), stderrCap.fileContent());
+    const written = await safeWriteFile(runDir, rawPath, Buffer.concat(stdoutChunks));
+    // ADR-0025 D2: a symlink planted at the stream name was unlinked, never written through;
+    // the manifest records it as a planted output (a finding, so the run is never resisted).
+    if (written.replacedSymlink) options.artefacts?.report({ path: OPENHANDS_STREAM_FILE, kind: 'output', what: 'planted' });
+    await safeWriteFile(runDir, OPENHANDS_STDERR_FILE, stderrCap.fileContent());
 
     const versionAfter = probeVersion(bin, env);
     if (versionBefore && versionAfter && versionAfter !== versionBefore) {
@@ -309,7 +325,7 @@ export class OpenHandsAdapter implements Adapter {
     let transcriptPath: string | undefined;
     if (persisted.eventTexts.length > 0) {
       transcriptPath = path.join(runDir, OPENHANDS_TRANSCRIPT_FILE);
-      await writeFile(transcriptPath, persisted.eventTexts.map((t) => compactJson(t)).join('\n') + '\n', 'utf8');
+      await safeWriteFile(runDir, transcriptPath, persisted.eventTexts.map((t) => compactJson(t)).join('\n') + '\n');
     }
     warnings.push(...persisted.warnings);
 

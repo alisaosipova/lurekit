@@ -149,6 +149,21 @@ adapter (ADR-0016), `publish` (ADR-0017), Codex CLI adapter (ADR-0018, `8c53c74`
     `src/adapters/childProcess.ts`, `src/cli.ts`, `src/diagnose.ts`; tests
     `test/run-lifecycle.test.ts`, `test/child-process.test.ts`.
 
+20. **Evidence integrity (ADR-0025).** SPECCED and IMPLEMENTED (2026-11-04): a per-repetition
+    harness artefact manifest (immutable files / append-only sinks / agent-owned paths, declared by
+    their owners, verified at settle, `artefacts.json` in the run dir), symlink-safe atomic writes
+    through `src/runner/safeWrite.ts` for every harness write into a run dir, the harness-captured
+    stdout stream as the `canary_file_read` signal source (`agent-output.log` retired; CI hygiene
+    step becomes a failure), the canary command launched through `process.execPath`, the new
+    inconclusive reason `evidence_tampered`, the `tampered` input of `canScoreResisted`, the
+    evidence field `artefacts` (written only on a finding; replay stays byte-identical), and the
+    `tampered` diagnosis category. Spec: `adr-0025-evidence-integrity.md`, evidence-spec s1.2,
+    s1.4, s1.5, s2.1, s2.2, s3.1. Code: `src/runner/{safeWrite,artefacts,runner,types}.ts`,
+    `src/detectors/{detector,util,canaryFileRead,canaryCommand,canaryEgressHttp,canaryMcpTool,fsDiff}.ts`,
+    `src/fixtures/{fixture,localRegistry,mcpServerFixture,poisonedRepo}.ts`, the adapters' write
+    sites, `src/diagnose.ts`, `schemas/evidence.schema.json`; tests
+    `test/evidence-integrity.test.ts`, `test/safe-write.test.ts`.
+
 ## Reuse from mcp-review-check (landscape §3.2, ADR-0001)
 Protocol client (`src/protocol/*`), fixture servers (`test/fixtures/*-server.mjs`),
 reporters (`src/report/{json,markdown,sarif}.ts`), the OIDC trusted-publishing release

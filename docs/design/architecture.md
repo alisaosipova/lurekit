@@ -39,6 +39,12 @@ The design is split across several files so each piece stays small and reviewabl
   `AbortController`, the lifecycle as a strict state machine with a `resisted` guard
   (`canScoreResisted`), teardown in `finally`, `inconclusive(run_timeout)`, process-group kill in a
   shared child-process helper. **Proposed, implemented; awaiting approval.**
+- `adr-0025-evidence-integrity.md` - evidence integrity: a per-repetition harness artefact manifest
+  (immutable files vs append-only sinks vs agent-owned paths) verified at settle, symlink-safe
+  atomic writes through one helper, the harness-captured stdout stream as the `canary_file_read`
+  signal source (`agent-output.log` retired), the canary command launched through
+  `process.execPath`, `inconclusive(evidence_tampered)` and the `tampered` input of the resisted
+  guard. **Proposed, implemented; awaiting approval.**
 - `evidence-spec.md` — the detector/evidence/verdict/adapter/reporting contract in detail
   (§1 detectors, §2 evidence+manifest, §3 verdicts, §4 adapter+observation, §5 redaction,
   §6 reporting). The ADRs below reference it rather than restating it.
@@ -429,8 +435,8 @@ recordings are not in the package `files`. The directory must still be empty aft
 `package.json` has `"prepack": "npm run build"`, so `npm pack` and a manual `npm publish` always
 build `dist/` first and cannot ship a stale build; the job checks that the pack lists `dist/`.
 A hygiene job fails on any `tmpdir()` call in `src/` or `test/` outside the TMPDIR sentinel test
-(`test/per-run-workdir.test.ts`), and warns (until block 2 retires it) on `agent-output.log` in
-`src/`.
+(`test/per-run-workdir.test.ts`), and fails on `agent-output.log` in `src/` (retired by
+ADR-0025 D3).
 
 ## ADR-0013: Weekly update cadence — **DECISION NEEDED**
 
@@ -537,3 +543,4 @@ plumbing, keep decisions in ADRs; codified in `CLAUDE.md`. This document was ass
 | 0022 | Doctor, smoke default and newcomer error paths (`adr-0022-doctor-smoke-default-and-error-paths.md`) | proposed, implemented; awaiting approval |
 | 0023 | Generated docs: catalog, verified-against matrix, demo image (`adr-0023-generated-docs.md`) | proposed, implemented; awaiting approval |
 | 0024 | Run lifecycle: per-run timeout, strict state machine, process-group kill (`adr-0024-run-lifecycle.md`) | proposed, implemented; awaiting approval |
+| 0025 | Evidence integrity: artefact manifest, symlink-safe writes, captured-output file-read signal, execPath launcher, `evidence_tampered` (`adr-0025-evidence-integrity.md`) | proposed, implemented; awaiting approval |

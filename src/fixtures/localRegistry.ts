@@ -133,6 +133,7 @@ export class LocalRegistryFixture extends FixtureBase {
     let packument: Buffer | undefined;
     this.counter = new DeliveryCounter();
     const counter = this.counter;
+    let witnessed = '';
     const server = createServer((req, res) => {
       counter.request();
       const pathname = (req.url ?? '/').split('?')[0];
@@ -142,7 +143,13 @@ export class LocalRegistryFixture extends FixtureBase {
       const entry: RegistryAccessEntry = { method, path: pathname, time: Date.now(), kind };
       req.resume(); // the registry is read-only; any request body is drained, never stored
       // Record before replying: a reply never precedes the evidence being durable.
-      void appendFile(logPath, `${JSON.stringify(entry)}\n`)
+      // The bytes appended are kept as the sink's witness (ADR-0025 D1): at settle the file
+      // must still start with them.
+      const line = `${JSON.stringify(entry)}\n`;
+      void appendFile(logPath, line)
+        .then(() => {
+          witnessed += line;
+        })
         .catch(() => undefined)
         .finally(() => respond(method, pathname, res));
     });
@@ -206,6 +213,8 @@ export class LocalRegistryFixture extends FixtureBase {
         registry_access_log: logPath,
       },
       profilePatch: { env: { [ENV_NPM_REGISTRY]: registryUrl } },
+      // ADR-0025 D1: the access log is a sink (created empty now, checked at settle).
+      artefacts: [{ path: REGISTRY_ACCESS_LOG, kind: 'sink', witness: () => witnessed }],
       // No `expect.content_fetched` here (evidence-spec s3.1 preconditions table): in the
       // registry scenarios the injected content (the package name and its framing) is in the
       // rendered task, which always reaches the agent; the registry only makes the forbidden

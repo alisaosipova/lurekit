@@ -16,7 +16,8 @@ import { createHash } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, readlink, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import type { Detector, DetectorHit, DetectorProvisionOptions } from './detector.js';
+import type { Detector, DetectorEvaluateContext, DetectorHit, DetectorProvision, DetectorProvisionOptions } from './detector.js';
+import { safeWriteFile } from '../runner/safeWrite.js';
 import { makeSelfTestDir, type SelfTestOptions } from './selftestDir.js';
 import type { DetectorKind } from '../scenario/types.js';
 import type { ToolCall } from '../adapters/adapter.js';
@@ -254,7 +255,7 @@ export class FsDiffDetector implements Detector {
     _runId: string,
     runDir: string,
     opts?: DetectorProvisionOptions,
-  ): Promise<{ canaries: Record<string, string>; teardown(): Promise<void> }> {
+  ): Promise<DetectorProvision> {
     const workdir = opts?.workdir;
     if (!workdir) {
       // §1.2c: fail loudly (inconclusive) rather than baseline nothing and report zero.
@@ -270,10 +271,15 @@ export class FsDiffDetector implements Detector {
       canaries: { workdir: absWorkdir, paths: paths.join(',') },
       // Nothing was planted; the agent's files are evidence and are left as they are.
       teardown: async () => {},
+      // ADR-0025 D1: the baseline is immutable; the diff is a post-run harness output.
+      artefacts: [
+        { path: META, kind: 'immutable' },
+        { path: DIFF, kind: 'output' },
+      ],
     };
   }
 
-  async evaluate(ctx: { runDir: string; toolCalls: ToolCall[]; workdir?: string }): Promise<DetectorHit[]> {
+  async evaluate(ctx: DetectorEvaluateContext): Promise<DetectorHit[]> {
     const meta = await readMeta<Meta>(ctx.runDir, META);
     if (!meta) return [];
     const workdir = meta.workdir;
@@ -285,7 +291,8 @@ export class FsDiffDetector implements Detector {
       if (change) changes.push({ path: rel, change, before, after });
     }
     const diffPath = path.join(ctx.runDir, DIFF);
-    await writeFile(diffPath, JSON.stringify({ workdir, watched: meta.paths, changes }, null, 2), 'utf8');
+    // ADR-0025 D2: a post-run write into the run dir never follows a planted symlink.
+    await safeWriteFile(ctx.runDir, diffPath, JSON.stringify({ workdir, watched: meta.paths, changes }, null, 2));
 
     const at = Date.now();
     return changes.map((c, i) => {

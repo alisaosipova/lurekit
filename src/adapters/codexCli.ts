@@ -15,7 +15,8 @@
 // Determinism (§4.5): the parse step is the exported pure `observeCodexRun`; tests drive an
 // offline stub binary (test/fixtures/agents/stub-codex.mjs). No live agent, network or spend.
 
-import { mkdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, stat } from 'node:fs/promises';
+import { safeWriteFile } from '../runner/safeWrite.js';
 import { performance } from 'node:perf_hooks';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
@@ -226,7 +227,15 @@ export class CodexCliAdapter implements Adapter {
       warnings.push(`agent version mismatch: profile names ${profile.agent_version}, binary reports ${versionBefore}`);
     }
 
-    await writeFile(path.join(runDir, CODEX_ARGV_FILE), JSON.stringify(argvRecord(bin, argv, task)), 'utf8');
+    // ADR-0025 D1/D2: the argv record is written symlink-safe and declared immutable; the
+    // run-scoped home is agent-owned; the stream and stderr files are declared outputs.
+    await safeWriteFile(runDir, CODEX_ARGV_FILE, JSON.stringify(argvRecord(bin, argv, task)));
+    if (options.artefacts) {
+      await options.artefacts.register({ path: CODEX_ARGV_FILE, kind: 'immutable' });
+      await options.artefacts.register({ path: CODEX_HOME_DIR, kind: 'agent' });
+      await options.artefacts.register({ path: CODEX_STREAM_FILE, kind: 'output' });
+      await options.artefacts.register({ path: CODEX_STDERR_FILE, kind: 'output' });
+    }
 
     const startedAt = Date.now();
     const perfStart = performance.now();
@@ -273,9 +282,12 @@ export class CodexCliAdapter implements Adapter {
     const endedAt = Date.now();
 
     const rawPath = path.join(runDir, CODEX_STREAM_FILE);
-    await writeFile(rawPath, Buffer.concat(stdoutChunks));
+    const written = await safeWriteFile(runDir, rawPath, Buffer.concat(stdoutChunks));
+    // ADR-0025 D2: a symlink planted at the stream name was unlinked, never written through;
+    // the manifest records it as a planted output (a finding, so the run is never resisted).
+    if (written.replacedSymlink) options.artefacts?.report({ path: CODEX_STREAM_FILE, kind: 'output', what: 'planted' });
     const stderrBuf = stderrCap.head();
-    await writeFile(path.join(runDir, CODEX_STDERR_FILE), stderrCap.fileContent());
+    await safeWriteFile(runDir, CODEX_STDERR_FILE, stderrCap.fileContent());
 
     const versionAfter = probeVersion(bin, env);
     if (versionBefore && versionAfter && versionAfter !== versionBefore) {

@@ -88,8 +88,9 @@ A real example is [`reports/aab-20261102161512-ca5fe106/index.md`](../../reports
 - Raw agent transcripts (`claude-stream.jsonl` and other agents' event streams).
 - Hook captures (`claude-hooks.jsonl`) and the hook script.
 - Detector logs and metadata: recorder logs, access logs, `*.canary.json`, `fs_diff` baselines and
-  diffs, `agent-output.log`. (`*.canary.json` is read to find canary values to mask, see below,
-  but is never copied.)
+  diffs, the canary decoy and launchers. (`*.canary.json` is read to find canary values to mask,
+  see below, but is never copied.)
+- The harness artefact manifest `artefacts.json` (ADR-0025).
 - The adapter's per-run config files (`mcp.json`, `claude-settings.json`).
 - The agent workdirs (`work/`).
 - Anything else in the run dir.

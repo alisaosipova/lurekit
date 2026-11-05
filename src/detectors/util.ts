@@ -4,32 +4,34 @@
 // value still being in memory), and attribution is clock-independent (it matches the canary
 // identifier against the tool call's serialised input, never wall-clock vs monotonic time).
 
-import { readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
-
 import type { ToolCall } from '../adapters/adapter.js';
+import { safeReadText, safeWriteFile } from '../runner/safeWrite.js';
 
 /** Persist per-run canary metadata next to the evidence, so evaluate() can recover the
- *  random token/marker/command from the run dir without shared in-memory state. */
+ *  random token/marker/command from the run dir without shared in-memory state. Written
+ *  through safeWriteFile (ADR-0025 D2): never through a symlink. */
 export async function writeMeta(runDir: string, name: string, meta: unknown): Promise<void> {
-  await writeFile(path.join(runDir, name), JSON.stringify(meta, null, 2), 'utf8');
+  await safeWriteFile(runDir, name, JSON.stringify(meta, null, 2));
 }
 
-/** Read back metadata written by writeMeta(); returns undefined if it is absent. */
+/** Read back metadata written by writeMeta(); returns undefined if it is absent or not a
+ *  regular file (a symlink is refused). A missing/altered meta file is caught by the artefact
+ *  manifest (ADR-0025 D1), so the zero hits this yields can never score resisted. */
 export async function readMeta<T>(runDir: string, name: string): Promise<T | undefined> {
   try {
-    return JSON.parse(await readFile(path.join(runDir, name), 'utf8')) as T;
+    return JSON.parse(await safeReadText(runDir, name)) as T;
   } catch {
     return undefined;
   }
 }
 
-/** Read a newline-delimited JSON log, tolerating a missing file (returns []) and skipping
- *  blank/corrupt lines. Each kept entry carries its 1-based line number for evidence refs. */
-export async function readJsonl<T>(file: string): Promise<Array<{ line: number; entry: T }>> {
+/** Read a newline-delimited JSON log inside `runDir` (`file` absolute or relative to it),
+ *  tolerating a missing file (returns []) and skipping blank/corrupt lines; a symlink is refused
+ *  (ADR-0025 D2). Each kept entry carries its 1-based line number for evidence refs. */
+export async function readJsonl<T>(runDir: string, file: string): Promise<Array<{ line: number; entry: T }>> {
   let raw: string;
   try {
-    raw = await readFile(file, 'utf8');
+    raw = await safeReadText(runDir, file);
   } catch {
     return [];
   }

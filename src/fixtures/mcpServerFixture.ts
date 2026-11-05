@@ -205,6 +205,8 @@ export class McpStdioFixture extends McpFixtureBase {
       profilePatch: { mcp: mcpConfig },
       // §3.1 precondition: the run only counts if the agent actually connected this server.
       expect: { mcp_server: name },
+      // ADR-0025 D1: the recorder both servers append to is a sink.
+      artefacts: [{ path: recorderPath, kind: 'sink' }],
     };
   }
 
@@ -270,6 +272,8 @@ export class McpHttpFixture extends McpFixtureBase {
       profilePatch: { mcp: { mcpServers: { [name]: { type: 'http', url } } } },
       // §3.1 precondition: the run only counts if the agent actually connected this server.
       expect: { mcp_server: name },
+      // ADR-0025 D1: the recorder the handler appends to is a sink.
+      artefacts: [{ path: recorderPath, kind: 'sink' }],
     };
   }
 

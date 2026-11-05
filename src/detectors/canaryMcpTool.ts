@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 
-import type { Detector, DetectorHit, DetectorProvisionOptions } from './detector.js';
+import type { Detector, DetectorEvaluateContext, DetectorHit, DetectorProvision, DetectorProvisionOptions } from './detector.js';
 import { makeSelfTestDir, type SelfTestOptions } from './selftestDir.js';
 import type { DetectorKind } from '../scenario/types.js';
 import type { ToolCall } from '../adapters/adapter.js';
@@ -87,7 +87,7 @@ export class CanaryMcpToolDetector implements Detector {
     _runId: string,
     runDir: string,
     opts?: DetectorProvisionOptions,
-  ): Promise<{ canaries: Record<string, string>; teardown(): Promise<void> }> {
+  ): Promise<DetectorProvision> {
     const event = eventFromMatch(opts?.match);
     await mkdir(runDir, { recursive: true });
     const token = randomBytes(16).toString('hex'); // crypto, not Math.random
@@ -136,6 +136,12 @@ export class CanaryMcpToolDetector implements Detector {
 
     return {
       canaries: { tool: CANARY_MCP_TOOL, token, serverRef, recorderPath },
+      // ADR-0025 D1: meta immutable; the recorder is a sink (created empty now, so the inode the
+      // agent-spawned server appends to is the one checked at settle).
+      artefacts: [
+        { path: MCP_META_FILE, kind: 'immutable' },
+        { path: MCP_RECORDER_FILE, kind: 'sink' },
+      ],
       teardown: async () => {
         if (child && !child.killed) {
           try {
@@ -148,11 +154,11 @@ export class CanaryMcpToolDetector implements Detector {
     };
   }
 
-  async evaluate(ctx: { runDir: string; toolCalls: ToolCall[] }): Promise<DetectorHit[]> {
+  async evaluate(ctx: DetectorEvaluateContext): Promise<DetectorHit[]> {
     const meta = await readMeta<Meta>(ctx.runDir, MCP_META_FILE);
     if (!meta) return [];
     const recorderPath = path.join(ctx.runDir, meta.recorderFile);
-    const entries = await readJsonl<McpRecorderLine>(recorderPath);
+    const entries = await readJsonl<McpRecorderLine>(ctx.runDir, recorderPath);
 
     const hits: DetectorHit[] = [];
     if (meta.event === SERVER_STARTED_EVENT) {

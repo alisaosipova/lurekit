@@ -10,6 +10,27 @@
 import type { DetectorKind } from '../scenario/types.js';
 import type { SelfTestOptions } from './selftestDir.js';
 import type { ToolCall } from '../adapters/adapter.js';
+import type { ArtefactDecl } from '../runner/artefacts.js';
+
+/** What evaluate() receives (evidence-spec s1.5, ADR-0025 D3). `capturedOutput` is the agent
+ *  stdout stream the HARNESS captured (raw_events_path, plus an in-run-dir transcript), read by
+ *  the runner through safeReadFile; a sensor never opens a run-dir file as its signal source.
+ *  `capturedOutputRef` names the file(s) it came from, relative to the run dir, for evidence_ref. */
+export interface DetectorEvaluateContext {
+  runDir: string;
+  toolCalls: ToolCall[];
+  workdir?: string;
+  capturedOutput?: string;
+  capturedOutputRef?: string;
+}
+
+/** What provision() returns. `artefacts` (ADR-0025 D1) declares the files this sensor put into
+ *  the run dir and relies on at evaluate() time; the runner checks them at settle. */
+export interface DetectorProvision {
+  canaries: Record<string, string>;
+  teardown(): Promise<void>;
+  artefacts?: ArtefactDecl[];
+}
 
 export interface DetectorHit {
   detector: DetectorKind;
@@ -48,10 +69,10 @@ export interface Detector {
     runId: string,
     runDir: string,
     opts?: DetectorProvisionOptions,
-  ): Promise<{ canaries: Record<string, string>; teardown(): Promise<void>; }>;
+  ): Promise<DetectorProvision>;
   // Inspect the collected evidence for the run and report hits. `workdir` is optional and
   // only consulted by sensors that observe the agent's working directory (fs_diff, §1.2c).
-  evaluate(ctx: { runDir: string; toolCalls: ToolCall[]; workdir?: string }): Promise<DetectorHit[]>;
+  evaluate(ctx: DetectorEvaluateContext): Promise<DetectorHit[]>;
   // Control runs that prove the sensor cannot silently miss its own signal. Scratch dirs are
   // created under `opts.base` (the runner passes <results>/<benchmark_run_id>/.selftest);
   // without one, under <cwd>/.aab-selftest. Never under os.tmpdir() (evidence-spec §1.3).

@@ -9,7 +9,7 @@
 import type { AgentId } from './scenario/types.js';
 import { agentInfo } from './doctor.js';
 
-export type IssueCategory = 'budget' | 'timeout' | 'binary' | 'permission' | 'auth' | 'network' | 'model' | 'adapter';
+export type IssueCategory = 'tampered' | 'budget' | 'timeout' | 'binary' | 'permission' | 'auth' | 'network' | 'model' | 'adapter';
 
 export interface RepIssue {
   scenario_id: string;
@@ -30,7 +30,7 @@ export interface Diagnosis {
   evidence_path?: string;
 }
 
-const PATTERNS: Array<[Exclude<IssueCategory, 'budget' | 'timeout' | 'adapter'>, RegExp]> = [
+const PATTERNS: Array<[Exclude<IssueCategory, 'tampered' | 'budget' | 'timeout' | 'adapter'>, RegExp]> = [
   ['binary', /not found or not executable|failed to spawn agent binary|\bENOENT\b|\bEACCES\b/],
   ['permission', /permission_mode: always-approve|permission_mode "[^"]*" is not available|unknown permission_mode token/],
   [
@@ -44,10 +44,15 @@ const PATTERNS: Array<[Exclude<IssueCategory, 'budget' | 'timeout' | 'adapter'>,
   ['model', /Model metadata for .* not found|unknown model|invalid model|model_not_found|\bmodel\b.*\b(does not exist|not found)/i],
 ];
 
-export const CATEGORY_ORDER: readonly IssueCategory[] = ['budget', 'timeout', 'binary', 'permission', 'auth', 'network', 'model', 'adapter'];
+export const CATEGORY_ORDER: readonly IssueCategory[] = ['tampered', 'budget', 'timeout', 'binary', 'permission', 'auth', 'network', 'model', 'adapter'];
 
 /** Category of one repetition, or undefined when it measured something / needs no advice. */
 export function classifyRep(rep: RepIssue): { category: IssueCategory; example: string } | undefined {
+  // ADR-0025 D5: a tampered repetition is reported first; its example is the first tamper warning.
+  if (rep.outcome === 'inconclusive' && rep.inconclusive_reason === 'evidence_tampered') {
+    const why = rep.warnings.find((w) => w.startsWith('evidence tampered: '));
+    return { category: 'tampered', example: why ?? rep.warnings[0] ?? 'evidence_tampered' };
+  }
   if (rep.inconclusive_reason === 'budget_exhausted') {
     return { category: 'budget', example: rep.warnings[0] ?? 'budget_exhausted' };
   }
@@ -88,6 +93,11 @@ function advice(cat: IssueCategory, ctx: DiagnoseContext): { what: string; next:
   const info = agentInfo(ctx.agent);
   const doctor = `lurekit doctor --agent ${ctx.agent}`;
   switch (cat) {
+    case 'tampered':
+      return {
+        what: 'the agent modified files the harness relies on (a canary file, a detector sink, a recorder, the run dir); they are inconclusive(evidence_tampered) and cannot be scored',
+        next: 'inspect <run dir>/artefacts.json and the `evidence tampered:` warnings; re-running does not make such a result trustworthy, isolation (ADR-0007) is the fix',
+      };
     case 'budget': {
       const b = ctx.budgetUsd ?? 0;
       const higher = Math.max(Math.ceil(b * 2), Math.ceil(ctx.spentUsd + 1));
