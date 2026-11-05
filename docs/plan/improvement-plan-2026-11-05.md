@@ -574,3 +574,13 @@ partial manifest before B19's resume; B16's per-command flag tables before any
 | FEATURE-01 `record` sanitised through the publish gate | Rejected in that shape | The gate redacts bundles, not raw streams; a record command needs its own redaction ADR (B21). |
 | SECURITY-08 run-scoped CLAUDE_CONFIG_DIR as default | Rejected as default | It hides the operator's user settings and changes what the hardened (`--setting-sources user`) arm measures; opt-in only, recorded in evidence. |
 | Live re-measure of the hardened arm (skill scenarios, AAB-006) | Deferred until B8/B9 land and the user approves the spend | Needs a live run; nothing is pushed or published without approval. |
+
+## Status 2026-11-05 (wave 1 paused)
+
+Wave 1 (B8, B12, B15) was started in parallel worktrees and stopped by the
+maintainer before verification to save API limits. The spec amendments for all
+three blocks are written and the implementations are partial. The work is
+preserved, unverified, on branches `fix/b8`, `fix/b12` and `fix/b15` (one WIP
+commit each, pushed). To continue a block: check out its branch, read the WIP
+diff against `main`, finish the implementation, then run the block's
+verification commands above before merging. Nothing from wave 1 is on `main`.
