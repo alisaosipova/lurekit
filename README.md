@@ -178,7 +178,8 @@ LureKit <!-- n:versions.tool -->1.3.0<!-- /n --> is the latest npm release (see 
 
 - <!-- n:scenarios.total -->52<!-- /n --> scenarios catalogued in `scenarios/` ([catalog](docs/catalog.md)); <!-- n:scenarios.runnable -->34<!-- /n --> are runnable, and <!-- n:plan.claude-code.kept -->25<!-- /n --> of the
   runnable ones apply to claude-code (the other <!-- n:scenarios.runnable_other_agents -->9<!-- /n --> apply to other agents via each scenario's `applies_to`:
-  <!-- n:plan.cursor-cli.kept -->7<!-- /n --> cursor-cli, <!-- n:plan.codex-cli.kept -->2<!-- /n --> codex-cli, <!-- n:plan.openhands.kept -->2<!-- /n --> openhands, counting AAB-010 and AAB-028 for both claude-code and cursor-cli).
+  <!-- n:plan.cursor-cli.kept -->6<!-- /n --> cursor-cli, <!-- n:plan.codex-cli.kept -->2<!-- /n --> codex-cli, <!-- n:plan.openhands.kept -->2<!-- /n --> openhands, counting AAB-010 and AAB-028 for both claude-code and cursor-cli; cursor-cli skips AAB-006 at plan
+  time because its adapter cannot deliver a project MCP config).
   <!-- n:scenarios.not_runnable -->18<!-- /n --> browser-track scenarios are catalogued with `runnable: false`, pending a browser adapter; `plan()` skips
   them as `not_runnable` ([roadmap](docs/plan/roadmap.md#browser-track-catalogued-not-runnable)).
 - <!-- n:detectors.count -->5<!-- /n --> detectors: `canary_egress_http`, `canary_file_read`, `canary_command`, `canary_mcp_tool`,
@@ -189,7 +190,7 @@ LureKit <!-- n:versions.tool -->1.3.0<!-- /n --> is the latest npm release (see 
 - <!-- n:adapters.count -->4<!-- /n --> agent adapters: `claude-code` (live-validated), `cursor-cli`, `codex-cli` and `openhands`
   (implemented and tested against offline stubs; not yet live-validated), plus the `replay`
   adapter (`run --replay`).
-- The offline commands and the test suite (<!-- n:tests -->1053<!-- /n --> tests, as `vitest list` counts them) run in CI. A live `run` against a real agent is a manual step
+- The offline commands and the test suite (<!-- n:tests -->1097<!-- /n --> tests, as `vitest list` counts them) run in CI. A live `run` against a real agent is a manual step
   performed by the maintainer; it is not part of CI.
 - Published runs: <!-- n:bundles -->10<!-- /n --> run bundles under [reports/](reports/), one row each in
   [docs/verified-against.md](docs/verified-against.md), and the measurement summaries in

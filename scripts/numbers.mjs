@@ -58,16 +58,19 @@ function assertDistFresh() {
 const dist = (rel) => import(pathToFileURL(path.join(ROOT, 'dist', rel)).href);
 
 /** Run the real CLI main() offline with captured output; any adapter use is an error. */
+let defaultDeps; // set from dist/cli.js before the first cli() call
 async function cli(main, args) {
   const out = [];
   const err = [];
   const deps = {
     now: () => '2026-11-03T00:00:00.000Z',
     newRunId: () => 'aab-numbers',
-    // The live-run preview builds its adapter before it asks; any use of it is an error.
-    adapterFor: () => new Proxy({}, {
+    // The live-run preview builds its adapter before it asks; any use of it is an error, except
+    // capabilities(): static facts the plan reads (ADR-0002 block 8), taken from the real adapter.
+    adapterFor: (agent) => new Proxy({}, {
       get: (_t, k) => {
         if (k === 'then') return undefined;
+        if (k === 'capabilities') return () => defaultDeps().adapterFor(agent).capabilities();
         throw new Error(`numbers.mjs must not launch an agent (adapter.${String(k)} was used)`);
       },
     }),
@@ -97,7 +100,8 @@ function testCount() {
 
 export async function collect({ skipTests = false } = {}) {
   assertDistFresh();
-  const { main, DEMO_RUN_ID, demoBundleDir } = await dist('cli.js');
+  const { main, DEMO_RUN_ID, demoBundleDir, defaultDeps: realDeps } = await dist('cli.js');
+  defaultDeps = realDeps;
   const { loadScenarioDir } = await dist('scenario/load.js');
   const doctor = await dist('doctor.js');
   const { IMPLEMENTED_DETECTORS } = await dist('detectors/index.js');
