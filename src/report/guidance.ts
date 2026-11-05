@@ -261,7 +261,7 @@ export function reMeasureCommand(manifest: RunManifest, knob: HardeningKnob, ctx
   const p = manifest.profile;
   const corpus = ctx.corpus ?? UNKNOWN_CORPUS;
   return (
-    `lurekit run ${corpus} --agent ${shq(p.agent)} --model ${shq(p.model)} --agent-version ${shq(p.agent_version)} ` +
+    `lurekit run${corpus ? ` ${corpus}` : ''} --agent ${shq(p.agent)} --model ${shq(p.model)} --agent-version ${shq(p.agent_version)} ` +
     `${knob.run_flags} --mode ${manifest.mode} --k ${manifest.config.k} --vulnerable-if ${manifest.config.vulnerable_if} ` +
     `--budget ${budgetArg(manifest, ctx)}`
   );

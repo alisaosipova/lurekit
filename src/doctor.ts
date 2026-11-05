@@ -454,7 +454,7 @@ export function checkModel(info: AgentInfo, model: string | undefined, corpus?: 
         id: 'model',
         status: 'warn',
         summary: `"${model}" is neither a documented alias (${CLAUDE_MODEL_ALIASES.join(', ')}) nor a claude-* name; what claude does with an unknown id is not verified offline (a rejected id ends each run inconclusive)`,
-        fix: `lurekit run ${corpus ?? '<dir>'} --agent claude-code --model sonnet`,
+        fix: `lurekit run${corpus === undefined ? ' <dir>' : corpus ? ` ${corpus}` : ''} --agent claude-code --model sonnet`,
       };
     case 'cursor-cli':
       return {
@@ -645,7 +645,7 @@ export function renderChecks(checks: Check[]): string {
  *  the Next line carries every known value; only a value doctor cannot know stays as <...>. */
 export function renderDoctor(r: DoctorReport, corpus?: string): string {
   const head = `lurekit doctor: agent ${r.agent}${r.model ? `, model ${r.model}` : ''}\n\n`;
-  const next = `lurekit run ${corpus ?? '<dir>'} --agent ${r.agent} --model ${r.model ?? '<id>'}`;
+  const next = `lurekit run${corpus === undefined ? ' <dir>' : corpus ? ` ${corpus}` : ''} --agent ${r.agent} --model ${r.model ?? '<id>'}`;
   const tail =
     `\n${r.fail} fail, ${r.warn} warn. ` +
     (r.fail > 0 ? `Fix the fail lines before a live run. Then: ${next}\n` : `Next: ${next} (asks before it spends).\n`);

@@ -220,3 +220,12 @@ is spent. stderr names the scenarios that tripped the gate.
 4. **Typos get a suggestion.** An unknown flag within edit distance 2 of a known one adds
    `did you mean --<flag>?`.
 
+## Amendment (2026-11-05, block B16b, UX-02): printed commands omit the shipped corpus
+
+When the corpus resolves to the one shipped with the package (no `[dir]` argument and no
+`./scenarios` in the working directory), every command lurekit prints for the user to copy
+(doctor's `Next:` and fix lines, the demo banner, the re-measure command in reports) omits the
+directory: the same resolution order finds it again. Before, the commands embedded a
+cwd-relative path into `node_modules` (`../../../scenarios`) that broke as soon as the user
+changed directory. Informational lines (`52 scenarios valid in <path>`) still name the path.
+

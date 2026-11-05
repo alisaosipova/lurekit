@@ -499,6 +499,9 @@ export interface ResolvedCorpus {
   dir: string;
   /** The same directory as the user should type it (relative to the cwd when plain). */
   shown: string;
+  /** The corpus argument for a command printed for the user to copy: '' for the shipped corpus,
+   *  which the default resolution finds again (ADR-0022 B16b), else `shown`. */
+  typed: string;
   source: CorpusSource;
 }
 
@@ -506,7 +509,7 @@ export interface ResolvedCorpus {
  *  argument wins; else ./scenarios when that directory exists in the cwd; else the corpus shipped
  *  next to the package (so `npx lurekit plan` works from an empty directory). */
 export function resolveScenarioDir(arg: string | undefined, deps: CliDeps): ResolvedCorpus {
-  if (arg !== undefined) return { dir: arg, shown: typedPath(arg), source: 'argument' };
+  if (arg !== undefined) return { dir: arg, shown: typedPath(arg), typed: typedPath(arg), source: 'argument' };
   const local = path.join(deps.cwd(), 'scenarios');
   let localIsDir = false;
   try {
@@ -514,8 +517,8 @@ export function resolveScenarioDir(arg: string | undefined, deps: CliDeps): Reso
   } catch {
     localIsDir = false;
   }
-  if (localIsDir) return { dir: local, shown: 'scenarios', source: 'cwd' };
-  return { dir: path.join(packageRoot(), 'scenarios'), shown: shippedScenariosArg(deps), source: 'shipped' };
+  if (localIsDir) return { dir: local, shown: 'scenarios', typed: 'scenarios', source: 'cwd' };
+  return { dir: path.join(packageRoot(), 'scenarios'), shown: shippedScenariosArg(deps), typed: '', source: 'shipped' };
 }
 
 /** The "corpus: <path> (...)" line printed by plan and run. */
@@ -974,7 +977,7 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
       format,
       evidenceLookup: makeEvidenceLookup(runDir, manifest),
       surfaceOf: surfaceLookupFrom(scenarios),
-      reMeasure: reMeasureContext(manifest, corpus.shown),
+      reMeasure: reMeasureContext(manifest, corpus.typed),
       terminal: terminalOptions(deps, output !== undefined),
     });
     if (output) writeOutput(output, rendered, deps);
@@ -1068,7 +1071,7 @@ export function cmdReport(flags: Flags, deps: CliDeps): number {
     format,
     evidenceLookup: makeEvidenceLookup(runDir, manifest),
     ...(format === 'markdown' || format === 'text'
-      ? { surfaceOf: shippedSurfaceLookup(), reMeasure: reMeasureContext(manifest, resolveScenarioDir(undefined, deps).shown) }
+      ? { surfaceOf: shippedSurfaceLookup(), reMeasure: reMeasureContext(manifest, resolveScenarioDir(undefined, deps).typed) }
       : {}),
     terminal: terminalOptions(deps, output !== undefined),
   });
@@ -1203,7 +1206,7 @@ export async function cmdDoctor(flags: Flags, deps: CliDeps): Promise<number> {
   checks.push(checkAuth(info, bin, probe));
   const droppedEnv = checkDroppedEnv(info, probe);
   if (droppedEnv) checks.push(droppedEnv);
-  checks.push(checkModel(info, model, resolveScenarioDir(flags._[0], deps).shown));
+  checks.push(checkModel(info, model, resolveScenarioDir(flags._[0], deps).typed));
   const perm = checkOpenHandsPermission(info);
   if (perm) checks.push(perm);
   checks.push(checkIsolation());
@@ -1238,7 +1241,7 @@ export async function cmdDoctor(flags: Flags, deps: CliDeps): Promise<number> {
   checks.push({ id: 'cost', status: 'ok', summary: estimateSentence(agent, kept, basis) });
 
   const result = summarize(agent, model, checks, kept, basis);
-  deps.stdout(format === 'json' ? JSON.stringify(result, null, 2) + '\n' : renderDoctor(result, missing ? undefined : corpus.shown));
+  deps.stdout(format === 'json' ? JSON.stringify(result, null, 2) + '\n' : renderDoctor(result, missing ? undefined : corpus.typed));
   return result.fail > 0 ? 1 : 0;
 }
 
@@ -1271,7 +1274,7 @@ export function demoBannerLines(manifest: RunManifest, scenariosDir = 'scenarios
     'To evaluate and harden your own setup (launches your real, authenticated agent and costs money),',
     `run \`${check}\`, then:`,
     '',
-    `\`lurekit run ${scenariosDir} --agent ${p.agent} --model <model-id> --agent-version <your-version> --mode smoke\``,
+    `\`lurekit run${scenariosDir ? ` ${scenariosDir}` : ''} --agent ${p.agent} --model <model-id> --agent-version <your-version> --mode smoke\``,
   ];
 }
 
@@ -1317,7 +1320,7 @@ export function cmdDemo(flags: Flags, deps: CliDeps): number {
     );
     return 1;
   }
-  const shipped = shippedScenariosArg(deps);
+  const shipped = resolveScenarioDir(undefined, deps).typed; // ADR-0022 B16b: '' when shipped
   const bannerLines = demoBannerLines(manifest, shipped);
   const body = report(manifest, {
     format,

@@ -25,6 +25,9 @@ No release is cut without changes.
 - `report`, `run` and `demo --output` write relative to the working directory and print
   `wrote <path>` (UX-13).
 - An unknown flag close to a known one suggests it (`did you mean --model?`) (UX-18).
+- Commands printed for you to copy (doctor's next step, the demo banner, re-measure commands)
+  no longer embed a path into `node_modules` such as `../../../scenarios` when the corpus is the
+  one shipped with lurekit; lurekit finds it again without the argument (UX-02).
 - doctor without `--model` shows the model row as not checked instead of ok, and no longer
   points at a file that does not ship with the package (UX-12).
 

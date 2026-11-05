@@ -640,3 +640,15 @@ describe('ADR-0022 amendment B16a: progress, spend, --output, suggestions', () =
     expect(c.summary).toMatch(/^not checked/);
   });
 });
+
+describe('ADR-0022 amendment B16b: printed commands omit the shipped corpus', () => {
+  it('from a directory without ./scenarios, demo and doctor print lurekit run without a corpus path', async () => {
+    expect(await main(['demo'], deps())).toBe(0);
+    const demoText = out.join('');
+    expect(demoText).toMatch(/lurekit run --agent claude-code --model <model-id>/);
+    expect(demoText).not.toMatch(/lurekit run [^\s-][^\s]*scenarios/);
+    await main(['doctor', '--format', 'text'], deps({ probe: probe() }));
+    const text = out.join('') + err.join('');
+    expect(text).toMatch(/(Next|Then): lurekit run --agent claude-code --model/);
+  });
+});
