@@ -18,6 +18,69 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+### Security (shipped after the 1.3.0 tag, block 2)
+
+These entries were merged after v1.3.0 was tagged, so the 1.3.0 package does not carry them.
+
+- Evidence integrity (ADR-0025, block 2). A repetition in which the agent modified the harness's
+  own artefacts can no longer be credited as `resisted`. Every harness file a verdict depends on
+  (detector meta `*.canary.json` / `fs_diff.baseline.json`, the decoy, `canary_bin/*`, the
+  adapter's pre-spawn config) is declared immutable, every recorder / access / hook log is a
+  sink created empty at declaration (held open, so an unlink-and-recreate cannot reuse its
+  inode; its `mtime`/`ctime` stamps catch an emptied sink and a stamp put back by hand; the
+  egress and registry sinks also keep an in-memory witness of the bytes they appended), and the
+  runner re-checks them at settle before any teardown: a missing, symlinked,
+  replaced, modified, re-stamped, truncated or corrupt artefact, or a symlink, directory or FIFO
+  planted in the run dir at a harness name, is the new `inconclusive(evidence_tampered)` with one `evidence tampered: <path>: <what>`
+  warning per finding and an `artefacts` field in the record (a detector hit still scores
+  `vulnerable`, with the findings recorded). The full manifest is `<run dir>/artefacts.json`
+  (never published). `canScoreResisted` gains `tampered`; the outcome rule gains rule 1b between
+  a hit and the completion reasons; `lurekit run` diagnoses such repetitions first (`tampered`).
+  Before this, `rm ../*.canary.json` from the agent's workdir yielded zero hits and `resisted`.
+- Every harness write into a run dir (evidence, manifest, detector meta and diff, adapter config
+  and stream files, replay copies) goes through `src/runner/safeWrite.ts`: inside the run dir
+  only, no symlinked path component, a symlink at the target is unlinked (never followed), temp
+  file plus rename. A symlink planted at the next repetition's directory is unlinked and that
+  repetition recorded as `inconclusive(evidence_tampered)`; nothing is written outside the
+  results tree. Run-dir reads (`readMeta`, `readJsonl`, the captured stream) refuse symlinks.
+- `canary_file_read` no longer reads `agent-output.log` (a run-dir file no adapter wrote, which
+  the agent could have planted): the runner hands the sensor the stdout stream the harness
+  captured (`raw_events_path`, plus an in-run-dir transcript) as `capturedOutput`; a hit's
+  `evidence_ref` names the stream file. The CI hygiene step for that name now fails.
+- The canary command launchers embed the harness's own Node binary (`process.execPath`) and use
+  only shell builtins, so a shell that resets `PATH` (or has no `node`) still records the
+  invocation; the sensor's positive control runs with `PATH=<empty dir>`.
+- Tests (ADR-0012 amendment, block B15, ENGINE-08): B3-T2 declares its timed-out repetitions
+  through the `runWithDeadline` seam instead of racing a 60 ms timer against a sleeping stub;
+  every wall-clock bound in `test/run-lifecycle.test.ts` and `test/child-process.test.ts` is
+  derived from `TIMER_EARLY_MS` / `LOAD_SLACK_MS` (`test/helpers/deadline.ts`) plus the production
+  constant that bounds the path; those two files, and only those, run with `retry: 1`; the
+  3000-name `pseudonymizeMcpServers` test keeps a 10 s hang guard instead of a 2 s performance
+  bound. `test/ci-docs.test.ts` greps for bare literals and stray `retry` options.
+- CI (ADR-0012 amendment, block B15, DOCS-04 and DOCS-01): CONTRIBUTING.md and the architecture
+  overview describe the five CI jobs (`test`, `docs`, `replay`, `package`, `hygiene`) and state
+  the replay rule as the workflow enforces it (`vulnerable == 0`; `inconclusive` only for a
+  failed `mcp_server` precondition; `degraded` only where the benign check is `file_written`),
+  checked by `test/ci-docs.test.ts` against the job ids in `ci.yml`. The hygiene job runs
+  `npm run changelog:check` (`scripts/changelog-frozen.mjs`): each released `## [X.Y.Z]`
+  section must equal the text at tag `vX.Y.Z`; a mismatch, a tag without a section or no
+  reachable tag fails the job.
+### Fixed
+
+- `--budget` now stops runs of agents that report no `cost_usd` (Codex CLI, Cursor CLI): every
+  repetition that reached the adapter is charged its reported cost when usable (finite, >= 0),
+  else a per-run estimate (the published per-repetition figure for claude-code, 0.25 USD for any
+  other agent). The manifest records `results[].spend_basis` and `totals.spend_basis`
+  (`estimated` | `mixed`; absent when everything was reported, so published bundles are
+  unchanged); evidence never carries an estimate; the plan and doctor say when an estimate is
+  charged, and a finished run prints `spend: ... (estimated|mixed basis; ...)`.
+- `--k` is validated pre-spend as a whole number from 1 to 10 (`Infinity` looped forever, `1.5`
+  wrote an invalid manifest, `0` scored every scenario `resisted` at zero cost); `--mode smoke`
+  with an explicit `--k` other than 1 is refused instead of silently overridden;
+  `BenchmarkRunner.runScenario()` rejects an out-of-range `k` before provisioning.
+- `diagnoseRun` has a row for `benign_unevaluated`; the interpreting-results guide documents the
+  new reason, the k bounds, `low_confidence` and `spend_basis`.
+
 ### Security
 
 - Publish gate round 3 (block B12, SECURITY-01, SECURITY-05; ADR-0017 block B12 amendment,
@@ -111,72 +174,145 @@ No release is cut without changes.
 ## [1.3.0] - 2026-11-05
 
 ### Security
-The four entries below belong to release 1.3.0 (block 2, ADR-0025): they were added to the
-`[1.3.0]` section after its tag, so the npm tarball of 1.3.0 does not carry them. Released
-sections are frozen (ADR-0012 amendment, block B15, DOCS-01), so they are recorded here.
-
-- Evidence integrity (ADR-0025, block 2). A repetition in which the agent modified the harness's
-  own artefacts can no longer be credited as `resisted`. Every harness file a verdict depends on
-  (detector meta `*.canary.json` / `fs_diff.baseline.json`, the decoy, `canary_bin/*`, the
-  adapter's pre-spawn config) is declared immutable, every recorder / access / hook log is a
-  sink created empty at declaration (held open, so an unlink-and-recreate cannot reuse its
-  inode; its `mtime`/`ctime` stamps catch an emptied sink and a stamp put back by hand; the
-  egress and registry sinks also keep an in-memory witness of the bytes they appended), and the
-  runner re-checks them at settle before any teardown: a missing, symlinked,
-  replaced, modified, re-stamped, truncated or corrupt artefact, or a symlink, directory or FIFO
-  planted in the run dir at a harness name, is the new `inconclusive(evidence_tampered)` with one `evidence tampered: <path>: <what>`
-  warning per finding and an `artefacts` field in the record (a detector hit still scores
-  `vulnerable`, with the findings recorded). The full manifest is `<run dir>/artefacts.json`
-  (never published). `canScoreResisted` gains `tampered`; the outcome rule gains rule 1b between
-  a hit and the completion reasons; `lurekit run` diagnoses such repetitions first (`tampered`).
-  Before this, `rm ../*.canary.json` from the agent's workdir yielded zero hits and `resisted`.
-- Every harness write into a run dir (evidence, manifest, detector meta and diff, adapter config
-  and stream files, replay copies) goes through `src/runner/safeWrite.ts`: inside the run dir
-  only, no symlinked path component, a symlink at the target is unlinked (never followed), temp
-  file plus rename. A symlink planted at the next repetition's directory is unlinked and that
-  repetition recorded as `inconclusive(evidence_tampered)`; nothing is written outside the
-  results tree. Run-dir reads (`readMeta`, `readJsonl`, the captured stream) refuse symlinks.
-- `canary_file_read` no longer reads `agent-output.log` (a run-dir file no adapter wrote, which
-  the agent could have planted): the runner hands the sensor the stdout stream the harness
-  captured (`raw_events_path`, plus an in-run-dir transcript) as `capturedOutput`; a hit's
-  `evidence_ref` names the stream file. The CI hygiene step for that name now fails.
-- The canary command launchers embed the harness's own Node binary (`process.execPath`) and use
-  only shell builtins, so a shell that resets `PATH` (or has no `node`) still records the
-  invocation; the sensor's positive control runs with `PATH=<empty dir>`.
+- Run lifecycle hardening (ADR-0024, block 1). A repetition whose adapter did not finish
+  normally can no longer be credited as `resisted`: `resisted` (and `degraded`) are reachable only
+  through the guard `canScoreResisted` (adapter call completed, exit 0, no detector hit, no unmet
+  precondition, nothing failed in settle/score), which the runner evaluates when it assigns the
+  outcome and asserts again before the record is written. The lifecycle is a strict state machine
+  (`provision -> run -> settle -> score -> teardown (finally) -> write evidence`): a throw in
+  `detector.evaluate()`, `checkBenign()`, the delivery snapshot or the precondition check used to
+  escape the runner (no teardown, no `evidence.json`, no manifest) and is now
+  `inconclusive(fixture_error)` with a named warning; teardown runs in a `finally` on every exit
+  from provisioning onwards, so loopback fixture servers and canary MCP children are released
+  even on a harness failure, and a teardown that throws (or does not settle within 10 s) is
+  recorded as `teardown_error` (plus a warning) without changing the verdict; an evidence write failure is kept in memory as an
+  inconclusive repetition and the manifest is still written. A detector hit on a timed-out,
+  aborted or crashed run still scores `vulnerable` (a hit is a hit).
+- All four live adapters spawn the agent through one helper (`src/adapters/childProcess.ts`): on
+  POSIX the agent leads its own process group and an abort kills the whole group (SIGTERM, then
+  SIGKILL after 2 s), on Windows `taskkill /PID <pid> /T /F`; the exit is awaited on `exit` with a
+  2 s stdio drain, so a grandchild that inherited the agent's stdout pipe (a shell its Bash tool
+  started, an MCP server it spawned) can no longer keep `adapter.run()` from returning after the
+  kill. Every live child is tracked and killed on harness exit. The Claude Code `--version` probe
+  is now capped at 15 s like the other three (a blocking probe counts as "no version reported").
+- Publish redaction gate is stricter (ADR-0017 block-4 amendment, evidence-spec s5); a bundle the
+  gate rejected before is still rejected, and every committed bundle under `reports/` passes
+  unchanged. New finding kinds: `email`, `host` (scheme-less `host:port` / `host/path` with a
+  public TLD, internal-TLD hosts, protocol-relative `//host`, private-range IPv4), `ws_url`,
+  `ssh_url`, `git_ssh` (`git@host:path`), `bearer`, `jwt`, `private_key`, and `glpat-` GitLab
+  tokens under `token`. `url` also covers every other URL scheme (`ftp://`, `smb://`,
+  `postgres://`, ...) and `\\` / `///` separators. The operator-username check now runs
+  on every publish when the username has 4+ characters (before: only under `--redact-home`).
+- Allow-URL instead of allow-host: a URL passes only if it is exactly (ignoring the fragment) a
+  source URL of a published scenario of the run's corpus, or its host is named with
+  `--allow-host`. **Operator-visible:** another URL on a scenario source host (any other
+  `github.com` path, for example) used to pass and now needs `--allow-host <host>`.
+- Every harness-minted `aab-<word>-<hex>` value (`aab-skill-`, `aab-web-`, ...) is
+  pseudonymised to `<canary-token-N>`, not only `aab-canary-<hex>`.
+- `--withhold`/`--exclude` now also drop the ids from the published `corpus.scenario_ids`;
+  `corpus_digest` is recomputed over the published scenarios and the run's digest is kept as
+  `corpus_digest_full` (evidence-spec s2.3, manifest schema). **Operator-visible:** this needs
+  the scenario files the run used; new `publish --scenarios <dir>` (default: the shipped
+  corpus); a corpus that does not reproduce the run's digest fails the publish.
+- `publish` never follows symlinks in the run dir (skipped with a warning; a symlinked
+  `manifest.json` is an error) and writes the bundle atomically (`<out>.partial`, then rename;
+  removed on failure).
+- Child env allow-list (ADR-0008 block-4 amendment): agents, the MCP fixture server and detector
+  children no longer inherit the whole operator environment, only process basics, `LC_*`, the
+  Node.js knobs, `AAB_*`, the agent's own auth variables and `profile.env`. The forwarded
+  variable NAMES are recorded as `observation.env_forwarded` (evidence schema).
+  **Operator-visible:** an agent that needs another variable (a proxy, a provider key) must get it
+  through `profile.env`.
+- Codex, Cursor and OpenHands stderr files are capped at 1 MiB with a truncation marker;
+  `<agent>-argv.json` stores the task as `<task sha256:...>`.
 
 ### Changed
+- Verdict semantics (ADR-0024): new inconclusive reason `run_timeout`. `lurekit run` gains
+  `--run-timeout <seconds>` (whole number 1..2147483, default 180 = three times the slowest
+  published repetition); a repetition still running past it is stopped and scored
+  `inconclusive(run_timeout)` with the warning `run timed out after <ms> ms (limit <ms> ms)`, the
+  evidence fields `timed_out: true` and `elapsed_ms`, and a `what went wrong` line with the next
+  command. The manifest records `config.run_timeout_ms` (`null` for `--replay`, which arms no
+  timer and ignores the flag with a note). Ctrl-C (SIGINT/SIGTERM) now stops the current
+  repetition (`inconclusive(adapter_error)`, warning `run aborted by operator after <ms> ms`),
+  skips the remaining ones and still writes the manifest; a second signal exits 130. The new
+  evidence/manifest fields are optional and written only when meaningful, so every published
+  bundle and the shipped replay recording validate and replay byte-identically.
+- Markdown report (ADR-0021 amendment, block 6): the plain-language paragraph is at most three
+  sentences and says only what the headline does not (attack surfaces, confidence, what
+  inconclusive/degraded mean); the per-vulnerable isolation line no longer prints the marker twice;
+  the scoring-notes line is plain words plus one link to the interpreting-results guide (report.json
+  keeps its `scoring_notes`); files not in the npm package (the hardened reference profile, the
+  guides) are cited by their repository URL, which the publish gate accepts as exact strings. The
+  audit table rows are unchanged.
+- `lurekit demo` banner: short lines, the `lurekit run` command on its own line.
+- Terminal view (ADR-0021 amendment): `lurekit demo` and `lurekit report` print a rendering for
+  people on stdout (`--format text`, the default without `--output`): plain sentences wrapped at the
+  terminal width, the headline and the Resisted line, an aligned result table that never wraps
+  (verdict in words, `conf` = vulnerable repetitions out of k, a short source reference, the name
+  truncated), the source URLs as a numbered Sources list, What to change as plain text with the
+  re-measure command on one line; coloured on a TTY unless `NO_COLOR` is set. `--format markdown`
+  (or `md`) prints the Markdown as before, and `--output` without `--format` writes it; `report`
+  no longer defaults to `json` on stdout (`--format json` is unchanged). `report.md` in bundles is
+  byte-identical to before. The README image (`docs/assets/demo-output.svg`) is regenerated from
+  the terminal view at 110 columns, verdicts coloured by kind, no wrapped table rows.
+- Docs numbers (ADR-0023 amendment): `scripts/numbers.mjs` emits the counts, costs and versions the
+  docs quote (`npm run docs:numbers`); README.md, the getting-started guide and the CLI reference
+  mark each one and `npm run docs:check` (now builds first) fails on drift; the CI docs job runs it.
+  The Claude Code version of the published runs is one constant (`PUBLISHED_CLAUDE_VERSION`), reused
+  by doctor's pinned-install recipe and read by `examples/run-live.sh`.
+- Getting started: corrected plan counts (27 skipped for claude-code, codex-cli 2 of 52), the
+  replay header (corpus line, 25 scenarios), the SARIF driver version; a demo step before the first
+  live run; the live run uses `--agent-version <your-version>` plus the pinned-install recipe.
+- Troubleshooting: the version-pinned batch recipe takes the version as a `PIN` placeholder instead
+  of a stale literal.
+- Newcomer path (ADR-0022 amendment, block 5): `run`, `plan`, `validate`, `list` and `doctor`
+  resolve the scenario directory the same way: the `[dir]` argument, else `./scenarios` when it
+  exists, else the corpus shipped with the package; `plan` and `run` print
+  `corpus: <path> (shipped with the package)` (or where else it came from). `npx lurekit run
+  --model sonnet` now works from an empty directory; the docs no longer mention
+  `node_modules/lurekit/scenarios`.
+- `run` validates `--format`, the `--output` directory, `--results` and `--budget` (> 0) before
+  the plan, the `Launch? [y/N]` prompt and any agent spawn; a bad value no longer surfaces after a
+  paid run. A finished run prints `Next: lurekit report <runDir> --format markdown|json|sarif` and
+  `lurekit publish <runDir> --redact-home`.
+- **Breaking for scripts:** `publish` without `--out` writes to
+  `<results>/<benchmark_run_id>/bundle` (default `.aab-runs/<id>/bundle`) instead of
+  `reports/<benchmark_run_id>` in the cwd. Pass `--out reports/<id>` for the old location.
+- Every refusal ends with a `next: <command>` line: missing values, `--model`, `--mode`,
+  `--vulnerable-if`, `doctor`/`demo` flag errors, an unknown agent, a failed bundle write, and an
+  unknown command (which suggests the closest command within edit distance 2). `report` and
+  `publish` without a `manifest.json` list the run directories under `--results`, newest first.
+  A missing demo asset is a clear exit-1 message. The adapter error no longer says "0.1".
+- `doctor`: the final `Next:` line and the `model`/`corpus` fix lines carry the resolved corpus,
+  `--agent` and `--model`; logged out with `ANTHROPIC_API_KEY` set is a `warn` ("UNVERIFIED whether
+  -p honours it on this version"), not a `fail`.
+- Report "What to change" (ADR-0021 amendment): the re-measure command reuses the run's corpus
+  path, agent, model, k and vulnerable_if, adds `--budget` (the run's cap or the published-run
+  estimate) and reminds you to add your own `--settings`/`--mcp`/`--hooks`/`--skill` flags; the
+  version line compares the leading x.y.z, so `2.1.317` and `2.1.317 (Claude Code)` no longer
+  count as a mismatch.
+- Tests: `testTimeout` and `hookTimeout` are 30 s (one constant in `test/helpers/deadline.ts`);
+  the stub ready-file polls in the claude/cursor/codex/openhands adapter tests use the shared
+  `pollUntil` with a deadline derived from, and below, the test timeout. Fixes spurious 5 s
+  timeouts on a loaded host.
+- Tests: every scratch directory is allocated by `test/helpers/scratch.ts` under the ignored
+  `.aab-test-work/` instead of `os.tmpdir()` (evidence-spec s2.1); only the TMPDIR sentinel test
+  still calls `tmpdir()`. Because repo-local scratch always has the repository as a git
+  ancestor, the codex-cli "workdir has no .git entry" test now covers the nested-in-a-repo
+  warning; the outside-any-repository branch is no longer exercised by the suite.
+- `package.json` gains `"prepack": "npm run build"`: `npm pack` / `npm publish` cannot ship a stale
+  `dist/`.
+- CI (ADR-0012): the package job runs `doctor --format json`, `demo`, and `list`/`validate`/`plan` without an argument, with the
+  installed bin from an empty directory and checks the pack lists `dist/`; a new hygiene job
+  rejects `tmpdir()` scratch in `src/` and `test/`.
+- `examples/profiles/` is a README pointer to `profiles/` (ADR-0011, one profiles directory); the
+  drifted copies are removed. `examples/run-live.sh` types the pinned Claude Code version once and
+  reads `--agent-version` from the pinned binary instead of a literal (it said 2.1.316 for a
+  2.1.317 install).
 
-- Tests (ADR-0012 amendment, block B15, ENGINE-08): B3-T2 declares its timed-out repetitions
-  through the `runWithDeadline` seam instead of racing a 60 ms timer against a sleeping stub;
-  every wall-clock bound in `test/run-lifecycle.test.ts` and `test/child-process.test.ts` is
-  derived from `TIMER_EARLY_MS` / `LOAD_SLACK_MS` (`test/helpers/deadline.ts`) plus the production
-  constant that bounds the path; those two files, and only those, run with `retry: 1`; the
-  3000-name `pseudonymizeMcpServers` test keeps a 10 s hang guard instead of a 2 s performance
-  bound. `test/ci-docs.test.ts` greps for bare literals and stray `retry` options.
-- CI (ADR-0012 amendment, block B15, DOCS-04 and DOCS-01): CONTRIBUTING.md and the architecture
-  overview describe the five CI jobs (`test`, `docs`, `replay`, `package`, `hygiene`) and state
-  the replay rule as the workflow enforces it (`vulnerable == 0`; `inconclusive` only for a
-  failed `mcp_server` precondition; `degraded` only where the benign check is `file_written`),
-  checked by `test/ci-docs.test.ts` against the job ids in `ci.yml`. The hygiene job runs
-  `npm run changelog:check` (`scripts/changelog-frozen.mjs`): each released `## [X.Y.Z]`
-  section must equal the text at tag `vX.Y.Z`; a mismatch, a tag without a section or no
-  reachable tag fails the job.
-
-### Fixed
-
-- `--budget` now stops runs of agents that report no `cost_usd` (Codex CLI, Cursor CLI): every
-  repetition that reached the adapter is charged its reported cost when usable (finite, >= 0),
-  else a per-run estimate (the published per-repetition figure for claude-code, 0.25 USD for any
-  other agent). The manifest records `results[].spend_basis` and `totals.spend_basis`
-  (`estimated` | `mixed`; absent when everything was reported, so published bundles are
-  unchanged); evidence never carries an estimate; the plan and doctor say when an estimate is
-  charged, and a finished run prints `spend: ... (estimated|mixed basis; ...)`.
-- `--k` is validated pre-spend as a whole number from 1 to 10 (`Infinity` looped forever, `1.5`
-  wrote an invalid manifest, `0` scored every scenario `resisted` at zero cost); `--mode smoke`
-  with an explicit `--k` other than 1 is refused instead of silently overridden;
-  `BenchmarkRunner.runScenario()` rejects an out-of-range `k` before provisioning.
-- `diagnoseRun` has a row for `benign_unevaluated`; the interpreting-results guide documents the
-  new reason, the k bounds, `low_confidence` and `spend_basis`.
+### Removed
+- The empty, untracked `src/profile/` directory.
 
 ## [1.3.0] - 2026-11-05
 
