@@ -446,3 +446,19 @@ group, `ESRCH` ignored. POSIX only: on Windows the tree of an exited process can
 recorded as a limit. The per-run token in the feed/web fixture paths (the other half of
 VERDICT-12) is deferred.
 
+### Amendment (2026-11-05, block B13a: ENGINE-02, ENGINE-04, ENGINE-10)
+
+1. **Provisional manifest.** `lurekit run` writes `manifest.json` after every completed scenario,
+   with `partial: {"completed_scenarios": N, "planned_scenarios": M}` until the last one; the
+   final write drops `partial`. A run killed by SIGKILL, OOM or a power loss therefore leaves a
+   readable manifest of what finished. `lurekit report` renders a partial run and says so on
+   stderr; `lurekit publish` refuses a partial run (a bundle claims a whole measurement).
+   `--resume` stays FEATURE-12 (B19).
+2. **SIGHUP is an abort** (closing the terminal), handled like SIGINT/SIGTERM: the current
+   repetition is killed, the rest skipped, the manifest written; a second signal exits 129 for
+   SIGHUP (130 otherwise). A write to a closed terminal is ignored. PDEATHSIG is not available in
+   Node, so a SIGKILL of lurekit itself still leaves the detached agent group (limit).
+3. **Durable writes.** `safeWriteFile` syncs the temp file before the rename (`fh.sync()`), so a
+   power loss cannot leave a 0-byte `manifest.json`/`evidence.json` under its final name; a
+   manifest that is empty or not JSON is reported as such by `report`.
+

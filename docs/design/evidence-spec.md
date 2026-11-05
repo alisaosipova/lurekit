@@ -911,6 +911,9 @@ distinguishes `unreported`, and `strict_mcp_config` states the flag itself.
 fields and one optional totals field, each written only when it carries information, so every
 manifest written before this amendment (the published bundles under `reports/` and `demo/`, none
 of which has an inconclusive repetition or an unreported cost) is unchanged and still validates:
+- `partial` (optional; ADR-0024 B13a amendment): `{completed_scenarios, planned_scenarios}` on a
+  provisional manifest written while the run is still going; absent on a finished run. A
+  partial manifest is reportable and never publishable.
 - `results[].low_confidence: true` (s3.2) when the verdict is not `inconclusive` and fewer than
   half of the planned repetitions were conclusive (`2 * conclusive < runs`). Never `false`.
 - `results[].inconclusive_reason` (s3.2) when the verdict is `inconclusive`: the most common
