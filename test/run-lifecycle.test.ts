@@ -594,3 +594,16 @@ describe('T6 --run-timeout CLI validation (ADR-0024 D1)', { retry: 1 }, () => {
     expect(sink.out.join('')).toMatch(/would run/);
   });
 });
+
+describe('ADR-0024 B13b ENGINE-16: the launch backoff is abortable', { retry: 1 }, () => {
+  it('an abort during a 10 s backoff ends retryLaunch within 200 ms', async () => {
+    const { retryLaunch } = await import('../src/adapters/claudeCode.js');
+    const ac = new AbortController();
+    const t0 = Date.now();
+    setTimeout(() => ac.abort(), 50);
+    await expect(
+      retryLaunch('spawn', { delaysMs: [10_000], sleep: (ms) => new Promise((r) => setTimeout(r, ms)), signal: ac.signal, warnings: [] }, () => ({ ok: false, retryable: true, reason: 'ENOENT' })),
+    ).rejects.toThrow(/aborted during launch retry/);
+    expect(Date.now() - t0).toBeLessThan(LOAD_SLACK_MS); // far below the 10 s backoff
+  });
+});

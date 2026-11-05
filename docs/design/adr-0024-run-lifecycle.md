@@ -465,3 +465,9 @@ VERDICT-12) is deferred.
    half); a
    manifest that is empty or not JSON is reported as such by `report`.
 
+### Amendment (2026-11-05, block B13b, ENGINE-16): abortable launch backoff
+
+The backoff wait between launch retries (`retryLaunch`) ends as soon as the per-run signal
+aborts, instead of finishing its 0.5-4 s sleep first. The synchronous version probe stays inside
+the deadline (moving it out needs an async probe; recorded as a limit).
+

@@ -363,6 +363,8 @@ The replay adapter re-drives a recorded Claude Code run through the same parse/m
   each carries `requestTimeout` and `headersTimeout` of 5 s and `keepAliveTimeout` of 1 s (Node's
   defaults outlast the 10 s teardown bound), and the `mcp_http` fixture reads at most 1 MiB of a
   request body (larger: 413).
+  The harness-owned `mcp_stdio` control child no longer pipes the stdout/stderr it never reads,
+  and its teardown awaits the exit (bounded to 1 s) (ENGINE-11).
 - *Bounded stderr.* The Codex, Cursor and OpenHands adapters keep at most 1 MiB
   (`STDERR_FILE_MAX`) of the agent's stderr in `<agent>-stderr.log`; past that a final line
   `[lurekit: stderr truncated at 1048576 bytes; N more bytes dropped]` is written. Excerpts are

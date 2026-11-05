@@ -855,9 +855,24 @@ export async function retryLaunch<T>(
     if (ctx.signal?.aborted) throw new Error(`${label} aborted during launch retry: ${r.reason}`);
     const delay = ctx.delaysMs[i]!;
     ctx.warnings.push(`launch retry ${i + 1}/${ctx.delaysMs.length} (${label}) in ${delay}ms: ${r.reason}`);
-    await ctx.sleep(delay);
+    // ADR-0024 B13b (ENGINE-16): the backoff wait ends as soon as the run is aborted.
+    await abortableWait(ctx.sleep(delay), ctx.signal);
     if (ctx.signal?.aborted) throw new Error(`${label} aborted during launch retry: ${r.reason}`);
   }
+}
+
+/** Resolve when `p` settles or `signal` aborts, whichever comes first (never rejects). */
+function abortableWait(p: Promise<void>, signal: AbortSignal | undefined): Promise<void> {
+  if (!signal) return p;
+  if (signal.aborted) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const done = (): void => {
+      signal.removeEventListener('abort', done);
+      resolve();
+    };
+    signal.addEventListener('abort', done, { once: true });
+    p.then(done, done);
+  });
 }
 
 /** ENOENT (binary absent) and EACCES (present but not executable yet) are the replace-in-place

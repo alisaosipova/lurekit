@@ -18,6 +18,13 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+### Fixed (blocks B10c, B13b)
+
+- The launch backoff between retries now ends as soon as the run is aborted, so Ctrl-C during a
+  retry stops at once instead of after up to 4 s (ENGINE-16).
+- The harness-owned stdio MCP control child no longer pipes output nobody reads, and its
+  teardown waits for it to exit (ENGINE-11).
+
 ### Changed (block B17, VERDICT-09)
 
 - Scenarios that run at reduced headless fidelity (the measured thing is narrower than the

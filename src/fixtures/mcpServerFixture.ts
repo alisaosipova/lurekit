@@ -189,7 +189,9 @@ export class McpStdioFixture extends McpFixtureBase {
         this.child = spawn(process.execPath, [mainPath, NO_START_RECORD_FLAG], {
           // ADR-0008 amendment: allow-listed harness env, never the operator's credentials.
           env: harnessChildEnv(env),
-          stdio: ['pipe', 'pipe', 'pipe'],
+          // B10 ENGINE-11: stdin stays a pipe (the stdio server lives while it is open); its
+          // output is never read, so it is not piped (an unread pipe can fill and block it).
+          stdio: ['pipe', 'ignore', 'ignore'],
         });
         this.child.on('error', () => undefined);
       } catch {
@@ -223,11 +225,22 @@ export class McpStdioFixture extends McpFixtureBase {
 
   async teardown(): Promise<void> {
     if (this.child && !this.child.killed) {
+      const child = this.child;
+      // B10 ENGINE-11: the exit is awaited (bounded), so the control child never outlives teardown.
+      const exited = new Promise<void>((resolve) => {
+        if (child.exitCode !== null || child.signalCode !== null) return resolve();
+        const t = setTimeout(resolve, 1_000);
+        child.once('exit', () => {
+          clearTimeout(t);
+          resolve();
+        });
+      });
       try {
-        this.child.kill();
+        child.kill();
       } catch {
         /* already gone */
       }
+      await exited;
     }
   }
 }
