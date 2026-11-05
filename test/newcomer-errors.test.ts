@@ -597,3 +597,20 @@ describe('ADR-0024 amendment B13a: provisional manifest, partial runs', () => {
     expect(err.join('')).toMatch(/is empty or not valid JSON/);
   });
 });
+
+describe('ADR-0022 amendment B17: --fail-on', () => {
+  it('report on the demo bundle exits 3 under --fail-on vulnerable and 0 under --fail-on inconclusive; a bad value is refused', async () => {
+    const demo = path.join(repoRoot, 'demo', 'aab-20261103071018-88a78d8f');
+    expect(await main(['report', demo, '--format', 'json', '--fail-on', 'vulnerable'], deps())).toBe(3);
+    expect(err.join('')).toMatch(/gate: --fail-on vulnerable tripped by AAB-001 \(vulnerable\)/);
+    expect(await main(['report', demo, '--format', 'json', '--fail-on', 'inconclusive'], deps())).toBe(0);
+    expect(await main(['report', demo, '--format', 'json'], deps())).toBe(0);
+    let msg = '';
+    try {
+      await main(['report', demo, '--fail-on', 'vulnerabel'], deps());
+    } catch (e) {
+      msg = (e as Error).message;
+    }
+    expect(msg + err.join('')).toMatch(/--fail-on takes a comma list of vulnerable, degraded, inconclusive/);
+  });
+});

@@ -18,6 +18,13 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+### Added (block B17)
+
+- `run` and `report --fail-on <vulnerable,degraded,inconclusive>`: after all output is written,
+  exit 3 when a scenario has one of the listed verdicts or the run is partial, naming the
+  scenarios on stderr. A CI step can now fail on a weak setup and tell that apart from a tool
+  failure (exit 1). Without the flag nothing changes (UX-03, ADR-0022 amendment).
+
 ### Fixed (block B14)
 
 - The Claude Code adapter decoded each stdout chunk on its own, so a multi-byte UTF-8 character
@@ -33,7 +40,7 @@ No release is cut without changes.
 - SIGHUP (closing the terminal) aborts like SIGINT: the current repetition is killed, the rest
   skipped, the manifest written; before, lurekit died and the agent kept running and billing
   (ENGINE-04).
-- Harness files are synced to disk before their atomic rename, and `report` names an empty or
+- `manifest.json` and `evidence.json` are synced to disk before their atomic rename, and `report` names an empty or
   cut-off manifest instead of crashing (ENGINE-10).
 
 ### Fixed (block B10a)

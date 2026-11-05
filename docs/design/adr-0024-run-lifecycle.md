@@ -458,7 +458,10 @@ VERDICT-12) is deferred.
    repetition is killed, the rest skipped, the manifest written; a second signal exits 129 for
    SIGHUP (130 otherwise). A write to a closed terminal is ignored. PDEATHSIG is not available in
    Node, so a SIGKILL of lurekit itself still leaves the detached agent group (limit).
-3. **Durable writes.** `safeWriteFile` syncs the temp file before the rename (`fh.sync()`), so a
-   power loss cannot leave a 0-byte `manifest.json`/`evidence.json` under its final name; a
+3. **Durable writes.** `manifest.json` and `evidence.json` are written with
+   `safeWriteFile(..., { durable: true })`, which syncs the temp file before the rename
+   (`fh.sync()`), so a power loss cannot leave a 0-byte record under its final name (other
+   harness files skip the sync: measured, syncing every file slowed the offline e2e suite by about
+   half); a
    manifest that is empty or not JSON is reported as such by `report`.
 

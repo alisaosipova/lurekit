@@ -60,6 +60,9 @@ export interface SafeWriteOptions {
   replaceDir?: boolean;
   /** File mode for the created file (POSIX), e.g. 0o755 for a launcher. */
   mode?: number;
+  /** fsync before the rename (ADR-0024 B13a): set for the records a report depends on
+   *  (manifest.json, evidence.json), not for every harness file (the cost adds up). */
+  durable?: boolean;
 }
 
 export interface SafeWriteResult {
@@ -178,7 +181,7 @@ export async function safeWriteFile(
   try {
     fh = await open(tmp, 'wx', opts.mode ?? 0o600);
     await fh.writeFile(data);
-    await fh.sync(); // ADR-0024 B13a: durable before the rename (no 0-byte file after a power loss)
+    if (opts.durable) await fh.sync(); // ADR-0024 B13a: durable before the rename (manifest, evidence)
     await fh.close();
     fh = undefined;
     await rename(tmp, abs);

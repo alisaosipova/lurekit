@@ -1123,7 +1123,7 @@ export class BenchmarkRunner implements Runner {
     const evidencePath = path.join(runDir, EVIDENCE_FILE);
     try {
       // ADR-0025 D2: atomic, never through a symlink; a planted directory is replaced.
-      const written = await safeWriteFile(runDir, evidencePath, JSON.stringify(evidence, null, 2), { replaceDir: true });
+      const written = await safeWriteFile(runDir, evidencePath, JSON.stringify(evidence, null, 2), { replaceDir: true, durable: true });
       if (written.replacedSymlink || written.replacedDir) {
         process.stderr.write(`warning: ${scenario.id} repetition ${rep}: a ${written.replacedSymlink ? 'symlink' : 'directory'} sat at ${EVIDENCE_FILE} and was replaced\n`);
       }
@@ -1160,7 +1160,7 @@ export class BenchmarkRunner implements Runner {
       { artefacts: info.artefacts },
     );
     const evidencePath = path.join(runDir, EVIDENCE_FILE);
-    await safeWriteFile(runDir, evidencePath, JSON.stringify(evidence, null, 2), { replaceDir: true });
+    await safeWriteFile(runDir, evidencePath, JSON.stringify(evidence, null, 2), { replaceDir: true, durable: true });
     return {
       run_id: runId,
       repetition: rep,
@@ -1368,7 +1368,7 @@ export class BenchmarkRunner implements Runner {
     const dir = path.join(cfg.resultsRoot, this.ids.benchmarkRunId);
     await mkdir(dir, { recursive: true, mode: 0o700 }); // B11a
     // ADR-0025 D2: the benchmark dir is the trusted root; the manifest never follows a symlink.
-    await safeWriteFile(dir, MANIFEST_FILE, JSON.stringify(manifest, null, 2), { replaceDir: true });
+    await safeWriteFile(dir, MANIFEST_FILE, JSON.stringify(manifest, null, 2), { replaceDir: true, durable: true });
     return manifest;
   }
 }

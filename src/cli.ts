@@ -208,7 +208,7 @@ interface Flags {
 const STRING_FLAGS = new Set([
   'model', 'agent', 'agent-version', 'mode', 'vulnerable-if', 'isolation',
   'results', 'workdir', 'format', 'output', 'permission-mode', 'settings', 'mcp', 'hooks',
-  'replay', 'out', 'setting-sources', 'scenarios', 'profile',
+  'replay', 'out', 'setting-sources', 'scenarios', 'profile', 'fail-on',
 ]);
 const NUMBER_FLAGS = new Set(['k', 'budget', 'run-timeout']);
 const NUMBER_FLAG_EXAMPLE: Record<string, string> = { k: '3', budget: '5', 'run-timeout': String(DEFAULT_RUN_TIMEOUT_S) };
@@ -601,6 +601,11 @@ function kProblem(flags: Flags, hint: string): string | undefined {
 /** ADR-0022 amendment (pre-spend validation): every run flag that would otherwise only fail after
  *  the agent ran (and was paid for) is checked first. Returns the refusal text, or undefined. */
 function preSpendProblem(flags: Flags, deps: CliDeps, hint: string): string | undefined {
+  try {
+    failOnSet(flags); // ADR-0022 B17: a bad --fail-on is refused before anything is spent
+  } catch (e) {
+    return (e as Error).message;
+  }
   const format = flags.str.get('format');
   if (format !== undefined && reportFormat(flags, 'markdown') === undefined) {
     return `--format must be ${FORMAT_LIST} (got ${JSON.stringify(format)}).\nnext: ${hint} --format markdown`;
@@ -983,11 +988,36 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
     if (live && profile.agent === 'claude-code') {
       deps.stderr('note: Claude Code also kept its own session transcripts of this run under ~/.claude/projects/ (one directory per workdir); lurekit does not delete them.\n');
     }
-    return 0;
+    return gateExit(manifest, failOnSet(flags), deps);
   }
 }
 
+/** ADR-0022 amendment B17 (UX-03): the verdicts that fail a CI gate. Undefined: no gate. Throws on
+ *  a bad value (callers run it before anything is spent). */
+const FAIL_ON_VALUES = ['vulnerable', 'degraded', 'inconclusive'] as const;
+function failOnSet(flags: Flags): Set<string> | undefined {
+  const raw = flags.str.get('fail-on');
+  if (raw === undefined) return undefined;
+  const items = raw.split(',').map((x) => x.trim()).filter(Boolean);
+  const bad = items.filter((x) => !(FAIL_ON_VALUES as readonly string[]).includes(x));
+  if (items.length === 0 || bad.length > 0) {
+    throw new Error(`--fail-on takes a comma list of ${FAIL_ON_VALUES.join(', ')} (got ${JSON.stringify(raw)})\nnext: --fail-on vulnerable`);
+  }
+  return new Set(items);
+}
+
+/** Exit code for a finished run or report under --fail-on: 3 when the gate trips, else 0. */
+function gateExit(manifest: RunManifest, gate: Set<string> | undefined, deps: CliDeps): number {
+  if (!gate) return 0;
+  const tripped = manifest.results.filter((r) => gate.has(r.verdict)).map((r) => `${r.scenario_id} (${r.verdict})`);
+  if (manifest.partial) tripped.push(`partial run (${manifest.partial.completed_scenarios} of ${manifest.partial.planned_scenarios} scenarios)`);
+  if (tripped.length === 0) return 0;
+  deps.stderr(`gate: --fail-on ${[...gate].join(',')} tripped by ${tripped.join(', ')} (exit 3)\n`);
+  return 3;
+}
+
 export function cmdReport(flags: Flags, deps: CliDeps): number {
+  const gate = failOnSet(flags); // ADR-0022 B17: validated before reading anything
   const runDir = flags._[0];
   if (!runDir || !existsSync(path.join(runDir, 'manifest.json'))) {
     deps.stderr(noRunDirMessage('report', runDir, flags, deps));
@@ -1022,7 +1052,7 @@ export function cmdReport(flags: Flags, deps: CliDeps): number {
   });
   if (output) writeFileSync(output, rendered, 'utf8');
   else deps.stdout(rendered + '\n');
-  return 0;
+  return gateExit(manifest, gate, deps);
 }
 
 /** publish <runDir> [--out <dir>] [--allow-host <host>]... [--withhold <id>]... [--exclude <id>]...
@@ -1314,6 +1344,7 @@ Commands:
                    --permission-mode <m>  --mcp <file.json>  --skill <dir> (repeatable)
                    --env NAME (repeatable; forwards that variable of your environment to the agent)
                    --profile <file|name> (a setup profile, e.g. claude-code-hardened; flags override it)
+                   --fail-on <verdicts> (run and report: exit 3 when a scenario is vulnerable,degraded,inconclusive)
                    --settings/--hooks <file.json>  claude-code only: forwarded in the single
                                     --settings file, observe hooks appended last (ADR-0020)
                    --setting-sources <csv>  claude-code only: load only these setting sources
