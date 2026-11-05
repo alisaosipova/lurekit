@@ -113,7 +113,7 @@ describe('B15-T2/T3 timing-tolerant test rules (ADR-0012 a.2, a.4)', () => {
   });
 
   it('describe-level retry: 1 appears in exactly the two files that drive real processes or timers', () => {
-    const withRetry = testFiles.filter((f) => /retry:\s*\d/.test(read(`test/${f}`)) && f !== 'ci-docs.test.ts');
+    const withRetry = testFiles.filter((f) => /\{\s*retry:\s*\d/.test(read(`test/${f}`)) && f !== 'ci-docs.test.ts');
     expect(withRetry.sort()).toEqual([...RETRY_FILES].sort());
     for (const f of RETRY_FILES) {
       const text = read(`test/${f}`);
