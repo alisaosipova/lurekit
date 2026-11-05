@@ -435,3 +435,14 @@ spec matches the code (CLAUDE.md "keep the SDD current"):
   before/after comparison against the pre-ADR build was done once, by hand, at implementation
   time (per-scenario verdicts identical).
 
+### Amendment (2026-11-05, block B10b, VERDICT-12): reap the group after a normal exit
+
+D5 killed the agent's process group only on abort. After a normal exit, whatever the agent left
+running in its group (a background fetcher, a server it started) outlived the repetition and
+could touch the next repetition's fixtures (a loopback port reused by the next feed fixture could
+then count a delivery the agent of that repetition never made). Every adapter now calls
+`reapGroup(child)` (`src/adapters/childProcess.ts`) right after `waitExit`: `SIGKILL` to the
+group, `ESRCH` ignored. POSIX only: on Windows the tree of an exited process cannot be walked,
+recorded as a limit. The per-run token in the feed/web fixture paths (the other half of
+VERDICT-12) is deferred.
+

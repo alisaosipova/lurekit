@@ -38,7 +38,7 @@ import type {
 } from './adapter.js';
 import { agentChildEnv, envNames } from './childEnv.js';
 import { safeReadText, safeWriteFile } from '../runner/safeWrite.js';
-import { killTree, probeVersionCapped, spawnAgent, waitExit } from './childProcess.js';
+import { killTree, probeVersionCapped, reapGroup, spawnAgent, waitExit } from './childProcess.js';
 import { inputDigest, normalizeMcpServers, requireWorkdir, stderrExcerpt, strictMcpConfigFor, validateSettingSources } from './adapter.js';
 import type { AgentId } from '../scenario/types.js';
 
@@ -308,6 +308,7 @@ export class ClaudeCodeAdapter implements Adapter {
     // Resolves on `exit`, then waits for `close` at most STDIO_DRAIN_MS (ADR-0024 D5): a
     // grandchild holding the stdout pipe cannot keep this adapter from returning.
     const exit = await waitExit(child);
+    reapGroup(child); // B10 VERDICT-12: nothing the agent started outlives the repetition
     if (exit.error) warnings.push(`agent process error (${bin}): ${exit.error.message}`);
     if (exit.drainTimedOut) warnings.push('agent stdio did not close after exit (a child process of the agent may still hold it); output read so far is kept');
     if (lineBuffer.length > 0) handleLine(lineBuffer);

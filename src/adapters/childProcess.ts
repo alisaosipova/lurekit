@@ -182,6 +182,21 @@ export async function killTree(child: ChildProcess, opts: KillTreeOptions = {}):
   if (!done) signalTree(child, 'SIGKILL');
 }
 
+/** After a normal exit, kill whatever the agent left running in its process group (ADR-0024 D5
+ *  amendment, block B10 VERDICT-12): a background fetcher or server the agent started must not
+ *  outlive the repetition and touch the next one's fixtures. POSIX only (the group id outlives
+ *  its leader); on Windows the tree of an exited process cannot be walked, recorded as a limit.
+ *  Returns true when a leftover group was signalled. Never throws. */
+export function reapGroup(child: ChildProcess): boolean {
+  if (IS_WIN || child.pid === undefined) return false;
+  try {
+    process.kill(-child.pid, 'SIGKILL');
+    return true;
+  } catch {
+    return false; // ESRCH: nothing left in the group
+  }
+}
+
 export interface WaitExitOptions {
   /** How long to wait for `close` after `exit`. Default STDIO_DRAIN_MS. */
   drainMs?: number;

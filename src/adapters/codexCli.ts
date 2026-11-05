@@ -25,7 +25,7 @@ import type { Adapter,
   AdapterCapabilities, ObservationSource, RunObservation, RunOptions, SetupProfile, ToolCall } from './adapter.js';
 import { requireWorkdir, stderrExcerpt } from './adapter.js';
 import { agentChildEnv, argvRecord, CappedStderr, envNames } from './childEnv.js';
-import { killTree, probeVersionCapped, spawnAgent, waitExit } from './childProcess.js';
+import { killTree, probeVersionCapped, reapGroup, spawnAgent, waitExit } from './childProcess.js';
 import type { AgentId } from '../scenario/types.js';
 
 export const CODEX_STREAM_FILE = 'codex-stream.jsonl';
@@ -277,6 +277,7 @@ export class CodexCliAdapter implements Adapter {
     // Resolves on `exit`, then waits for `close` at most STDIO_DRAIN_MS (ADR-0024 D5): a
     // grandchild holding the stdout pipe cannot keep this adapter from returning.
     const exit = await waitExit(child);
+    reapGroup(child); // B10 VERDICT-12: nothing the agent started outlives the repetition
     if (exit.error) warnings.push(`failed to spawn agent binary "${bin}"`);
     if (exit.drainTimedOut) warnings.push('agent stdio did not close after exit (a child process of the agent may still hold it); output read so far is kept');
     lineBuffer += decoder.end();

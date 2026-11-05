@@ -20,6 +20,9 @@ No release is cut without changes.
 
 ### Fixed (block B10a)
 
+- After an agent exits normally, anything it left running in its process group is killed, so a
+  leftover background process cannot touch the next repetition's fixtures (VERDICT-12, ADR-0024
+  amendment; POSIX).
 - Concurrent requests to the egress sink or the local registry could leave the tamper witness
   in a different order than the file, a false `evidence_tampered` on a clean run; appends are now
   serialised per sink (ENGINE-05, ADR-0025 amendment).

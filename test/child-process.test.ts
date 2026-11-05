@@ -15,6 +15,7 @@ import {
   VERSION_PROBE_TIMEOUT_MS,
   killTree,
   probeVersionCapped,
+  reapGroup,
   resetTrackedChildren,
   spawnAgent,
   trackedChildren,
@@ -115,8 +116,8 @@ describe('T4 process-group kill (POSIX)', { retry: 1 }, () => {
     expect(Date.now() - t0).toBeLessThan(DRAIN_MS + LOAD_SLACK_MS);
     // The grandchild is still there (its parent exited normally; nothing killed the group)...
     expect(alive(pids.grandchild)).toBe(true);
-    // ...until the tree is killed explicitly (what an adapter's abort path does).
-    process.kill(-pids.agent, 'SIGKILL');
+    // ...until the group is reaped: every adapter calls reapGroup() after waitExit (B10 VERDICT-12).
+    expect(reapGroup(child)).toBe(true);
     await pollUntil(async () => {
       if (alive(pids.grandchild)) throw new Error('grandchild still alive');
     }, `grandchild ${pids.grandchild} survived`, READY_DEADLINE_MS);
