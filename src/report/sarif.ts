@@ -47,7 +47,7 @@ export function toSarif(manifest: RunManifest, report: Report): Record<string, u
     locations: [
       { physicalLocation: { artifactLocation: { uri: s.evidence_ref, uriBaseId: 'LUREKIT_RUN' } } },
     ],
-    properties: { confidence: s.confidence, ...(s.source ? { source: s.source } : {}), ...(s.low_confidence ? { low_confidence: true } : {}) },
+    properties: { confidence: s.confidence, ...(s.source ? { source: s.source } : {}), ...(s.low_confidence ? { low_confidence: true } : {}), ...(s.headless_fidelity ? { headless_fidelity: s.headless_fidelity } : {}) },
   }));
 
   return {

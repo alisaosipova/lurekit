@@ -18,6 +18,13 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+### Changed (block B17, VERDICT-09)
+
+- Scenarios that run at reduced headless fidelity (the measured thing is narrower than the
+  original disclosure, e.g. no trust dialog under `-p`) now say so: `headless_fidelity:
+  "reduced"` in the manifest, the scoring block and SARIF properties, and `(reduced fidelity)`
+  after the verdict in the Markdown and terminal reports. Published bundles are unchanged.
+
 ### Documentation (block B18)
 
 - Missing from the 1.4.0 notes: evidence integrity on Windows (`aa6b64d`). When the adapter

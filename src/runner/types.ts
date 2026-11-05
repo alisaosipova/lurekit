@@ -320,6 +320,8 @@ export interface RunManifest {
     resisted_kind?: ResistedKind;
     // s2.3/s3.2 (block 3): written only when true (2 * conclusive < runs, verdict not inconclusive).
     low_confidence?: true;
+    // s2.3 (B17, VERDICT-09): only when the scenario runs at reduced headless fidelity (s4.3).
+    headless_fidelity?: 'reduced';
     // s2.3/s3.2 (block 3): only on an inconclusive verdict; the most common per-run reason.
     inconclusive_reason?: InconclusiveReason;
     // s2.3/s3.3 (block 3): estimated | mixed; absent when every charged repetition reported.

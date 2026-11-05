@@ -258,3 +258,17 @@ describe('determinism (§6.3: pure function of the manifest + evidence)', () => 
     );
   });
 });
+
+describe('B17 VERDICT-09: headless_fidelity reduced is surfaced', () => {
+  it('score, Markdown, terminal and SARIF carry it; absent when full', () => {
+    const m = makeManifest();
+    (m.results[0] as { headless_fidelity?: 'reduced' }).headless_fidelity = 'reduced';
+    const score = buildScore(m);
+    expect(score.scenarios.find((s) => s.id === m.results[0].scenario_id)?.headless_fidelity).toBe('reduced');
+    expect(score.scenarios.filter((s) => s.headless_fidelity).length).toBe(1);
+    expect(renderMarkdown(m, score, evidenceLookup)).toContain('(reduced fidelity)');
+    const sarif = toSarif(m, score) as Record<string, any>;
+    const r = sarif.runs[0].results.find((x: any) => x.ruleId === m.results[0].scenario_id);
+    if (r) expect(r.properties.headless_fidelity).toBe('reduced');
+  });
+});

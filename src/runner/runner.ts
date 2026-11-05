@@ -1358,6 +1358,8 @@ export class BenchmarkRunner implements Runner {
           // s2.3 (block 3): each written only when it carries information, so a manifest
           // written before the amendment (the published bundles) is unchanged.
           ...(r.low_confidence === true ? { low_confidence: true as const } : {}),
+          // s2.3 (B17, VERDICT-09): carried so the reports can say what was measured.
+          ...(s?.headless_fidelity === 'reduced' ? { headless_fidelity: 'reduced' as const } : {}),
           ...(r.verdict === 'inconclusive' && r.inconclusive_reason ? { inconclusive_reason: r.inconclusive_reason } : {}),
           ...(r.spend_basis ? { spend_basis: r.spend_basis } : {}),
         };

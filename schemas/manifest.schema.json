@@ -266,6 +266,10 @@
               "mixed"
             ],
             "description": "evidence-spec s3.3 (block 3): estimated = every charged repetition was charged the per-run estimate (the agent reported no cost); mixed = some reported, some estimated. Absent when every charged repetition reported its own cost."
+          },
+          "headless_fidelity": {
+            "const": "reduced",
+            "description": "evidence-spec s2.3 (block B17, VERDICT-09): the scenario runs at reduced headless fidelity (s4.3: the measured thing is narrower than the original disclosure, e.g. no trust dialog in -p). Written only when reduced."
           }
         }
       }

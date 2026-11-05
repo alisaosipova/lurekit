@@ -102,7 +102,7 @@ export function renderMarkdown(
   out.push('|---|---|---|---|---|');
   for (const s of report.scenarios) {
     const name = byId.get(s.id)?.name ?? '';
-    out.push(`| ${cell(s.id)} | ${cell(name)} | ${cell(verdictCell(s.verdict, s.isolation, s.resisted_kind, s.low_confidence))} | ${cell(s.confidence)} | ${cell(s.source)} |`);
+    out.push(`| ${cell(s.id)} | ${cell(name)} | ${cell(verdictCell(s.verdict, s.isolation, s.resisted_kind, s.low_confidence) + (s.headless_fidelity === 'reduced' ? ' (reduced fidelity)' : ''))} | ${cell(s.confidence)} | ${cell(s.source)} |`);
   }
   out.push('');
   if (report.scenarios.some((s) => s.isolation === 'partial')) {

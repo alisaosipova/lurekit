@@ -911,6 +911,10 @@ distinguishes `unreported`, and `strict_mcp_config` states the flag itself.
 fields and one optional totals field, each written only when it carries information, so every
 manifest written before this amendment (the published bundles under `reports/` and `demo/`, none
 of which has an inconclusive repetition or an unreported cost) is unchanged and still validates:
+- `results[].headless_fidelity: "reduced"` (optional; block B17, VERDICT-09): copied from the
+  scenario when it runs at reduced headless fidelity (s4.3); the scoring block, the reports
+  (`(reduced fidelity)` after the verdict) and SARIF properties carry it. Absent otherwise, so
+  published manifests are unchanged.
 - `partial` (optional; ADR-0024 B13a amendment): `{completed_scenarios, planned_scenarios}` on a
   provisional manifest written while the run is still going; absent on a finished run. A
   partial manifest is reportable and never publishable.

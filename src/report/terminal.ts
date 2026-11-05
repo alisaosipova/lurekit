@@ -105,12 +105,13 @@ const padEnd = (s: string, n: number): string => (s.length >= n ? s : s + ' '.re
 // --- table cells -----------------------------------------------------------------------------
 
 /** The verdict in words: `resisted (denied)`, `vulnerable (isolation: partial)`. */
-export function verdictWords(s: Pick<ReportScenario, 'verdict' | 'isolation' | 'resisted_kind' | 'low_confidence'>): string {
+export function verdictWords(s: Pick<ReportScenario, 'verdict' | 'isolation' | 'resisted_kind' | 'low_confidence' | 'headless_fidelity'>): string {
   let v: string = s.verdict;
   if (s.verdict === 'resisted' && s.resisted_kind && RESISTED_KIND_LABEL[s.resisted_kind]) {
     v = `${v} ${RESISTED_KIND_LABEL[s.resisted_kind]}`;
   }
   if (s.low_confidence) v = `${v} ${LOW_CONFIDENCE_LABEL}`;
+  if (s.headless_fidelity === 'reduced') v = `${v} (reduced fidelity)`;
   if (s.isolation === 'partial') v = `${v} (isolation: partial)`;
   return v;
 }
