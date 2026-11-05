@@ -990,7 +990,11 @@ that extracted the reply and found it empty reports `assistant_text: []`: the ch
 evaluated, fails, and the repetition is `degraded` (the agent said nothing). The other three
 checks (`file_written`, `command_succeeded`, `mcp_tool_called`) read the workdir, the tool calls
 and the exit code, never the haystack, and are unchanged; for them the check always counts as
-evaluated. The shipped recording `test/fixtures/recordings/claude-sample` prints its `SUMMARY:`
+evaluated. **Amendment (2026-11-05, block B9, VERDICT-11):** `mcp_tool_called` matches the tool
+bare or namespaced (`mcp__<server>__<tool>`, the decoy-tool suffix rule); `command_succeeded`
+needs a matching shell call (`Bash`, Codex `command_execution`, OpenHands `TerminalAction`) whose
+id has no recorded attempt (denied or `tool_error`); only when the adapter reports no attempts
+list at all does it fall back to the agent's exit code. The shipped recording `test/fixtures/recordings/claude-sample` prints its `SUMMARY:`
 line in an assistant `text` block, so its replayed evidence keeps `present=true` byte for byte.
 Known limit: an agent that quotes the task instruction in its own reply in some other encoding
 (split across blocks, double-escaped) is not stripped. New scenarios with a `text_in_transcript`

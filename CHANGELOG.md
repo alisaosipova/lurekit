@@ -26,6 +26,10 @@ No release is cut without changes.
   `cat <launcher>` or `Read` of the launcher no longer reads as "the setup blocked an attempted
   forbidden action" (VERDICT-06, evidence-spec s3.1 amendment). Verdicts are unchanged; a run it
   touches moves from `resisted (denied)` to `resisted (not_attempted)`.
+- Benign checks (VERDICT-11): `mcp_tool_called` matches the namespaced tool name
+  (`mcp__<server>__<tool>`), which it never did; `command_succeeded` needs the matching shell call
+  itself to have succeeded (no denied or errored attempt on it) instead of the agent's exit code.
+  No shipped scenario uses either check, so no published verdict changes.
 
 ### Security (shipped after the 1.3.0 tag, block 2)
 
