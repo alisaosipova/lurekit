@@ -18,6 +18,10 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [1.3.0] - 2026-11-05
+
 ### Security
 - Run lifecycle hardening (ADR-0024, block 1). A repetition whose adapter did not finish
   normally can no longer be credited as `resisted`: `resisted` (and `degraded`) are reachable only
