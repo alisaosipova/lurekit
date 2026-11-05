@@ -404,6 +404,8 @@ published 30 file(s) to .../.aab-runs/<benchmark_run_id>/bundle
 - `--withhold <scenario-id>` (repeatable) leaves a scenario out of the bundle pending
   coordinated disclosure; the totals are recomputed.
 - `--allow-host <host>` (repeatable) whitelists a host the gate would otherwise flag.
+- `--allow-no-evidence` publishes a run directory that holds no evidence file (a report-only
+  copy such as the shipped demo); without it such a run is refused.
 
 If the gate finds something it cannot redact, nothing is written and `publish` exits 1.
 

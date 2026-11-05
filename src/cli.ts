@@ -125,6 +125,9 @@ export interface CliDeps {
   /** ADR-0021 amendment (terminal view): whether stdout is a terminal, its width, and the
    *  NO_COLOR / FORCE_COLOR / COLUMNS variables. Absent => not a terminal, 100 columns, no colour. */
   terminal?(): TerminalInfo;
+  /** ADR-0017 block B12: the publishing process environment the `env_value` gate check reads
+   *  (a copy is passed to planPublish). Absent => process.env. A test injects a fixed map. */
+  env?(): NodeJS.ProcessEnv;
 }
 
 export function defaultDeps(): CliDeps {
@@ -212,7 +215,7 @@ const MULTI_FLAGS = new Set(['skill', 'allow-host', 'withhold', 'exclude']);
 /** Explicit allowlist of boolean flags: only the ones main()/a command actually reads. Anything
  *  else is rejected, so a typo or a mis-quoted flag can never be silently ignored (a single
  *  token like "--withhold AAB-003" once nearly published a withheld scenario). */
-const BOOLEAN_FLAGS = new Set(['help', 'version', 'redact-home', 'yes']);
+const BOOLEAN_FLAGS = new Set(['help', 'version', 'redact-home', 'yes', 'allow-no-evidence']);
 
 /** Strict parser: throws (exit 1 via the bin's error path) before any command runs on
  *  an unknown --name, a --name=value form, a flag token containing whitespace, or a
@@ -939,10 +942,12 @@ export function cmdReport(flags: Flags, deps: CliDeps): number {
 }
 
 /** publish <runDir> [--out <dir>] [--allow-host <host>]... [--withhold <id>]... [--exclude <id>]...
- *  [--redact-home] (ADR-0017). Builds the whole bundle in memory, optionally withholds scenarios
- *  (ADR-0014) or excludes operator-declared non-measurements (ADR-0017 "Excluding a scenario"),
- *  optionally replaces the operator home dir with <HOME> in the copies,
- *  runs the §5 redaction gate, and writes only if the gate is clean. */
+ *  [--redact-home] [--allow-no-evidence] (ADR-0017). Builds the whole bundle in memory,
+ *  optionally withholds scenarios (ADR-0014) or excludes operator-declared non-measurements
+ *  (ADR-0017 "Excluding a scenario"), optionally replaces the operator home dir with <HOME> in
+ *  the copies, runs the s5 redaction gate (including the block B12 operator-value check over a
+ *  copy of this process's environment), and writes only if the gate is clean. A run dir without
+ *  evidence files is refused unless --allow-no-evidence (block B12 "Evidence count"). */
 export function cmdPublish(flags: Flags, deps: CliDeps): number {
   const runArg = flags._[0];
   if (!runArg || !existsSync(path.join(path.resolve(deps.cwd(), runArg), 'manifest.json'))) {
@@ -975,7 +980,7 @@ export function cmdPublish(flags: Flags, deps: CliDeps): number {
   }
   let contents;
   try {
-    contents = readRunDir(runDir);
+    contents = readRunDir(runDir, { skipScenarios: [...withhold, ...exclude] });
   } catch (e) {
     deps.stderr(`${(e as Error).message}; nothing written\n`);
     return 1;
@@ -989,11 +994,17 @@ export function cmdPublish(flags: Flags, deps: CliDeps): number {
     redactHome: flags.bool.has('redact-home'),
     surfaceOf: surfaceLookupFrom(loaded.scenarios),
     corpus: loaded.scenarios,
+    // Block B12: a copy of the publishing environment for the operator-value check; the plan
+    // stays a pure function of what it is given.
+    operatorEnv: { ...(deps.env ? deps.env() : process.env) },
+    allowNoEvidence: flags.bool.has('allow-no-evidence'),
+    runDir: typedPath(runArg),
   });
   if (!plan.ok) {
     deps.stderr(formatPlanFailure(plan));
     return 1;
   }
+  for (const w of plan.warnings) deps.stderr(`warning: ${w}\n`);
   // ADR-0022 amendment: the default bundle goes inside the run directory (<results>/<id>/bundle),
   // never into the cwd; --out still overrides it.
   const outFlag = flags.str.get('out');
@@ -1014,7 +1025,11 @@ export function cmdPublish(flags: Flags, deps: CliDeps): number {
   if (plan.homeReplacements !== undefined) {
     deps.stdout(`redaction applied: home directory -> <HOME> (${plan.homeReplacements} replacements)\n`);
   }
+  if (plan.evidenceFound === 0) {
+    deps.stdout(`evidence: 0 of ${plan.evidenceExpected} file(s) (--allow-no-evidence)\n`);
+  }
   deps.stdout(`\npublished ${plan.files.length} file(s) to ${outDir}\n`);
+  deps.stdout(`\nNext: lurekit report ${shownPath(outDir, deps)}\n      cite it as described in the publishing guide ("Citing a bundle")\n`);
   return 0;
 }
 
@@ -1233,6 +1248,8 @@ Commands:
                                   an id may not be given to both --withhold and --exclude
                    --redact-home  replace YOUR home dir with <HOME> in the published copies (opt-in;
                                   run dir untouched; other home paths still fail the gate)
+                   --allow-no-evidence  publish a run dir that holds no evidence file (report-only
+                                  copy, noted in index.md); without it such a run is refused
                    --scenarios <dir>  the run's scenario corpus (default: the shipped corpus): its
                                   source URLs pass the gate; with --withhold/--exclude the
                                   published corpus_digest is recomputed from it

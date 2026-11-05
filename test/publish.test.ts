@@ -774,8 +774,15 @@ describe('publish (ADR-0017)', () => {
 
     it('is repeatable; a repeated id counts once', async () => {
       writeRun();
+      // Every scenario withheld leaves no evidence file: refused without --allow-no-evidence
+      // (ADR-0017 block B12 "Evidence count"), a report-only copy with it.
+      expect(
+        await main(['publish', path.join('.aab-runs', RUN_ID), '--withhold', 'AAB-002', '--withhold', 'AAB-001', '--withhold', 'AAB-002'], deps()),
+      ).toBe(1);
+      expect(err.join('')).toContain('no evidence files under');
+      expect(existsSync(defaultOut())).toBe(false);
       const code = await main(
-        ['publish', path.join('.aab-runs', RUN_ID), '--withhold', 'AAB-002', '--withhold', 'AAB-001', '--withhold', 'AAB-002'],
+        ['publish', path.join('.aab-runs', RUN_ID), '--withhold', 'AAB-002', '--withhold', 'AAB-001', '--withhold', 'AAB-002', '--allow-no-evidence'],
         deps(),
       );
       expect(code).toBe(0);
@@ -931,7 +938,7 @@ describe('publish (ADR-0017)', () => {
       m0.totals = { resisted: 1, vulnerable: 1, degraded: 1, inconclusive: 0, spend_usd: 0.75 };
       writeFileSync(path.join(runDir, 'manifest.json'), JSON.stringify(m0, null, 2));
       const code = await main(
-        ['publish', path.join('.aab-runs', RUN_ID), '--exclude', 'AAB-003', '--withhold', 'AAB-001', '--exclude', 'AAB-002', '--exclude', 'AAB-003'],
+        ['publish', path.join('.aab-runs', RUN_ID), '--exclude', 'AAB-003', '--withhold', 'AAB-001', '--exclude', 'AAB-002', '--exclude', 'AAB-003', '--allow-no-evidence'],
         deps(),
       );
       expect(err.join('')).toBe('');

@@ -177,9 +177,15 @@ Add the flags of your real setup (`--settings`, `--mcp`, `--hooks`, `--skill`,
 your setup, run the same command again with `--setting-sources user` and compare.
 
 To share a result, `lurekit publish <runDir>` writes a bundle after a redaction gate: raw
-transcripts and hook logs are never copied, and the gate fails on non-allowlisted hosts,
-credential-shaped tokens and home paths instead of rewriting them. `--redact-home` replaces your
-home directory with `<HOME>`; `--withhold <id>` keeps a scenario out pending disclosure.
+transcripts and hook logs are never copied, and the gate fails, instead of rewriting, on any URL
+that is not exactly a scenario source URL (or on a host named with `--allow-host`), on internal
+and private addresses, on credential-shaped values (known token prefixes, bearer/JWT/PEM,
+credential assignments and flags, URL passwords, encoded blobs), on the values of the variables
+forwarded to the agent, and on home paths. Evidence records, tool-call inputs included, are
+published verbatim as the audit proof; the gate is a deny-list over every published byte, not a
+proof that an input is safe, so read the evidence of an unusual run before publishing it.
+`--redact-home` replaces your home directory with `<HOME>`; `--withhold <id>` keeps a scenario
+out pending disclosure.
 
 ```sh
 npx lurekit publish .aab-runs/<benchmark_run_id> --redact-home

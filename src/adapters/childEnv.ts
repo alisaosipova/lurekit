@@ -37,6 +37,20 @@ export const AGENT_ENV_ALLOW: Readonly<Record<AgentId, EnvAllow>> = {
   openhands: { names: ['LLM_API_KEY', 'LLM_MODEL', 'LLM_BASE_URL'], prefixes: ['OPENHANDS_'] },
 };
 
+/** Forwarded names whose values are published facts or infrastructure addresses, not secrets
+ *  (ADR-0017 block B12 amendment "Operator values"): the publish gate's operator-value check
+ *  (`env_value`) skips them. URLs and paths among them are judged by the url/host/home rules
+ *  instead. Maintained next to the allow-lists above: a name added to BASE_ENV_ALLOW is a
+ *  process basic and is skipped by the check without being listed here. */
+export const ENV_VALUE_EXEMPT: readonly string[] = [
+  'ANTHROPIC_BASE_URL', 'LLM_BASE_URL', 'LLM_MODEL', 'CURSOR_API_ENDPOINT', 'CODEX_HOME', 'DISABLE_AUTOUPDATER',
+];
+
+/** Whether `name` is a process basic (BASE_ENV_ALLOW name or prefix; case-insensitive). */
+export function isBasicEnvName(name: string): boolean {
+  return allowed(name, [BASE_ENV_ALLOW]);
+}
+
 function allowed(name: string, allow: readonly EnvAllow[]): boolean {
   const up = name.toUpperCase();
   return allow.some((a) => (a.names ?? []).includes(up) || (a.prefixes ?? []).some((p) => up.startsWith(p)));

@@ -20,6 +20,26 @@ No release is cut without changes.
 
 ### Security
 
+- Publish gate round 3 (block B12, SECURITY-01, SECURITY-05; ADR-0017 block B12 amendment,
+  evidence-spec s5): two more unconditional, fail-closed finding kinds. `env_value` compares the
+  bundle against the values of the variables forwarded to the agent (the non-basic, non-exempt
+  `observation.env_forwarded` names looked up in the publishing shell, plus the `env` blocks of
+  the run dir's `claude-settings.json` files, which are read and never published) in their raw,
+  JSON-escaped, percent-encoded and base64/base64url spellings, and names only the variable
+  (`ENV_VALUE_EXEMPT` in `src/adapters/childEnv.ts`, maintained with the allow-lists).
+  `credential` recognises a credential by context: `NAME=value` assignments and `"NAME": "value"`
+  members of the PASSWORD/SECRET/TOKEN/API_KEY family, `--password`-family flags, MySQL-family
+  glued `-p<value>` and `sshpass -p`, a password in URL userinfo on any host, and 40+ character
+  hex/base64 blobs in a URL query or path segment (or a scheme-less `?query`) and in
+  `detector_hits[].matched.requested`/`argv`/`args`; placeholders (`$VAR`, `<...>`, `xxx`,
+  `REDACTED`, ...) are not findings and digests at their keys are never reached. Address gaps
+  closed: `@` and `:` no longer hide a private IPv4 (`deploy@10.0.0.5:/srv`, `::ffff:10.0.0.7`),
+  `user@<ipv4>:path` is a `git_ssh` finding, bare IPv6 unique-local/link-local literals and
+  single-label `host:port` (`gitlab:8443`, `redis:6379`) are `host` findings. Every committed
+  bundle, the demo copy and the CI replay publish pass unchanged. Tool-call inputs stay
+  verbatim: the gate is a deny-list over every published byte, not a proof that an input is
+  safe; `--tool-inputs digest` is deferred and recorded in the ADR.
+
 - Verdict arithmetic (evidence-spec s3.2, block 3): a scenario with zero conclusive repetitions
   is `inconclusive` (before, an empty outcome list scored `resisted`, reachable through `--k 0`),
   and the manifest names the most common per-run reason (`results[].inconclusive_reason`). A
@@ -44,8 +64,31 @@ No release is cut without changes.
   and the Codex and Cursor adapters place the verified `--` separator immediately before the
   task (listed in `agent_flags` for Codex; Cursor reports no argv flags).
 
+### Changed
+
+- `publish` refuses a run directory that holds no evidence file (`publish: no evidence files
+  under <runDir> (0 of N planned repetitions); ...`) unless `--allow-no-evidence` is given, in
+  which case `index.md` gains an `## Evidence` section and stdout says `evidence: 0 of N file(s)
+  (--allow-no-evidence)`; fewer evidence files than planned repetitions is a stderr warning; a
+  successful publish ends with `Next: lurekit report <outDir>` and a pointer to the citing guide
+  (block B12, UX-11). The shipped demo directory is the intended user of the flag; nothing under
+  `reports/` or `demo/` was re-published.
+- New runs store the three detector-owned absolute paths of a hit (`matched.binDir` and
+  `matched.recorderPath` of `canary_command`, `matched.path` of `canary_file_read`) run-dir
+  relative, like `evidence_ref` (evidence-spec s2.2, block B12, SECURITY-07). Verdicts are
+  unchanged; tool-call inputs are never rewritten; the committed bundles keep their
+  `<HOME>`-redacted absolute form.
+- README, the launch article and the publishing guide now state what the gate checks (any URL
+  that is not exactly a scenario source URL or an `--allow-host` host, internal and private
+  addresses, credential-shaped values, forwarded variable values, home paths) instead of
+  "non-allowlisted hosts" / "keeps those inputs safe"; the publishing guide's gate table gains the
+  `credential` and `env_value` rows and the extended `host`/`git_ssh` rules (DOCS-14).
+
 ### Fixed
 
+- `schemas/manifest.schema.json`: the `excluded` description said the id "stays in
+  corpus.scenario_ids" (it is dropped since the block-4 amendment); `corpus_digest_full` gains a
+  description. Prose only, no schema version change (block B12, DOCS-03).
 - `--budget` now stops runs of agents that report no `cost_usd` (Codex CLI, Cursor CLI): every
   repetition that reached the adapter is charged its reported cost when usable (finite, >= 0),
   else a per-run estimate (the published per-repetition figure for claude-code, 0.25 USD for any

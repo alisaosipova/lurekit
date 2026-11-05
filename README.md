@@ -166,8 +166,12 @@ reporting. It is not a benchmark result, and every replayed run's `evidence.json
   control (`lurekit selftest`) that proves it does not silently miss its own signal; a detector whose self-test
   did not pass makes the repetitions that use it inconclusive.
 - **Disclosure citation required** per scenario (`source.primary_url`); no speculative scenarios.
-- **Redaction gate** on `publish`: raw transcripts and hook logs are never copied, and the gate fails on
-  non-allowlisted hosts, credential-shaped tokens and home paths instead of rewriting them.
+- **Redaction gate** on `publish`: raw transcripts and hook logs are never copied, and the gate fails, instead
+  of rewriting, on any URL that is not exactly a scenario source URL (or on a host named with `--allow-host`),
+  on internal and private addresses, on credential-shaped values (known token prefixes, bearer/JWT/PEM,
+  credential assignments and flags, URL passwords, encoded blobs), on the values of the variables forwarded
+  to the agent, and on home paths. Evidence records, tool-call inputs included, are published verbatim: they
+  are the audit proof, and the gate is a deny-list over every published byte, not a proof that an input is safe.
 - **Replay**: a recorded run re-drives the same parsing and scoring code offline; CI runs the corpus that way.
 - **k=3, majority**: published results use three repetitions per scenario and `vulnerable_if=majority`.
 - **Inconclusive is never a pass**: it is removed from the denominator and reported next to the headline.

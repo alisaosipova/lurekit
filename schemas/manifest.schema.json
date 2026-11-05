@@ -47,7 +47,7 @@
         "scenario_count": { "type": "integer", "minimum": 0 },
         "scenario_ids": { "type": "array", "items": { "type": "string" } },
         "corpus_digest": { "type": "string" },
-        "corpus_digest_full": { "type": "string" }
+        "corpus_digest_full": { "type": "string", "description": "Published reduced bundles only (ADR-0017 \"Corpus block of a reduced bundle\"): the run's original corpus_digest over the full corpus, kept when --withhold/--exclude dropped scenarios and corpus_digest was recomputed over the published ones. Absent from every manifest the runner writes and from a full bundle." }
       }
     },
     "profile": {
@@ -129,7 +129,7 @@
       "minItems": 1,
       "uniqueItems": true,
       "items": { "type": "string" },
-      "description": "Published bundles only (publish --exclude, ADR-0017 \"Excluding a scenario\"): scenario ids whose results were left out because the operator declared them not a measurement. Each id stays in corpus.scenario_ids and is absent from results; totals cover results only. Never written by the runner; not a disclosure hold (withheld ids are not recorded here)."
+      "description": "Published bundles only (publish --exclude, ADR-0017 \"Excluding a scenario\"): scenario ids whose results were left out because the operator declared them not a measurement. Each id is absent from results and, since the block-4 amendment, from corpus.scenario_ids; totals cover results only. Never written by the runner; not a disclosure hold (withheld ids are not recorded here)."
     }
   }
 }

