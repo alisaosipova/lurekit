@@ -329,6 +329,9 @@ per-run value this sensor watches — never a literal stand-in. Keys a fixture m
 `canary_command` → `commandPath` (absolute path of the per-run no-op launcher under
 `<runDir>/canary_bin`; `.cmd` on Windows; the bin dir is not put on PATH) plus `command`,
 `binDir`, `recorderPath`; `canary_file_read` → `path` (absolute decoy file path), `marker`;
+(these canary values are absolute at hand-off, so a fixture can plant them; the evidence record
+stores `matched.binDir`, `matched.recorderPath` and `matched.path` run-dir-relative, s2.2,
+block B12 amendment)
 `canary_egress_http` → `url`, `host`, `token` (registry_fetch mode, §1.2d: `package`,
 `registry_access_log`); `canary_mcp_tool` → `tool`, `token`,
 `serverRef`, `recorderPath` (MCP fixtures launch the inert server with this `token` and
@@ -733,7 +736,9 @@ files. An explicit `--workdir <base>` relocates only the workdirs, to `<base>/<s
                "hooks": "…", "skills": [], "settings_digest": "sha256",
                "setting_sources": ["user"] },   // §4.3: only when the profile sets it
   "forbidden_effect": { "detector": "canary_mcp_tool", "match": { "tool": "aab_canary_record" } },
-  "detector_hits": [ /* DetectorHit[] from §1, with evidence_ref paths relative to this dir */ ],
+  "detector_hits": [ /* DetectorHit[] from s1, with evidence_ref paths relative to this dir; so are
+                        matched.binDir / matched.recorderPath (canary_command) and matched.path
+                        (canary_file_read), block B12 */ ],
   "benign": { "check": "text_in_transcript", "ok": true, "evidence_ref": "…" },
   "observation": { "raw_events_path": "claude-stream.jsonl", "tool_calls": [ /* ToolCall[] */ ],
                    "exit_code": 0, "cost_usd": 0.0, "effective_model": "…",
@@ -834,6 +839,17 @@ reached the adapter). `resisted_kind` is written into every
 repetition record whose `outcome` is `resisted` (`"denied"` when `attempted_forbidden` is true,
 else `"not_attempted"`, §3.1), so a reader never re-derives it from the runner rule; it is
 absent for every other outcome. Both are optional in `schemas/evidence.schema.json`.
+
+**Relative detector paths (block B12 amendment, 2026-11-05; ADR-0017 block B12).** Besides
+`evidence_ref`, the runner relativises at write time the three detector-owned absolute run-dir
+paths a hit carries: `matched.binDir` and `matched.recorderPath` (`canary_command`) and
+`matched.path` (`canary_file_read`, captured-output and atime branches). Strings only, and only
+when the value lies under the run dir; a decoy under an explicit `--workdir` base keeps its
+absolute path, like `workdir` above. Nothing else in `matched` and nothing in
+`observation.tool_calls[].input` is rewritten (s1.4: the inputs are what the agent did). The
+verdict does not depend on these strings, so recordings replay to the same outcomes; records
+written before this amendment (the committed bundles) keep their absolute, `<HOME>`-redacted
+form and are never edited.
 
 All timestamps that must be reproducible are durations (ms since run start), not wall-clock.
 `scenario_version` and `settings_digest` are content hashes so a reader can confirm the exact
@@ -1475,6 +1491,23 @@ rejects (throws before provisioning anything, no agent spawned) when a caller by
   canary values including every `aab-<word>-<hex>`) and the opt-in `--redact-home` are listed in
   ADR-0017. The bundle is written atomically (`<out>.partial`, then rename) and the run dir is
   read without following symlinks.
+- **Publish gate, block B12 amendment (ADR-0017, 2026-11-05).** Two more kinds, both
+  unconditional and fail-closed: `env_value` (the value of a variable forwarded to the agent,
+  taken from the publishing shell for the non-basic names in `observation.env_forwarded` and
+  from the harness settings files' `env` blocks in the run dir, looked for raw, JSON-escaped,
+  percent-encoded and base64/base64url; the finding names the variable, never the value; values
+  under 8 characters and the published model / agent version are skipped) and `credential` (a
+  credential recognised by context: `NAME=value` and `"NAME": "value"` with a
+  PASSWORD/SECRET/TOKEN/API_KEY-family name, `--password`-family flags, MySQL-family glued
+  `-p<value>` and `sshpass -p`, a password in URL userinfo on any host, and a 40+ character
+  hex or base64 blob in a URL query/path or in `detector_hits[].matched.requested`/`argv`/`args`).
+  The `host` kind also covers private IPv6 (ULA, link-local) literals and single-label
+  `host:port`, and `git_ssh` covers `user@<ipv4>:path`; `@` and `:` no longer hide a private IPv4
+  (`deploy@10.0.0.5:/srv`, `::ffff:10.0.0.7`). Tool-call inputs stay verbatim: the gate is a
+  deny-list over every published byte, not a proof that an input is safe. A run dir with no
+  evidence file is refused unless `--allow-no-evidence` (then `index.md` says so); fewer
+  evidence files than planned repetitions is a warning. New runs store the three detector-owned
+  paths of s2.2 run-dir-relative.
 - **Child env (ADR-0008, block-4 amendment).** Agent, MCP fixture and detector children get an
   allow-listed env, never the whole operator environment; agent stderr files are capped at
   1 MiB; `<agent>-argv.json` stores the task as its sha256.

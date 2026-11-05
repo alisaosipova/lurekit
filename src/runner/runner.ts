@@ -2073,8 +2073,22 @@ export function perRunWorkdir(
   return path.join(runDir, WORKDIR_NAME);
 }
 
-function relativiseHit(hit: DetectorHit, runDir: string): DetectorHit {
-  return { ...hit, evidence_ref: relativisePath(hit.evidence_ref, runDir) };
+/** Detector-owned `matched` keys that hold an absolute run-dir path (`binDir`, `recorderPath` of
+ *  canary_command; `path` of canary_file_read): stored run-dir-relative like evidence_ref
+ *  (evidence-spec s2.2, block B12 amendment). Strings only, and only when the value lies under
+ *  the run dir; anything else in `matched` is left as the detector reported it. */
+const MATCHED_PATH_KEYS: readonly string[] = ['binDir', 'recorderPath', 'path'];
+
+export function relativiseHit(hit: DetectorHit, runDir: string): DetectorHit {
+  const matched: Record<string, unknown> = { ...hit.matched };
+  for (const key of MATCHED_PATH_KEYS) {
+    const v = matched[key];
+    if (typeof v !== 'string' || !path.isAbsolute(v)) continue;
+    const rel = path.relative(runDir, v);
+    if (rel === '' || rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) continue;
+    matched[key] = rel;
+  }
+  return { ...hit, matched, evidence_ref: relativisePath(hit.evidence_ref, runDir) };
 }
 
 function relativisePath(ref: string, runDir: string): string {

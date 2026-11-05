@@ -56,6 +56,17 @@
 // published manifest records the ids in a top-level `excluded` array. An id may not be both
 // withheld and excluded; an unknown id fails the publish.
 //
+// Block B12 (ADR-0017 amendment 2026-11-05, evidence-spec s5): two more unconditional gate kinds.
+// `env_value` compares the bundle against the values of the variables forwarded to the agent
+// (the non-basic `observation.env_forwarded` names looked up in the publishing shell, plus the
+// `env` blocks of the harness settings files in the run dir) in their raw, JSON-escaped,
+// percent-encoded and base64/base64url spellings, and names only the variable. `credential`
+// recognises a credential by its context (assignment, JSON member, --password-family flag,
+// MySQL-family glued -p / sshpass -p, URL userinfo password, 40+ character hex/base64 blob in a
+// URL query/path or in detector_hits[].matched.requested/argv/args). The address rules cover
+// private IPv6, `user@<ipv4>:` remotes and single-label `host:port`. A run dir without evidence
+// files is refused unless --allow-no-evidence; fewer files than planned repetitions is a warning.
+//
 // Structure: planPublish() / scanForLeaks() / renderIndex() are pure (data in, data out);
 // readRunDir() (lstat, never follows a symlink) and writeBundle() (atomic: <out>.partial, then
 // rename) are the only I/O; cmdPublish() in src/cli.ts glues them.
@@ -65,6 +76,7 @@ import path from 'node:path';
 
 import type { EvidenceRecord, RunManifest } from '../runner/types.js';
 import { extractHost, findSecretShapes } from '../fixtures/fixture.js';
+import { ENV_VALUE_EXEMPT, isBasicEnvName } from '../adapters/childEnv.js';
 import type { Scenario } from '../scenario/types.js';
 import { corpusDigest } from '../scenario/digest.js';
 import { report, buildScore, type EvidenceLookup } from './index.js';
@@ -88,6 +100,19 @@ export interface RunDirContents {
    *  values that appear in a transcript although no detector hit recorded them (ADR-0017 "Harness
    *  canary tokens"). Optional: absent = harvest from the bundle alone. */
   canaryMeta?: BundleFile[];
+  /** The `env` values of the harness settings files of the kept repetitions
+   *  (`<scenario>/<rep>/claude-settings.json`, ADR-0017 block B12 "Operator values"). Never
+   *  published: read only so a value the operator handed the agent through its settings is
+   *  known to the `env_value` check. `rel` names the file so a withheld/excluded scenario's
+   *  values are dropped with it. Optional: absent = the publishing shell is the only source. */
+  settingsEnv?: SettingsEnvEntry[];
+}
+
+/** One operator-declared environment value harvested from a harness settings file. */
+export interface SettingsEnvEntry {
+  rel: string; // <scenario>/<rep>/<file>
+  name: string;
+  value: string;
 }
 
 export interface PublishPolicy {
@@ -113,6 +138,16 @@ export interface PublishPolicy {
   exclude?: string[];
   /** ADR-0021: scenario id -> attack surface for report.md's plain-language layers. */
   surfaceOf?: SurfaceLookup;
+  /** The publishing process environment (a copy of process.env, or a test's map), ADR-0017
+   *  block B12 "Operator values": the value of every non-basic, non-exempt name in the union of
+   *  `observation.env_forwarded` is looked for in the bundle (`env_value`). Absent = the
+   *  settings files are the only source. */
+  operatorEnv?: Readonly<Record<string, string | undefined>>;
+  /** --allow-no-evidence: publish a run dir that holds no evidence file (report-only copy, e.g.
+   *  the shipped demo). Without it such a run is refused (block B12 "Evidence count"). */
+  allowNoEvidence?: boolean;
+  /** How the run dir is named in messages (the path the operator typed). */
+  runDir?: string;
 }
 
 /** The fixed index.md text for a withheld scenario. */
@@ -140,6 +175,8 @@ export type LeakKind =
   | 'bearer' // Bearer credential
   | 'jwt' // JSON Web Token
   | 'private_key' // PEM private-key header
+  | 'credential' // a credential recognised by context (assignment, flag, URL userinfo, encoded blob)
+  | 'env_value' // the value of a variable forwarded to the agent (named, never shown)
   | 'home_path'
   | 'home_user';
 
@@ -167,8 +204,13 @@ export type PublishPlan =
       withheld: string[];
       /** Scenario ids excluded via --exclude (in manifest order; empty = none). */
       excluded: string[];
+      /** Non-fatal notes for stderr (block B12: fewer evidence files than planned repetitions). */
+      warnings: string[];
+      /** Evidence files in the bundle versus planned repetitions of the published results. */
+      evidenceFound: number;
+      evidenceExpected: number;
     }
-  | { ok: false; benchmarkRunId?: string; error?: string; leaks: Leak[] };
+  | { ok: false; benchmarkRunId?: string; error?: string; next?: string; leaks: Leak[] };
 
 /** URLs the tool itself emits (SARIF $schema and driver.informationUri, and the repository file
  *  URLs a Markdown report cites, ADR-0021 amendment). They are exact strings, not hosts, so
@@ -428,13 +470,15 @@ const INTERNAL_HOST_RE = new RegExp(
   `(?<![A-Za-z0-9._%+@/:\\-])((?:${LABEL}\\.)+(?:${GATE_INTERNAL_TLDS.map((t) => t.replace('.', '\\.')).join('|')}))(?![A-Za-z0-9-])(?!\\.[A-Za-z0-9])`,
   'gi',
 );
-/** A scheme-less IPv4 literal with a port (`10.0.0.5:22`); loopback and 0.0.0.0 are filtered. */
-const IPV4_PORT_RE = /(?<![A-Za-z0-9._%+@/:\\-])((?:\d{1,3}\.){3}\d{1,3}):\d{1,5}(?!\d)/g;
+/** A scheme-less IPv4 literal with a port (`10.0.0.5:22`); loopback and 0.0.0.0 are filtered.
+ *  Block B12: `@` and `:` are not in the lookbehind (scheme URLs are blanked from the view before
+ *  this runs, so they only hid `deploy@10.0.0.5:/srv` and `::ffff:10.0.0.7`). */
+const IPV4_PORT_RE = /(?<![A-Za-z0-9._%+/\\-])((?:\d{1,3}\.){3}\d{1,3}):\d{1,5}(?!\d)/g;
 /** A scheme-less RFC 1918 / CGNAT / link-local IPv4 literal, with or without a port (ADR-0017
  *  "Gate patterns" block 4 amendment): an internal address is a finding on its own. Not part of
  *  a longer dotted number (`1.10.0.0.5`, `10.0.0.5.1`). */
 const IPV4_PRIVATE_RE =
-  /(?<![A-Za-z0-9._%+@/:\\-])(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|169\.254\.\d{1,3}\.\d{1,3}|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3})(?![0-9]|\.[0-9])/g;
+  /(?<![A-Za-z0-9._%+/\\-])(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|169\.254\.\d{1,3}\.\d{1,3}|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3})(?![0-9]|\.[0-9])/g;
 /** A protocol-relative reference `//host.tld` (public or internal TLD) not preceded by a scheme,
  *  path or word character. */
 const PROTO_REL_HOST_RE = new RegExp(
@@ -443,12 +487,228 @@ const PROTO_REL_HOST_RE = new RegExp(
 );
 /** scp-style git remote `user@host:path` (git@github.com:org/repo.git). */
 const GIT_SSH_RE = new RegExp(`(?<![A-Za-z0-9._%+-])[A-Za-z0-9._-]+@((?:${LABEL}\\.)+[A-Za-z]{2,}):(?=[A-Za-z0-9~._/-])`, 'g');
+/** scp-style remote on an IPv4 literal, `user@<ipv4>:path` (`deploy@10.0.0.5:/srv`,
+ *  `backup@10.20.30.40:/mnt`), block B12: GIT_SSH_RE needs an alphabetic TLD. Loopback and
+ *  `--allow-host` hosts are skipped by the caller. */
+const GIT_SSH_IPV4_RE = /(?<![A-Za-z0-9._%+-])[A-Za-z0-9._-]+@((?:\d{1,3}\.){3}\d{1,3}):(?=[A-Za-z0-9~._/-])/g;
+/** A bare IPv6 unique-local (`fc00::/7`) or link-local (`fe80::/10`) literal, with or without
+ *  brackets and a port, block B12: `fd12:3456::1`, `fe80::1`, `[fd12::1]:22`. Global IPv6
+ *  literals stay out (same budget as public IPv4); `::1` is loopback. Not part of a longer
+ *  hex/dotted token. */
+const IPV6_PRIVATE_RE = /(?<![A-Za-z0-9:.-])\[?((?:f[cd][0-9a-f]{2}|fe[89ab][0-9a-f])(?::[0-9a-f]{0,4}){2,7})\]?(?::\d{1,5})?(?![A-Za-z0-9.-])/gi;
+/** A single-label host with a port (`gitlab:8443`, `redis:6379`, `db:5432`), block B12, decided
+ *  against the FP budget (zero matches over the committed bundles, demo, recordings, corpus and
+ *  guides): a label of 2-63 characters starting with a letter, `:`, 2-5 digits; preceded by the
+ *  start, whitespace, a quote, a backtick, `=`, `(` or `[`; followed by whitespace, a quote, a
+ *  backtick, `/`, `)`, `,`, `;`, `]` or the end. So `at 12:30`, `C:123`, `retry:3`, `sha256:ab`,
+ *  `"port":8080` and `file.ts:12` are not matches. `localhost` and `--allow-host` labels are
+ *  skipped by the caller. */
+const SINGLE_LABEL_PORT_RE = /(?<![^\s"'`=(\[])([A-Za-z][A-Za-z0-9-]{1,62}):(\d{2,5})(?=[\s"'`/),;\]]|$)/g;
 /** An email address: local part, `@`, a dotted domain ending in an alphabetic TLD. A git remote
  *  (`@host:path`) is reported by GIT_SSH_RE instead. */
 const EMAIL_RE = new RegExp(
   `(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@((?:${LABEL}\\.)+[A-Za-z]{2,})(?![A-Za-z0-9-])(?!:[A-Za-z0-9~._/-])`,
   'g',
 );
+
+// --- credential shapes (block B12; gate-only, separate from the fixture inertness list) ---------
+
+/** A value that is a placeholder, not a credential (ADR-0017 block B12 "Credential shapes"):
+ *  starts with `$`, `<`, `*`, `{`, `%`, `xxx`, `...` or one of the words REDACTED, CHANGEME,
+ *  EXAMPLE, PLACEHOLDER (any case). */
+export function isPlaceholderValue(value: string): boolean {
+  return /^(?:[$<*{%]|xxx|\.\.\.|redacted|changeme|example|placeholder)/i.test(value);
+}
+
+/** The credential-bearing name family of the assignment and JSON-member shapes. */
+const CRED_NAME = '(?:PASSWORD|PASSWD|SECRET|TOKEN|API_KEY|APIKEY|ACCESS_KEY|PRIVATE_KEY|CREDENTIALS?)';
+
+/** One context shape: the regex (global), which capture group holds the value (placeholder
+ *  check) and how the finding is worded from the match (never the value). */
+interface CredentialShape {
+  name: string;
+  re: RegExp;
+  value: number;
+  detail: (m: RegExpMatchArray) => string;
+}
+
+/** The credential shapes the gate recognises by context rather than by token prefix (ADR-0017
+ *  block B12 "Credential shapes"; evidence-spec s5). Kept apart from the fixture inertness
+ *  `SECRET_PATTERNS` (src/fixtures/fixture.ts): these are assignment/flag/URL contexts, and lure
+ *  prose such as `TOKEN=` followed by a canary must stay acceptable in a fixture (the canary
+ *  rewrite turns such a value into `<canary-token-N>` before the gate anyway). Scanned per line
+ *  and over the joined view; the detail names the shape, never the value. The values exclude
+ *  whitespace, quotes and backslashes (a JSON escape ends a value). */
+export const CREDENTIAL_SHAPES: readonly CredentialShape[] = [
+  {
+    // 1. NAME=value: an upper-case name of the family, bounded by non-word characters, `=`, and
+    //    an 8+ character value (optionally quoted). `export`/`set`/`env` prefixes need nothing.
+    name: 'assignment',
+    re: new RegExp(`(?<![A-Za-z0-9_])([A-Z0-9_]*${CRED_NAME}[A-Z0-9_]*)=["']?([^\\s"'\\\\]{8,})`, 'g'),
+    value: 2,
+    detail: (m) => `credential assignment ${m[1]}=... (value redacted)`,
+  },
+  {
+    // 2. "NAME": "value", the same family case-insensitively, so a settings `env` block or a
+    //    .env file the agent printed is caught in its JSON spelling (raw or escaped quotes).
+    name: 'json_member',
+    re: new RegExp(`\\\\?"([A-Za-z0-9_-]*${CRED_NAME}[A-Za-z0-9_-]*)\\\\?"\\s*:\\s*\\\\?"([^\\s"\\\\]{8,})\\\\?"`, 'gi'),
+    value: 2,
+    detail: (m) => `credential JSON member "${m[1]}" (value redacted)`,
+  },
+  {
+    // 3. --password-family flag followed by `=` or whitespace and a 4+ character value; not
+    //    preceded by a word character or `-` (`canary-token rewrite` is prose). A value that
+    //    starts with `-` is the next flag, not a value.
+    name: 'flag',
+    re: /(?<![A-Za-z0-9_-])(--(?:password|passwd|secret|token|api-?key|access-?key))(?:=|\s+)["']?(?!-)([^\s"'\\]{4,})/gi,
+    value: 2,
+    detail: (m) => `credential flag ${m[1].toLowerCase()} (value redacted)`,
+  },
+  {
+    // 4a. MySQL-family glued -p<value> on the same command segment (no `|`, `;`, `&` or line
+    //     break between the command word and the flag). A bare `-p ` (`claude -p <task>`,
+    //     `mkdir -p`) is not a match.
+    name: 'mysql_p',
+    re: /\b(mysql|mysqladmin|mysqldump|mysqlsh|mariadb|mariadb-dump)\b[^\n|;&]*?\s-p([^\s"'\\]{2,})/g,
+    value: 2,
+    detail: (m) => `credential glued -p<value> after ${m[1]} (value redacted)`,
+  },
+  {
+    // 4b. sshpass -p <value> (glued or spaced).
+    name: 'sshpass_p',
+    re: /\bsshpass\b[^\n|;&]*?\s-p\s*["']?([^\s"'\\]{2,})/g,
+    value: 1,
+    detail: () => 'credential sshpass -p (value redacted)',
+  },
+  {
+    // 5. scheme://user:password@host with a non-empty password, on every host (loopback and
+    //    allowed hosts included: the host rules skip loopback, this one does not).
+    name: 'url_userinfo',
+    re: /[A-Za-z][A-Za-z0-9+.-]+:\/\/([^\s/:@"'<>`\\]*):([^\s/@"'<>`\\]+)@(\[[^\]\s]+\]|[^\s/:?#"'<>`\\]+)/g,
+    value: 2,
+    detail: (m) => `credential in URL userinfo on host "${m[3].toLowerCase()}"`,
+  },
+];
+
+/** A 40+ character hex run, or a 40+ character base64/base64url run (optional `=` padding) that
+ *  carries an upper-case letter, a lower-case letter and a digit and no `--` (Markdown anchors
+ *  and slugs do not qualify). Block B12 "Encoded blob". */
+export function hasEncodedBlob(text: string): boolean {
+  if (/[0-9a-f]{40,}/i.test(text)) return true;
+  for (const m of text.matchAll(/[A-Za-z0-9+/_-]{40,}=*/g)) {
+    const run = m[0];
+    if (run.includes('--')) continue;
+    if (/[A-Z]/.test(run) && /[a-z]/.test(run) && /[0-9]/.test(run)) return true;
+  }
+  return false;
+}
+
+/** Whether a URL (comparison form) carries an encoded blob in its query string or in a path
+ *  segment (the fragment is not looked at). */
+function urlHasEncodedBlob(url: string): boolean {
+  const m = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/?#]*([^#]*)/.exec(url);
+  if (!m) return false;
+  const q = m[1].indexOf('?');
+  const pathPart = q === -1 ? m[1] : m[1].slice(0, q);
+  const query = q === -1 ? '' : m[1].slice(q + 1);
+  if (pathPart.split('/').some((seg) => hasEncodedBlob(seg))) return true;
+  return query.length > 0 && hasEncodedBlob(query);
+}
+
+/** A scheme-less query string: `?` followed by query characters up to whitespace, a quote,
+ *  `<>`, a backtick or a backslash (a JSON escape ends it). */
+const SCHEMELESS_QUERY_RE = /\?([^\s"'<>`\\?#]+)/g;
+
+/** Detector-owned `matched` keys read structurally from each evidence record for the encoded
+ *  blob rule (b): `requested` (canary_egress_http), `argv` (canary_command), `args`
+ *  (canary_mcp_tool). Digest keys live elsewhere and are never reached. */
+const BLOB_MATCHED_KEYS: readonly string[] = ['requested', 'argv', 'args'];
+
+/** Every string found (recursively) under `value`. */
+function stringsOf(value: unknown, out: string[] = []): string[] {
+  if (typeof value === 'string') out.push(value);
+  else if (Array.isArray(value)) for (const v of value) stringsOf(v, out);
+  else if (value && typeof value === 'object') for (const v of Object.values(value as Record<string, unknown>)) stringsOf(v, out);
+  return out;
+}
+
+/** The `matched.<key>` names of an evidence record's detector hits whose strings carry an
+ *  encoded blob (rule b), in first-seen order. `text` must be an evidence record; anything that
+ *  is not valid JSON yields nothing (the gate's text rules still apply to it). */
+export function blobMatchedKeys(text: string): string[] {
+  let rec: unknown;
+  try {
+    rec = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  const hits = (rec as { detector_hits?: unknown })?.detector_hits;
+  if (!Array.isArray(hits)) return [];
+  const out: string[] = [];
+  for (const h of hits) {
+    const matched = (h as { matched?: unknown })?.matched;
+    if (!matched || typeof matched !== 'object') continue;
+    for (const key of BLOB_MATCHED_KEYS) {
+      if (out.includes(key)) continue;
+      if (stringsOf((matched as Record<string, unknown>)[key]).some(hasEncodedBlob)) out.push(key);
+    }
+  }
+  return out;
+}
+
+// --- operator values (block B12, pure) ------------------------------------------------------
+
+/** The shortest operator value the `env_value` check looks for (ADR-0017 block B12): shorter
+ *  values collide with ordinary words. */
+export const ENV_VALUE_MIN_LEN = 8;
+
+/** The spellings an operator value can take in published text: raw, JSON-escaped, percent-encoded
+ *  (encodeURIComponent), base64 and base64url, each with and without padding. Distinct values
+ *  only. */
+export function envValueSpellings(value: string): string[] {
+  const b64 = Buffer.from(value, 'utf8').toString('base64');
+  const b64url = Buffer.from(value, 'utf8').toString('base64url');
+  return [
+    ...new Set([
+      value,
+      JSON.stringify(value).slice(1, -1),
+      encodeURIComponent(value),
+      b64,
+      b64.replace(/=+$/, ''),
+      b64url,
+      `${b64url}${'='.repeat((4 - (b64url.length % 4)) % 4)}`,
+    ]),
+  ];
+}
+
+/** One `env_value` leak per file and name whose value (any spelling, any scan view) is a
+ *  substring of the file. Values shorter than ENV_VALUE_MIN_LEN and values in `skip` (the
+ *  published model and agent version) are not looked for. The finding names the variable, never
+ *  the value. Pure. */
+export function findOperatorValues(
+  files: BundleFile[],
+  values: ReadonlyArray<{ name: string; value: string }>,
+  skip: ReadonlySet<string> = new Set(),
+): Leak[] {
+  const leaks: Leak[] = [];
+  const seen = new Set<string>();
+  const candidates = values.filter((v) => v.value.length >= ENV_VALUE_MIN_LEN && !skip.has(v.value));
+  if (candidates.length === 0) return leaks;
+  for (const f of files) {
+    const views = scanViews(f.text);
+    for (const { name, value } of candidates) {
+      const key = `${f.rel}\u0000${name}`;
+      if (seen.has(key)) continue;
+      const spellings = envValueSpellings(value);
+      if (views.some((v) => spellings.some((sp) => v.includes(sp)))) {
+        seen.add(key);
+        leaks.push({ file: f.rel, kind: 'env_value', detail: `value of environment variable ${name} present (value redacted)` });
+      }
+    }
+  }
+  return leaks;
+}
 
 /** What the gate lets through besides loopback and the tool's intrinsic URLs. */
 export interface GateAllow {
@@ -708,6 +968,11 @@ export function scanForLeaks(files: BundleFile[], allow: ReadonlySet<string> | G
         // `file:///abs/path` has no host: the home-path patterns below judge the path.
         if (scheme === 'file' && /^file:[\\/]{3}/i.test(raw)) continue;
         const host = extractHost(url);
+        // Block B12 "Encoded blob" (a): a 40+ character blob in the query or a path segment of
+        // any URL, loopback included, except the exact source URLs and the intrinsic URLs.
+        if (!allowedUrls.has(normalizeGateUrl(url)) && urlHasEncodedBlob(url)) {
+          report('credential', 'blob:url', 'encoded blob in URL query or path');
+        }
         if (hostOk(host)) continue;
         if (scheme === 'http' || scheme === 'https') {
           if (allowedUrls.has(normalizeGateUrl(url))) continue;
@@ -722,6 +987,11 @@ export function scanForLeaks(files: BundleFile[], allow: ReadonlySet<string> | G
       }
       // A view without the scheme URLs, so their hosts and userinfo are not seen again below.
       const rest = view.replace(URL_RE, ' ');
+      // Block B12 "Encoded blob" (a), scheme-less spelling: a `?query` string outside any scheme
+      // URL (`/c/tok?k=<blob>` in a tool-call input) carrying a blob.
+      for (const m of rest.matchAll(SCHEMELESS_QUERY_RE)) {
+        if (hasEncodedBlob(m[1])) report('credential', 'blob:query', 'encoded blob in URL query or path');
+      }
       for (const m of rest.matchAll(GIT_SSH_RE)) {
         const host = m[1].toLowerCase();
         if (!hostOk(host)) report('git_ssh', host, `scp-style git remote on host "${host}"`);
@@ -750,6 +1020,19 @@ export function scanForLeaks(files: BundleFile[], allow: ReadonlySet<string> | G
         const host = m[1];
         if (!hostOk(host) && host !== '0.0.0.0') report('host', host, `scheme-less IP address with port "${host}"`);
       }
+      // Block B12 "Address gaps".
+      for (const m of rest.matchAll(GIT_SSH_IPV4_RE)) {
+        const host = m[1];
+        if (!hostOk(host)) report('git_ssh', host, `scp-style remote on host "${host}"`);
+      }
+      for (const m of rest.matchAll(IPV6_PRIVATE_RE)) {
+        const host = m[1].toLowerCase();
+        if (!hostOk(host)) report('host', host, `private IPv6 address "${host}"`);
+      }
+      for (const m of rest.matchAll(SINGLE_LABEL_PORT_RE)) {
+        const host = m[1].toLowerCase();
+        if (!hostOk(host)) report('host', host, `single-label host with port "${host}"`);
+      }
     }
     // Credential shapes: one list, owned by the fixture inertness contract. Scan per line so a
     // file naming several families reports each; the value is never echoed.
@@ -767,6 +1050,28 @@ export function scanForLeaks(files: BundleFile[], allow: ReadonlySet<string> | G
     }
     for (const [name, kind] of families) {
       leaks.push({ file: f.rel, kind, detail: `${name} (value redacted)` });
+    }
+    // Credential shapes by context (block B12): per line and over the joined view, like the
+    // token families; placeholders are not findings; the detail never carries the value.
+    const shapes = new Set<string>();
+    const scanShapes = (text: string): void => {
+      for (const shape of CREDENTIAL_SHAPES) {
+        for (const m of text.matchAll(shape.re)) {
+          if (!isPlaceholderValue(m[shape.value])) shapes.add(shape.detail(m));
+        }
+      }
+    };
+    for (const view of views) {
+      for (const line of view.split(/\r?\n/)) scanShapes(line);
+      const joined = view.replace(/(?:\\r|\\n|\r|\n)+[ \t]*/g, '');
+      if (joined !== view) scanShapes(joined);
+    }
+    for (const detail of shapes) leaks.push({ file: f.rel, kind: 'credential', detail });
+    // Encoded blob (b): read structurally from the detector-owned fields of an evidence record.
+    if (/(?:^|\/)evidence\.json$/.test(f.rel)) {
+      for (const key of blobMatchedKeys(f.text)) {
+        leaks.push({ file: f.rel, kind: 'credential', detail: `encoded blob in detector field matched.${key}` });
+      }
     }
     // Home paths, plain or encoded: fail, never rewrite to `~`.
     home: for (const view of [...views, ...percentDecodedViews(views)]) {
@@ -812,6 +1117,9 @@ export interface IndexNotes {
   withheld?: string[];
   /** Scenario ids excluded via --exclude; an `## Excluded` section is shown when non-empty. */
   excluded?: string[];
+  /** Set under --allow-no-evidence when the bundle holds no evidence file: the planned
+   *  repetitions of the published results. An `## Evidence` section says so (block B12). */
+  noEvidenceExpected?: number;
 }
 
 export function renderIndex(manifest: RunManifest, evidenceRels: string[], notes: IndexNotes = {}): string {
@@ -860,6 +1168,14 @@ export function renderIndex(manifest: RunManifest, evidenceRels: string[], notes
   out.push('- [report.md](report.md), [report.json](report.json), [report.sarif](report.sarif) — renders (evidence-spec §6)');
   for (const rel of evidenceRels) out.push(`- [${rel}](${rel})`);
   out.push('');
+  if (notes.noEvidenceExpected !== undefined) {
+    out.push('## Evidence', '');
+    out.push(
+      `no evidence files published (--allow-no-evidence): 0 of ${notes.noEvidenceExpected} planned ` +
+        'repetition(s); the evidence lines in report.md cite files that are not in this bundle',
+      '',
+    );
+  }
   const mcpNotes = (notes.mcpNameReplacements ?? 0) > 0;
   const canaryNotes = (notes.canaryTokenReplacements ?? 0) > 0;
   if (notes.homeReplacements !== undefined || mcpNotes || canaryNotes) {
@@ -1064,6 +1380,28 @@ export function planPublish(contents: RunDirContents, policy: PublishPolicy = {}
   }
   const keptEvidence = contents.evidence.filter((f) => !dropSet.has(f.rel.split('/')[0]));
 
+  // Evidence count (ADR-0017 block B12 "Evidence count"): the kept evidence files against the
+  // planned repetitions of the published results. None at all is refused unless the operator
+  // asked for a report-only copy (--allow-no-evidence); fewer than planned is a warning.
+  const evidenceExpected = manifest.results.reduce((n, r) => n + (typeof r.runs === 'number' && r.runs > 0 ? r.runs : 0), 0);
+  const evidenceFound = keptEvidence.length;
+  const warnings: string[] = [];
+  const runLabel = policy.runDir ?? '<runDir>';
+  if (evidenceFound === 0 && !policy.allowNoEvidence) {
+    return {
+      ok: false,
+      benchmarkRunId: id,
+      error: `no evidence files under ${runLabel} (0 of ${evidenceExpected} planned repetitions); a bundle without evidence cannot be audited`,
+      next: `lurekit publish ${runLabel} --allow-no-evidence   (report-only copy, e.g. the shipped demo)`,
+      leaks: [],
+    };
+  }
+  if (evidenceFound > 0 && evidenceFound < evidenceExpected) {
+    warnings.push(
+      `publish: ${evidenceFound} evidence file(s) for ${evidenceExpected} planned repetition(s); report.md cites evidence files that are not in the bundle`,
+    );
+  }
+
   // Operator MCP server names (unconditional): rewrite the parsed manifest and records, and
   // re-serialise only the files that changed, so every other file stays a byte copy. The
   // renders below are built from the rewritten objects. Manifest first, then evidence in
@@ -1148,6 +1486,7 @@ export function planPublish(contents: RunDirContents, policy: PublishPolicy = {}
     excluded,
     canaryTokenReplacements,
     canaryDistinctTokens: canaryUsed.size,
+    ...(evidenceFound === 0 ? { noEvidenceExpected: evidenceExpected } : {}),
   };
 
   // --redact-home: rewrite the in-memory copies only (contents.* are fresh objects per file, the
@@ -1193,15 +1532,46 @@ export function planPublish(contents: RunDirContents, policy: PublishPolicy = {}
   // at least USERNAME_MIN_LEN characters, and for any length under --redact-home.
   const leaks = scanForLeaks(files, gateAllowFor(manifest, policy.corpus, policy.allowHosts), policy.homeDir);
   leaks.push(...findUsernameTokens(files, policy.homeDir, policy.redactHome ? 0 : USERNAME_MIN_LEN));
+  // Operator values (ADR-0017 block B12 "Operator values"): the publishing shell's value of every
+  // non-basic, non-exempt name the published records forwarded to the agent, plus every `env`
+  // value of the kept repetitions' harness settings files. The published model and agent version
+  // are facts by design; shorter values than ENV_VALUE_MIN_LEN are skipped inside the check.
+  const forwarded = new Set<string>();
+  for (const p of parsed) {
+    for (const n of p.rec.observation?.env_forwarded ?? []) if (typeof n === 'string') forwarded.add(n);
+  }
+  const exempt = new Set(ENV_VALUE_EXEMPT.map((n) => n.toUpperCase()));
+  const operatorValues: { name: string; value: string }[] = [];
+  const seenValue = new Set<string>();
+  const addValue = (name: string, value: string): void => {
+    const key = `${name}\u0000${value}`;
+    if (seenValue.has(key)) return;
+    seenValue.add(key);
+    operatorValues.push({ name, value });
+  };
+  for (const name of [...forwarded].sort()) {
+    if (isBasicEnvName(name) || exempt.has(name.toUpperCase())) continue;
+    const value = policy.operatorEnv?.[name];
+    if (typeof value === 'string') addValue(name, value);
+  }
+  for (const e of contents.settingsEnv ?? []) {
+    if (dropSet.has(e.rel.split('/')[0])) continue;
+    if (typeof e.name === 'string' && typeof e.value === 'string') addValue(e.name, e.value);
+  }
+  const publishedFacts = new Set(
+    [manifest.profile?.model, manifest.profile?.agent_version].filter((v): v is string => typeof v === 'string'),
+  );
+  leaks.push(...findOperatorValues(files, operatorValues, publishedFacts));
   if (leaks.length > 0) return { ok: false, benchmarkRunId: id, leaks };
+  const counts = { warnings, evidenceFound, evidenceExpected };
   return homeReplacements === undefined
-    ? { ok: true, benchmarkRunId: id, files, mcpNameReplacements, canaryTokenReplacements, withheld, excluded }
-    : { ok: true, benchmarkRunId: id, files, homeReplacements, homeEncodedReplacements, mcpNameReplacements, canaryTokenReplacements, withheld, excluded };
+    ? { ok: true, benchmarkRunId: id, files, mcpNameReplacements, canaryTokenReplacements, withheld, excluded, ...counts }
+    : { ok: true, benchmarkRunId: id, files, homeReplacements, homeEncodedReplacements, mcpNameReplacements, canaryTokenReplacements, withheld, excluded, ...counts };
 }
 
 /** Human-readable failure text for a rejected plan. */
 export function formatPlanFailure(plan: Extract<PublishPlan, { ok: false }>): string {
-  if (plan.error) return `publish: ${plan.error}; nothing written\n`;
+  if (plan.error) return `publish: ${plan.error}; nothing written\n${plan.next ? `next: ${plan.next}\n` : ''}`;
   const lines = plan.leaks.map((l) => `  ${l.file}: ${l.kind}: ${l.detail}`);
   return (
     `publish: redaction gate failed (evidence-spec §5), ${plan.leaks.length} finding(s); nothing written\n` +
@@ -1231,13 +1601,24 @@ function entryKind(p: string): 'missing' | 'symlink' | 'dir' | 'file' | 'other' 
   return 'other';
 }
 
+/** The harness settings files whose top-level `env` object the operator-value check reads
+ *  (ADR-0017 block B12 "Operator values"): the Claude Code adapter's per-repetition settings
+ *  (src/adapters/claudeCode.ts HOOK_SETTINGS_FILE). Never published. */
+export const SETTINGS_ENV_FILES: readonly string[] = ['claude-settings.json'];
+
 /** Read manifest.json and every <scenario>/<rep>/evidence.json for the manifest's scenarios.
- *  Nothing else under the run dir is read (raw transcripts stay local). Symlinks are never
- *  followed (ADR-0017 "Run-dir reading"): a symlinked scenario dir, repetition dir, evidence or
- *  canary metadata file is skipped and named in `warnings`, so a link planted in the run dir
- *  cannot pull an outside file into the bundle. A symlinked manifest.json is an error. */
-export function readRunDir(runDir: string): RunDirContents & { warnings: string[] } {
+ *  Nothing else under the run dir is read (raw transcripts stay local), except the detector
+ *  canary metadata and the harness settings files' `env` blocks (both never published; the
+ *  settings files of the scenarios in `opts.skipScenarios`, the --withhold/--exclude ids, are
+ *  not read, and one that is not valid JSON throws so the publish fails closed). Symlinks are
+ *  never followed (ADR-0017 "Run-dir reading"): a symlinked scenario dir, repetition dir,
+ *  evidence, canary metadata or settings file is skipped and named in `warnings`, so a link
+ *  planted in the run dir cannot pull an outside file into the bundle. A symlinked
+ *  manifest.json is an error. */
+export function readRunDir(runDir: string, opts: { skipScenarios?: Iterable<string> } = {}): RunDirContents & { warnings: string[] } {
   const warnings: string[] = [];
+  const skipScenarios = new Set(opts.skipScenarios ?? []);
+  const settingsEnv: SettingsEnvEntry[] = [];
   const mpath = path.join(runDir, 'manifest.json');
   if (entryKind(mpath) === 'symlink') {
     throw new Error(`publish: ${mpath} is a symlink; refusing to follow it`);
@@ -1279,9 +1660,27 @@ export function readRunDir(runDir: string): RunDirContents & { warnings: string[
         if (d.isSymbolicLink()) skip(`${id}/${rep}/${d.name}`);
         else if (d.isFile()) canaryMeta.push({ rel: `${id}/${rep}/${d.name}`, text: readFileSync(path.join(rdir, d.name), 'utf8') });
       }
+      if (skipScenarios.has(id)) continue;
+      for (const name of SETTINGS_ENV_FILES) {
+        const rel = `${id}/${rep}/${name}`;
+        const kind = entryKind(path.join(rdir, name));
+        if (kind === 'symlink') skip(rel);
+        if (kind !== 'file') continue;
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(readFileSync(path.join(rdir, name), 'utf8'));
+        } catch (err) {
+          throw new Error(`publish: ${rel} is not valid JSON: ${(err as Error).message}`);
+        }
+        const env = (parsed as { env?: unknown } | null)?.env;
+        if (!env || typeof env !== 'object' || Array.isArray(env)) continue;
+        for (const [k, v] of Object.entries(env as Record<string, unknown>)) {
+          if (typeof v === 'string') settingsEnv.push({ rel, name: k, value: v });
+        }
+      }
     }
   }
-  return { manifestText, evidence, canaryMeta, warnings };
+  return { manifestText, evidence, canaryMeta, settingsEnv, warnings };
 }
 
 /** ADR-0022 amendment: publish's default output directory, inside the run directory it

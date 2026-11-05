@@ -20,6 +20,7 @@ import {
   mergeProfilePatch,
   type RunConfig,
   type RunnerIds,
+  relativiseHit,
 } from '../src/runner/runner.js';
 import type { Scenario } from '../src/scenario/types.js';
 import type { SetupProfile } from '../src/adapters/adapter.js';
@@ -694,6 +695,62 @@ describe('evidence and manifest validate against their schemas (§2.2/§2.3)', (
 });
 
 // --- determinism (evidence-spec §5) -------------------------------------------------------
+
+describe('relative detector paths (evidence-spec s2.2, block B12)', () => {
+  it('canary_command binDir/recorderPath and canary_file_read path are stored run-dir-relative; tool-call inputs untouched', async () => {
+    const root = await tmpRoot();
+    const runner = new BenchmarkRunner({ ids: ids('BRP') });
+    const cfg = makeCfg(root);
+    const cmd = await runner.runScenario(
+      makeScenario({ id: 'AAB-001' }),
+      new StubAdapter({ trigger: 'canary_command', benignText: 'DONE-BENIGN' }),
+      makeProfile(path.join(root, 'work')),
+      cfg,
+    );
+    expect(cmd.verdict).toBe('vulnerable');
+    const evCmd = await readEvidence(cfg, 'BRP', 'AAB-001', 0);
+    const runDir = path.join(root, 'BRP', 'AAB-001', '0');
+    const hit = evCmd.detector_hits[0].matched as { binDir: string; recorderPath: string; command: string };
+    for (const v of [hit.binDir, hit.recorderPath]) {
+      expect(path.isAbsolute(v)).toBe(false);
+      expect(v.startsWith('..')).toBe(false);
+    }
+    expect(readFileSync(path.join(runDir, hit.recorderPath), 'utf8')).toContain(hit.command);
+    expect(evCmd.detector_hits[0].evidence_ref.startsWith(hit.recorderPath)).toBe(true);
+    // The agent's own tool-call input keeps whatever it said (here the canary command name).
+    expect(evCmd.observation.tool_calls[0].input.command).toBe(`${hit.command} --run`);
+
+    const read = await runner.runScenario(
+      makeScenario({ id: 'AAB-002', forbidden_effect: { detector: 'canary_file_read' } }),
+      new StubAdapter({ trigger: 'canary_file_read', benignText: 'DONE-BENIGN' }),
+      makeProfile(path.join(root, 'work')),
+      cfg,
+    );
+    expect(read.verdict).toBe('vulnerable');
+    const evRead = await readEvidence(cfg, 'BRP', 'AAB-002', 0);
+    const matched = evRead.detector_hits[0].matched as { path: string; via: string };
+    expect(path.isAbsolute(matched.path)).toBe(false);
+    expect(matched.path.startsWith('..')).toBe(false);
+    expect(matched.via).toBe('captured_output');
+  });
+
+  it('relativiseHit rewrites only the three path keys, only under the run dir, strings only', () => {
+    const runDir = path.join(path.sep, 'runs', 'r1');
+    const outside = path.join(path.sep, 'elsewhere', 'decoy.txt');
+    const hit = {
+      detector: 'canary_file_read' as const,
+      matched: { path: outside, marker: 'm', via: 'atime', binDir: 7, recorderPath: path.join(runDir, 'rec.log'), other: path.join(runDir, 'x') },
+      evidence_ref: `${path.join(runDir, 'rec.log')}#L1`,
+      at: 1,
+    };
+    const out = relativiseHit(hit, runDir);
+    expect(out.matched).toEqual({ path: outside, marker: 'm', via: 'atime', binDir: 7, recorderPath: 'rec.log', other: path.join(runDir, 'x') });
+    expect(out.evidence_ref).toBe('rec.log#L1');
+    expect(hit.matched.recorderPath).toBe(path.join(runDir, 'rec.log')); // input not mutated
+    // A sibling dir that merely shares the prefix is outside.
+    expect(relativiseHit({ ...hit, matched: { path: `${runDir}2${path.sep}d` } }, runDir).matched.path).toBe(`${runDir}2${path.sep}d`);
+  });
+});
 
 describe('determinism', () => {
   it('two runs over the same scripted inputs produce identical evidence modulo injected ids', async () => {

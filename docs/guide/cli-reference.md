@@ -171,7 +171,7 @@ your own `--settings`/`--mcp`/`--hooks`/`--skill` flags (ADR-0021 amendment). Of
 ### publish
 
 ```
-lurekit publish <runDir> [--out <dir>] [--allow-host <host>]... [--withhold <id>]... [--exclude <id>]... [--redact-home] [--scenarios <dir>]
+lurekit publish <runDir> [--out <dir>] [--allow-host <host>]... [--withhold <id>]... [--exclude <id>]... [--redact-home] [--allow-no-evidence] [--scenarios <dir>]
 ```
 
 Run the redaction gate and write a shareable bundle (manifest, each scenario's
@@ -181,8 +181,12 @@ required and must contain a `manifest.json` (when it does not, the run directori
 (`--results` defaults to `.aab-runs`), next to the run and never in the cwd; `--out <dir>`
 overrides it. The run's own files are untouched.
 Exit 0 on a clean gate + successful write; 1 if the manifest is missing, a `--withhold` or
-`--exclude` value is not a scenario id, an id is given to both flags, the gate fails, or the write fails (nothing is written on any failure).
-Offline.
+`--exclude` value is not a scenario id, an id is given to both flags, the run dir holds no
+evidence file and `--allow-no-evidence` is not given, the gate fails, or the write fails
+(nothing is written on any failure). Fewer evidence files than planned repetitions is a stderr
+warning. A successful publish ends with `Next: lurekit report <outDir>`.
+Offline. The gate's operator-value check reads this process's environment (the values of the
+variables the run forwarded to the agent); nothing is sent anywhere.
 
 ### doctor
 
@@ -301,6 +305,7 @@ the body would be digested into evidence yet never reach the agent.
 | `--withhold <scenario-id>` | string (repeatable) | *(none)* | leave a scenario out of the bundle; totals recomputed |
 | `--exclude <scenario-id>` | string (repeatable) | *(none)* | leave out a scenario whose result is not a measurement (own `index.md` note, manifest `excluded`); same handling as `--withhold`; an id may not be given to both |
 | `--redact-home` | boolean | off | replace your home dir with `<HOME>` in the published copies (run dir untouched) |
+| `--allow-no-evidence` | boolean | off | publish a run dir that holds no `evidence.json` (report-only copy, e.g. the shipped demo); noted in `index.md`; refused without it |
 | `--scenarios <dir>` | string | the shipped corpus | the run's scenario corpus: its source URLs pass the gate; with `--withhold`/`--exclude` the published `corpus_digest` is recomputed from it |
 
 ### Global flags

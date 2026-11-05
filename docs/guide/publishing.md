@@ -43,6 +43,7 @@ lurekit publish <runDir> [--out <dir>] [--allow-host <host>]... [--withhold <sce
 | `--withhold <scenario-id>` | none | Repeatable. Leave one scenario out of the bundle (see [Withholding a scenario](#withholding-a-scenario)). |
 | `--exclude <scenario-id>` | none | Repeatable. Leave out a scenario whose result is not a measurement (see [Excluding a scenario](#excluding-a-scenario)). An id may not be given to both `--withhold` and `--exclude`. |
 | `--redact-home` | off | Replace your own home directory with `<HOME>` in the published copies (see [--redact-home](#--redact-home)). |
+| `--allow-no-evidence` | off | Publish a run directory that holds no `evidence.json` at all (a report-only copy such as the shipped demo). Without it such a run is refused, because a bundle without evidence cannot be audited; with it `index.md` gains an `## Evidence` section saying so. Fewer evidence files than planned repetitions is a warning either way (see [Evidence count](#evidence-count)). |
 | `--scenarios <dir>` | the corpus shipped with lurekit | The scenario directory the run used. Its scenarios' source URLs pass the gate, and with `--withhold`/`--exclude` the published `corpus_digest` is recomputed from it (it must reproduce the run's digest first). |
 
 Flags are strict: pass each flag and its value as separate arguments. `--withhold=AAB-003` or the
@@ -91,7 +92,9 @@ A real example is [`reports/aab-20261102161512-ca5fe106/index.md`](../../reports
   diffs, the canary decoy and launchers. (`*.canary.json` is read to find canary values to mask,
   see below, but is never copied.)
 - The harness artefact manifest `artefacts.json` (ADR-0025).
-- The adapter's per-run config files (`mcp.json`, `claude-settings.json`).
+- The adapter's per-run config files (`mcp.json`, `claude-settings.json`). (The `env` block of
+  `claude-settings.json` is read so the operator-value check knows the values it holds, see
+  `env_value` below, but the file is never copied.)
 - The agent workdirs (`work/`).
 - Anything else in the run dir.
 
@@ -101,18 +104,22 @@ your home path and username, and the raw canary values.
 
 ## Order of operations
 
-1. Read `manifest.json`, and the `evidence.json` and `*.canary.json` files of every scenario in
-   it. Validate that the run id and scenario ids are safe path segments
-   (`^[A-Za-z0-9][A-Za-z0-9._-]*$`); anything else fails.
-2. Apply `--withhold` and `--exclude`: drop the named scenarios, recompute the totals.
+1. Read `manifest.json`, and the `evidence.json`, `*.canary.json` and `claude-settings.json`
+   (`env` block only) files of every scenario in it. Validate that the run id and scenario ids
+   are safe path segments (`^[A-Za-z0-9][A-Za-z0-9._-]*$`); anything else fails.
+2. Apply `--withhold` and `--exclude`: drop the named scenarios, recompute the totals. Count the
+   evidence files that remain against the planned repetitions: none at all is refused unless
+   `--allow-no-evidence`; fewer than planned is a warning.
 3. Pseudonymise operator MCP server names (always).
 4. Render `report.md`, `report.json` and `report.sarif` from the rewritten manifest and evidence.
 5. Replace harness canary tokens in every file, renders included (always).
 6. If `--redact-home` is set: replace your home directory in all its spellings, in every file.
 7. Render `index.md` last, so its `## Redaction` section carries the counts, and pass it through
    the same replacements.
-8. Run the redaction gate on every file of the bundle. With `--redact-home`, also run the
-   bare-username check.
+8. Run the redaction gate on every file of the bundle, including the operator-value check
+   (`env_value`) over the publishing shell's values of the forwarded variables and the settings
+   `env` values. With `--redact-home`, also run the bare-username check (it always runs for a
+   username of 4+ characters).
 9. Write the bundle only if there is no finding. Otherwise print every finding, exit 1 and write
    nothing.
 
@@ -192,13 +199,15 @@ a space, so a value right after an escaped newline in a JSON string is still cau
 | `url` | An `http(s)` URL that is not on a loopback host (`localhost`, `*.localhost`, `127.0.0.0/8`, `::1`), is not one of the two intrinsic tool URLs (the SARIF `$schema` URL and the repository `informationUri`, exact strings), is not exactly (ignoring the `#fragment`) a `source` URL (`primary_url`, `secondary_urls`) of a published scenario of the run's corpus, and is not on an `--allow-host` host. A source URL opens only itself, never its host: another `github.com` URL fails. The host is taken after stripping path, query, fragment and then userinfo, so `https://a.example/x@github.com` has host `a.example`. A URL of any other scheme (`ftp://`, `smb://`, `postgres://`, ...) not on a loopback or `--allow-host` host is a `url` finding too; `\\` or `///` in place of `//` does not hide a URL. `file:///path` has no host and is judged by the home-path rule only. | `non-allowlisted host "<host>" (not a scenario source URL)` |
 | `ws_url` | A `ws://` or `wss://` URL not on a loopback or `--allow-host` host. | `<scheme>:// URL on non-allowlisted host "<host>"` |
 | `ssh_url` | An `ssh://`, `git://`, `git+ssh://`, `sftp://` or `scp://` URL not on a loopback or `--allow-host` host. | `<scheme>:// URL on non-allowlisted host "<host>"` |
-| `git_ssh` | An scp-style git remote `user@host:path` (`git@github.com:org/repo.git`) not on an `--allow-host` host. | `scp-style git remote on host "<host>"` |
-| `host` | A scheme-less `host:port` or `host/path` whose last label is a public TLD from a curated list (`com`, `net`, `org`, `io`, `dev`, `ai`, `co`, `cloud`, country codes, ...; file-extension look-alikes such as `md`, `sh`, `py`, `rs`, `ts`, `app`, `zip` are not in it), not preceded by a URL, path or address character, not loopback and not on an `--allow-host` host. Also: a host ending in an internal TLD (`.internal`, `.local`, `.lan`, `.corp`, `.example`, ...), a protocol-relative `//host.tld`, an IPv4 address with a port, and a private-range IPv4 address (`10/8`, `172.16/12`, `192.168/16`, `100.64/10`, `169.254/16`) with or without a port. | `scheme-less host reference "<host>"` (or `internal host name`, `protocol-relative host reference`, `scheme-less IP address with port`, `private IP address`) |
+| `git_ssh` | An scp-style git remote `user@host:path` (`git@github.com:org/repo.git`) not on an `--allow-host` host; also an scp-style remote on an IPv4 literal (`deploy@10.0.0.5:/srv`, `backup@203.0.113.40:/mnt`) that is not loopback or an `--allow-host` host. | `scp-style git remote on host "<host>"`, `scp-style remote on host "<ip>"` |
+| `host` | A scheme-less `host:port` or `host/path` whose last label is a public TLD from a curated list (`com`, `net`, `org`, `io`, `dev`, `ai`, `co`, `cloud`, country codes, ...; file-extension look-alikes such as `md`, `sh`, `py`, `rs`, `ts`, `app`, `zip` are not in it), not preceded by a URL, path or address character, not loopback and not on an `--allow-host` host. Also: a host ending in an internal TLD (`.internal`, `.local`, `.lan`, `.corp`, `.example`, ...), a protocol-relative `//host.tld`, an IPv4 address with a port, and a private-range IPv4 address (`10/8`, `172.16/12`, `192.168/16`, `100.64/10`, `169.254/16`) with or without a port, also after `@` or `:` (`deploy@10.0.0.5:/srv`, `::ffff:10.0.0.7`); a bare IPv6 unique-local or link-local literal (`fd12:3456::1`, `fe80::1`, `[fd12::1]:22`; global IPv6 literals and `::1` are not); and a single-label host with a port (`gitlab:8443`, `redis:6379`, `db:5432`: a label of 2-63 characters starting with a letter, a 2-5 digit port, bounded by whitespace, quotes, `=`, brackets or the ends of the text, so `at 12:30`, `C:123`, `retry:3`, `"port":8080` and `file.ts:12` are not; `localhost` is not). | `scheme-less host reference "<host>"` (or `internal host name`, `protocol-relative host reference`, `scheme-less IP address with port`, `private IP address`, `private IPv6 address`, `single-label host with port`) |
 | `email` | An email address not on an `--allow-host` host. | `email address at "<host>" (value redacted)` |
 | `token` | A prefixed key or token shape (shared with fixture inertness): OpenAI/Anthropic-style `sk-` keys, GitHub tokens (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`), GitHub fine-grained PATs (`github_pat_`), GitLab tokens (`glpat-`), AWS access key ids (`AKIA`), Slack tokens (`xoxb-`, `xoxp-`, `xox*`), Google API keys (`AIza`). | the pattern family and `(value redacted)`; the value is never echoed |
 | `bearer` | `Bearer ` (any case) followed by a 20+ character token68 value. | the pattern family and `(value redacted)` |
 | `jwt` | A JSON Web Token: `eyJ...` and two more dot-separated base64url segments. | the pattern family and `(value redacted)` |
 | `private_key` | A PEM private-key header (`-----BEGIN RSA PRIVATE KEY-----`, `-----BEGIN OPENSSH PRIVATE KEY-----`, `-----BEGIN PRIVATE KEY-----`, ...). Public keys and certificates are not findings. | the pattern family and `(value redacted)` |
+| `credential` | A credential recognised by its context rather than its prefix: an assignment `NAME=value` whose upper-case name contains `PASSWORD`, `PASSWD`, `SECRET`, `TOKEN`, `API_KEY`, `APIKEY`, `ACCESS_KEY`, `PRIVATE_KEY` or `CREDENTIAL(S)` and whose value has 8+ characters; the same family as a JSON member `"NAME": "value"` (any case, raw or escaped quotes); a `--password`, `--passwd`, `--secret`, `--token`, `--api-key`/`--apikey` or `--access-key` flag with a 4+ character value; a MySQL-family glued `-p<value>` (`mysql`, `mysqladmin`, `mysqldump`, `mysqlsh`, `mariadb`, `mariadb-dump`) or `sshpass -p <value>`; a password in URL userinfo (`scheme://user:password@host`) on any host, loopback included; and a 40+ character hex or base64 blob in the query string or a path segment of any URL (or a scheme-less `?query`) except the exact source URLs, or anywhere in `detector_hits[].matched.requested`, `.argv` or `.args` of an evidence record. A value that starts with `$`, `<`, `*`, `{`, `%`, `xxx`, `...`, `REDACTED`, `CHANGEME`, `EXAMPLE` or `PLACEHOLDER` is a placeholder, not a finding; `mkdir -p dir` and `claude -p "task"` are not findings; digests at their keys are never reached. No `--allow-host` override: fix the evidence or do not publish the run. | the shape (`credential assignment NAME=...`, `credential JSON member "NAME"`, `credential flag --password`, `credential glued -p<value> after mysql`, `credential sshpass -p`, `credential in URL userinfo on host "<host>"`, `encoded blob in URL query or path`, `encoded blob in detector field matched.<key>`) and `(value redacted)`; the value is never echoed |
+| `env_value` | The value of a variable the harness forwarded to the agent appears in the bundle. Sources: the publishing shell's value of every name in the records' `observation.env_forwarded` that is neither a process basic (`PATH`, `HOME`, `LANG`, `AAB_*`, ...; `BASE_ENV_ALLOW` in `src/adapters/childEnv.ts`) nor exempt (`ENV_VALUE_EXEMPT`: `ANTHROPIC_BASE_URL`, `LLM_BASE_URL`, `LLM_MODEL`, `CURSOR_API_ENDPOINT`, `CODEX_HOME`, `DISABLE_AUTOUPDATER`; URLs and paths in those are judged by the other rules), and every `env` value of the kept repetitions' `claude-settings.json`. Looked for raw, JSON-escaped, percent-encoded and base64/base64url (padded and unpadded). Values shorter than 8 characters and the published model / agent version are skipped. Limits: the publishing shell may not be the shell that ran the benchmark (then the variable is unset and the check is silent for it), and a value the agent transformed in another way passes; the `credential` shapes are the backstop. No override. | `value of environment variable NAME present (value redacted)` |
 | `home_path` | An absolute path under your home directory or any conventional home root (`/home/<u>`, `/Users/<u>`, `/root`, `<drive>:\Users\<u>`), in plain, JSON-escaped and forward- or back-slash spellings; your home's dash-encoded project slug (every separator or non-alphanumeric replaced by `-`, as the agent runtime names its project directories, e.g. `-home-<u>-...`); your home percent-encoded (`%2Fhome%2F<u>`, either hex case); and a percent-encoded
 `/home/<u>` or `/Users/<u>` of any user. | `absolute home path "..."`, `home directory slug "..."` or `percent-encoded home path "..."` |
 | `home_user` | Your bare username (the last segment of your home directory) appears anywhere as a token bounded by non-alphanumerics. Checked on every publish when the username has 4 or more characters, and for any length with `--redact-home`. Case-sensitive. | `operator username present (value redacted)` |
@@ -376,6 +385,8 @@ Fix the run artefacts, or pass --allow-host <host> for a deliberate URL exceptio
 | `home_path` naming another home, a sibling or a non-segment-ending occurrence | Inspect the evidence file. The run captured an unexpected path; fix the cause or do not publish that run. |
 | `home_user` | Find the remaining username occurrence in the named file (the local run dir has the same text). If it is a coincidental word, the run cannot be published as is with this account; re-run under a different home or results location. |
 | `token` | Inspect the evidence. A real credential shape in a run is a finding about the setup (a live key in the environment or in a file the agent read). Rotate the credential, fix the setup, re-run. Never allowlist it. |
+| `credential` | As for `token`, by context: the named file holds an assignment, flag, URL password or encoded blob. Open the local evidence file, find the shape, and decide whether a real credential reached the run (rotate it, fix the setup, re-run) or the agent echoed a test value (then the run still cannot be published as is; there is no override). |
+| `env_value` | A value you handed the agent through the environment or the settings `env` block is in the bundle (the finding names the variable only). Rotate it, find how the agent echoed it in the named file, fix the setup, re-run. |
 | `url`, `ws_url`, `ssh_url`, `git_ssh`, `host`, `email` | Decide whether the host is a deliberate citation (`--allow-host`) or evidence of unexpected network use or an operator identity in the evidence (investigate). |
 | `bearer`, `jwt`, `private_key` | As for `token`: a live credential reached the run. Rotate it, fix the setup, re-run. |
 
@@ -458,13 +469,39 @@ the headless behaviour, not the original interactive step. See
 When a finding concerns an agent vendor, follow [SECURITY.md](../../SECURITY.md) and the
 coordinated-disclosure policy above before publishing.
 
+## Evidence count
+
+A bundle is auditable only through its evidence files, so `publish` counts the kept
+`<scenario>/<rep>/evidence.json` files against the planned repetitions of the published results
+(the sum of `results[].runs` after `--withhold`/`--exclude`):
+
+- fewer than planned: `warning: publish: <found> evidence file(s) for <expected> planned
+  repetition(s); report.md cites evidence files that are not in the bundle` on stderr, and the
+  publish continues;
+- none at all: refused, `publish: no evidence files under <runDir> (0 of <expected> planned
+  repetitions); a bundle without evidence cannot be audited; nothing written`, with the next
+  command `lurekit publish <runDir> --allow-no-evidence`. With the flag the bundle is written,
+  `index.md` gains an `## Evidence` section (`no evidence files published (--allow-no-evidence):
+  0 of <expected> planned repetition(s); ...`) and stdout prints `evidence: 0 of <expected>
+  file(s) (--allow-no-evidence)`. The shipped `demo/<id>` directory (manifest and `report.json`
+  only) is the intended user of the flag. With evidence present the flag changes nothing.
+
+A successful publish ends with `Next: lurekit report <outDir>` and a pointer to
+[Citing a bundle](#citing-a-bundle).
+
 ## Limits
 
 - The gate is a heuristic, not a proof of absence. A token with no known prefix, or a path outside
   a known home root, passes. Raising the bar means extending the token-shape list (which also
   tightens fixture inertness) or the home-root list, together with ADR-0017.
 - Evidence records are published verbatim apart from the rewrites above, including tool-call
-  inputs. The gate, not the renderer, is what keeps those inputs safe to share, so read the
-  evidence of any run that did something unusual before publishing it.
+  inputs: they are the audit proof a reader needs, and a digested copy would be unverifiable. The
+  gate fails, instead of rewriting, on any URL that is not exactly a scenario source URL (or on a
+  host named with `--allow-host`), on internal and private addresses, on credential-shaped values
+  (known token prefixes, bearer/JWT/PEM, credential assignments and flags, URL passwords, encoded
+  blobs), on the values of the variables forwarded to the agent, and on home paths. It is a
+  deny-list over every published byte, not a proof that an input is safe: a secret with no known
+  prefix that sits in no assignment, flag, URL or forwarded variable passes. Read the evidence of
+  any run that did something unusual before publishing it.
 - `--redact-home`, the MCP name rewrite and the canary-token rewrite are substitutions. They are
   always recorded in `index.md`, and the run dir keeps the exact bytes.
