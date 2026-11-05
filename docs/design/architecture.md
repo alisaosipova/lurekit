@@ -829,3 +829,4 @@ plumbing, keep decisions in ADRs; codified in `CLAUDE.md`. This document was ass
 | 0024 | Run lifecycle: per-run timeout, strict state machine, process-group kill (`adr-0024-run-lifecycle.md`) | proposed, implemented; awaiting approval |
 | 0025 | Evidence integrity: artefact manifest, symlink-safe writes, captured-output file-read signal, execPath launcher, `evidence_tampered` (`adr-0025-evidence-integrity.md`) | proposed, implemented; awaiting approval |
 | 0026 | `lurekit diff`: run comparison and regression mode (`adr-0026-run-diff.md`) | accepted, implemented (B20) |
+| 0027 | `lurekit clean`: remove adapter caches that are not evidence (`adr-0027-clean.md`) | accepted (ENGINE-14) |

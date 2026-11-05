@@ -50,6 +50,7 @@ authority when the two disagree.
 - [design/adr-0024-run-lifecycle.md](design/adr-0024-run-lifecycle.md) - ADR-0024: run lifecycle, per-run timeout, resisted guard, process-group kill, provisional manifest.
 - [design/adr-0025-evidence-integrity.md](design/adr-0025-evidence-integrity.md) - ADR-0025: harness artefact manifest, `evidence_tampered`, symlink-safe writes.
 - [design/adr-0026-run-diff.md](design/adr-0026-run-diff.md) - ADR-0026: `lurekit diff`, run comparison and regression mode.
+- [design/adr-0027-clean.md](design/adr-0027-clean.md) - ADR-0027: `lurekit clean`, removing adapter caches that are not evidence.
 
 ## Plan (`plan/`)
 
