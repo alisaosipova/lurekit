@@ -39,7 +39,7 @@ import type {
 } from './adapter.js';
 import { agentChildEnv, envNames } from './childEnv.js';
 import { safeReadText, safeWriteFile } from '../runner/safeWrite.js';
-import { killTree, probeVersionCapped, reapGroup, spawnAgent, waitExit } from './childProcess.js';
+import { createLineSplitter, killTree, probeVersionCapped, reapGroup, spawnAgent, waitExit } from './childProcess.js';
 import { inputDigest, normalizeMcpServers, requireWorkdir, stderrExcerpt, strictMcpConfigFor, validateSettingSources } from './adapter.js';
 import type { AgentId } from '../scenario/types.js';
 
@@ -261,7 +261,7 @@ export class ClaudeCodeAdapter implements Adapter {
 
     const state = newStreamState();
     const stdoutChunks: Buffer[] = [];
-    let lineBuffer = '';
+    const splitter = createLineSplitter((line) => handleLine(line), (msg) => warnings.push(msg));
 
     let stderrText = '';
     const handleLine = (line: string): void => {
@@ -296,13 +296,7 @@ export class ClaudeCodeAdapter implements Adapter {
     const decoder = new StringDecoder('utf8');
     child.stdout!.on('data', (buf: Buffer) => {
       stdoutChunks.push(buf);
-      lineBuffer += decoder.write(buf);
-      let idx: number;
-      while ((idx = lineBuffer.indexOf('\n')) >= 0) {
-        const line = lineBuffer.slice(0, idx);
-        lineBuffer = lineBuffer.slice(idx + 1);
-        handleLine(line);
-      }
+      splitter.push(decoder.write(buf)); // ENGINE-07: bounded, scans only new text
     });
     // Drain stderr so the pipe never blocks. Contents are not evidence; only a capped,
     // secret-redacted one-line excerpt becomes a warning on a non-zero exit (ADR-0022).
@@ -315,8 +309,8 @@ export class ClaudeCodeAdapter implements Adapter {
     reapGroup(child); // B10 VERDICT-12: nothing the agent started outlives the repetition
     if (exit.error) warnings.push(`agent process error (${bin}): ${exit.error.message}`);
     if (exit.drainTimedOut) warnings.push('agent stdio did not close after exit (a child process of the agent may still hold it); output read so far is kept');
-    lineBuffer += decoder.end();
-    if (lineBuffer.length > 0) handleLine(lineBuffer);
+    splitter.push(decoder.end());
+    splitter.end();
     const exitCode: number = exit.exitCode;
 
     signal.removeEventListener('abort', onAbort);

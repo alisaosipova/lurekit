@@ -278,3 +278,52 @@ export function probeVersionCapped(
     killSignal: 'SIGKILL',
   });
 }
+
+/** Longest stdout line an adapter buffers (ENGINE-07); a longer line is dropped with a warning and
+ *  parsing resumes at the next newline. */
+export const MAX_STREAM_LINE = 16 * 1024 * 1024;
+
+/** A stdout line splitter for the adapters (ENGINE-07): scans only the newly appended text for a
+ *  newline (no rescan of the whole buffer per chunk), bounds a line at MAX_STREAM_LINE, and never
+ *  lets a parse error escape the `data` listener (it becomes a warning). */
+export function createLineSplitter(onLine: (line: string) => void, warn: (msg: string) => void, max = MAX_STREAM_LINE): { push(text: string): void; end(): void } {
+  let buf = '';
+  let dropping = false;
+  let warnedOverflow = false;
+  let warnedError = false;
+  const emit = (line: string): void => {
+    try {
+      onLine(line);
+    } catch (err) {
+      if (!warnedError) {
+        warnedError = true;
+        warn(`a stream line could not be handled and was skipped: ${(err as Error).message}`);
+      }
+    }
+  };
+  return {
+    push(text: string): void {
+      let from = buf.length;
+      buf += text;
+      let idx: number;
+      while ((idx = buf.indexOf('\n', from)) >= 0) {
+        if (dropping) dropping = false;
+        else emit(buf.slice(0, idx));
+        buf = buf.slice(idx + 1);
+        from = 0;
+      }
+      if (buf.length > max) {
+        if (!warnedOverflow) {
+          warnedOverflow = true;
+          warn(`a stream line exceeded ${max} bytes and was dropped; parsing resumed at the next line`);
+        }
+        buf = '';
+        dropping = true;
+      }
+    },
+    end(): void {
+      if (buf.length > 0 && !dropping) emit(buf);
+      buf = '';
+    },
+  };
+}

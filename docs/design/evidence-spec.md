@@ -490,6 +490,14 @@ the same parse step. Which attempts count against a scenario's forbidden effect 
 §3.1 "Resisted kind" (per detector kind, including registry_fetch installs). The Cursor adapter reports `attempts: []`: its stream has no verified
 denial record (ADR-0016), so it reports none rather than guess.
 
+**Amendment (2026-11-05, ENGINE-07): bounded stream lines.** The Claude Code, Codex and
+OpenHands adapters split stdout with one shared splitter (`createLineSplitter`,
+`src/adapters/childProcess.ts`): it scans only newly arrived text for a newline, drops a line
+longer than 16 MiB with one warning and resumes at the next newline, and turns an exception
+while handling a line into a warning instead of letting it escape the `data` listener. The raw
+stream file is still written whole after the run (streaming it to disk during the run is not
+done; recorded limit).
+
 ### §4.3 Claude Code specifics that constrain scenarios
 
 - `claude -p` shows **no trust dialog** and runs the project's `.claude/settings.json` hooks

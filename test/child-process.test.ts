@@ -226,3 +226,24 @@ describe('T7 Claude Code --version probe is capped', { retry: 1 }, () => {
     await rm(runDir, { recursive: true, force: true });
   });
 });
+
+describe('ENGINE-07: bounded line splitter', { retry: 1 }, () => {
+  it('splits across chunks, drops an over-long line with one warning and resumes, contains handler errors', async () => {
+    const { createLineSplitter } = await import('../src/adapters/childProcess.js');
+    const lines: string[] = [];
+    const warns: string[] = [];
+    const s = createLineSplitter((l) => {
+      if (l === 'boom') throw new Error('bad line');
+      lines.push(l);
+    }, (w) => warns.push(w), 10);
+    s.push('ab');
+    s.push('c\nde');
+    s.push('f\n');
+    s.push('x'.repeat(25));
+    s.push('yy\nok\nboom\ntail');
+    s.end();
+    expect(lines).toEqual(['abc', 'def', 'ok', 'tail']);
+    expect(warns.filter((w) => /exceeded 10 bytes/.test(w))).toHaveLength(1);
+    expect(warns.filter((w) => /could not be handled/.test(w))).toHaveLength(1);
+  });
+});

@@ -24,7 +24,7 @@ import type { Adapter,
   AdapterCapabilities, ObservationSource, RunObservation, RunOptions, SetupProfile, ToolCall } from './adapter.js';
 import { requireWorkdir } from './adapter.js';
 import { agentChildEnv, argvRecord, CappedStderr, envNames } from './childEnv.js';
-import { killTree, probeVersionCapped, reapGroup, spawnAgent, waitExit } from './childProcess.js';
+import { createLineSplitter, killTree, probeVersionCapped, reapGroup, spawnAgent, waitExit } from './childProcess.js';
 import type { AgentId } from '../scenario/types.js';
 
 export const OPENHANDS_STREAM_FILE = 'openhands-stream.jsonl';
@@ -264,7 +264,7 @@ export class OpenHandsAdapter implements Adapter {
     const state = newOpenHandsStreamState();
     const stdoutChunks: Buffer[] = [];
     const stderrCap = new CappedStderr();
-    let lineBuffer = '';
+    const splitter = createLineSplitter((line) => handleLine(line), (msg) => warnings.push(msg));
     const decoder = new StringDecoder('utf8');
     const handleLine = (line: string): void => {
       parseOpenHandsStreamLine(line, performance.now() - perfStart, state);
@@ -282,13 +282,7 @@ export class OpenHandsAdapter implements Adapter {
 
     child.stdout!.on('data', (buf: Buffer) => {
       stdoutChunks.push(buf);
-      lineBuffer += decoder.write(buf);
-      let idx: number;
-      while ((idx = lineBuffer.indexOf('\n')) >= 0) {
-        const line = lineBuffer.slice(0, idx);
-        lineBuffer = lineBuffer.slice(idx + 1);
-        handleLine(line);
-      }
+      splitter.push(decoder.write(buf)); // ENGINE-07: bounded, scans only new text
     });
     child.stderr!.on('data', (buf: Buffer) => stderrCap.push(buf));
     // Resolves on `exit`, then waits for `close` at most STDIO_DRAIN_MS (ADR-0024 D5): a
@@ -297,8 +291,8 @@ export class OpenHandsAdapter implements Adapter {
     reapGroup(child); // B10 VERDICT-12: nothing the agent started outlives the repetition
     if (exit.error) warnings.push(`failed to spawn agent binary "${bin}"`);
     if (exit.drainTimedOut) warnings.push('agent stdio did not close after exit (a child process of the agent may still hold it); output read so far is kept');
-    lineBuffer += decoder.end();
-    if (lineBuffer.length > 0) handleLine(lineBuffer);
+    splitter.push(decoder.end());
+    splitter.end();
     const exitCode: number = exit.exitCode;
     signal.removeEventListener('abort', onAbort);
     const endedAt = Date.now();

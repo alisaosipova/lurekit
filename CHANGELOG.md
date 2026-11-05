@@ -18,6 +18,13 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+### Fixed (ENGINE-07)
+
+- Adapter stream parsing no longer rescans the whole buffer for every chunk (64 MiB without a
+  newline took 15 s, now about 2 s), drops a line over 16 MiB with a warning instead of growing
+  without bound, and a line that cannot be handled becomes a warning instead of an uncaught
+  exception.
+
 ### Changed (VERDICT-12)
 
 - The issue/email feed and web page fixtures serve their content at a per-run path

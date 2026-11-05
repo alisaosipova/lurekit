@@ -25,7 +25,7 @@ import type { Adapter,
   AdapterCapabilities, ObservationSource, RunObservation, RunOptions, SetupProfile, ToolCall } from './adapter.js';
 import { requireWorkdir, stderrExcerpt } from './adapter.js';
 import { agentChildEnv, argvRecord, CappedStderr, envNames } from './childEnv.js';
-import { killTree, probeVersionCapped, reapGroup, spawnAgent, waitExit } from './childProcess.js';
+import { createLineSplitter, killTree, probeVersionCapped, reapGroup, spawnAgent, waitExit } from './childProcess.js';
 import type { AgentId } from '../scenario/types.js';
 
 export const CODEX_STREAM_FILE = 'codex-stream.jsonl';
@@ -246,7 +246,7 @@ export class CodexCliAdapter implements Adapter {
     const state = newCodexStreamState();
     const stdoutChunks: Buffer[] = [];
     const stderrCap = new CappedStderr();
-    let lineBuffer = '';
+    const splitter = createLineSplitter((line) => handleLine(line), (msg) => warnings.push(msg));
     const decoder = new StringDecoder('utf8');
     const handleLine = (line: string): void => {
       parseCodexStreamLine(line, performance.now() - perfStart, state);
@@ -264,13 +264,7 @@ export class CodexCliAdapter implements Adapter {
 
     child.stdout!.on('data', (buf: Buffer) => {
       stdoutChunks.push(buf);
-      lineBuffer += decoder.write(buf);
-      let idx: number;
-      while ((idx = lineBuffer.indexOf('\n')) >= 0) {
-        const line = lineBuffer.slice(0, idx);
-        lineBuffer = lineBuffer.slice(idx + 1);
-        handleLine(line);
-      }
+      splitter.push(decoder.write(buf)); // ENGINE-07: bounded, scans only new text
     });
     // stderr is kept verbatim up to STDERR_FILE_MAX: exec writes progress and errors there (NOTES).
     child.stderr!.on('data', (buf: Buffer) => stderrCap.push(buf));
@@ -280,8 +274,8 @@ export class CodexCliAdapter implements Adapter {
     reapGroup(child); // B10 VERDICT-12: nothing the agent started outlives the repetition
     if (exit.error) warnings.push(`failed to spawn agent binary "${bin}"`);
     if (exit.drainTimedOut) warnings.push('agent stdio did not close after exit (a child process of the agent may still hold it); output read so far is kept');
-    lineBuffer += decoder.end();
-    if (lineBuffer.length > 0) handleLine(lineBuffer);
+    splitter.push(decoder.end());
+    splitter.end();
     const exitCode: number = exit.exitCode;
     signal.removeEventListener('abort', onAbort);
     const endedAt = Date.now();
