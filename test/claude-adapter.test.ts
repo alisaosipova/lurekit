@@ -89,6 +89,7 @@ describe('ClaudeCodeAdapter.capabilities (§4.4)', () => {
       observes: ['stream', 'hook'],
       can_pin_version: true,
       can_pin_model: true,
+      delivers_mcp_config: true, // s4.4 block 8: --mcp-config delivers profile.mcp
     });
   });
 

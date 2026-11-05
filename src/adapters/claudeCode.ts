@@ -26,6 +26,7 @@ import path from 'node:path';
 
 import type {
   Adapter,
+  AdapterCapabilities,
   ObservationSource,
   RunObservation,
   RunOptions,
@@ -101,18 +102,15 @@ export class ClaudeCodeAdapter implements Adapter {
     this.versionProbeTimeoutMs = opts.versionProbeTimeoutMs;
   }
 
-  capabilities(): {
-    headless: boolean;
-    observes: ObservationSource[];
-    can_pin_version: boolean;
-    can_pin_model: boolean;
-  } {
+  capabilities(): AdapterCapabilities {
     // §4.4.
     return {
       headless: true,
       observes: ['stream', 'hook'],
       can_pin_version: true,
       can_pin_model: true,
+      // s4.4 block 8: profile.mcp is written to <runDir>/mcp.json and passed as --mcp-config.
+      delivers_mcp_config: true,
     };
   }
 

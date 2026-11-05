@@ -164,7 +164,9 @@ describe('fixture preconditions in the runner (§3.1)', () => {
     expect(evidence.observation.warnings.join('\n')).toContain('status was "failed"');
   });
 
-  it('a hit without the declared surface is still inconclusive (rule 0 outranks vulnerable), hit recorded', async () => {
+  // B8-T8 (block 8): only a canary_mcp_tool decoy hit naming the expected server satisfies the
+  // expectation (test/b8-preconditions.test.ts); a hit of another sensor keeps rule 0.
+  it('a hit of another sensor without the declared surface is still inconclusive (rule 0 outranks vulnerable), hit recorded', async () => {
     const { result, evidence } = await runWith('BRP3', [], 'canary_command');
     expect(result.runs[0].outcome).toBe('inconclusive');
     expect(result.runs[0].inconclusive_reason).toBe('precondition_failed');

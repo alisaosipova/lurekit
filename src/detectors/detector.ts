@@ -22,6 +22,11 @@ export interface DetectorEvaluateContext {
   workdir?: string;
   capturedOutput?: string;
   capturedOutputRef?: string;
+  /** Block 8 (evidence-spec s1.3 "Pre-run negative control", s1.5): `baseline` is the runner's
+   *  read-only evaluation right after provisioning, before the agent runs (no capturedOutput,
+   *  empty toolCalls); a sensor whose final evaluation writes into the run dir writes nothing in
+   *  that phase. Absent means `final`. */
+  phase?: 'baseline' | 'final';
 }
 
 /** What provision() returns. `artefacts` (ADR-0025 D1) declares the files this sensor put into

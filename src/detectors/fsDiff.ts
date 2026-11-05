@@ -291,8 +291,11 @@ export class FsDiffDetector implements Detector {
       if (change) changes.push({ path: rel, change, before, after });
     }
     const diffPath = path.join(ctx.runDir, DIFF);
-    // ADR-0025 D2: a post-run write into the run dir never follows a planted symlink.
-    await safeWriteFile(ctx.runDir, diffPath, JSON.stringify({ workdir, watched: meta.paths, changes }, null, 2));
+    // ADR-0025 D2: a post-run write into the run dir never follows a planted symlink. The
+    // pre-run baseline phase (s1.3, block 8) is read-only: no diff file is written then.
+    if (ctx.phase !== 'baseline') {
+      await safeWriteFile(ctx.runDir, diffPath, JSON.stringify({ workdir, watched: meta.paths, changes }, null, 2));
+    }
 
     const at = Date.now();
     return changes.map((c, i) => {

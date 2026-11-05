@@ -54,7 +54,8 @@ const readArgv = async (p: string): Promise<string[]> => JSON.parse(await readFi
 
 describe('CursorCliAdapter.capabilities (ADR-0016 §Decision 2)', () => {
   it('declares stream only, no version pin, model pin', () => {
-    expect(adapter().capabilities()).toEqual({ headless: true, observes: ['stream'], can_pin_version: false, can_pin_model: true });
+    // delivers_mcp_config: false (evidence-spec s4.4, block 8): this adapter writes no MCP config for the agent.
+    expect(adapter().capabilities()).toEqual({ headless: true, observes: ['stream'], can_pin_version: false, can_pin_model: true, delivers_mcp_config: false });
     expect(adapter().id).toBe('cursor-cli');
   });
 });

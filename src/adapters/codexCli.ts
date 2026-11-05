@@ -21,7 +21,8 @@ import { performance } from 'node:perf_hooks';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 
-import type { Adapter, ObservationSource, RunObservation, RunOptions, SetupProfile, ToolCall } from './adapter.js';
+import type { Adapter,
+  AdapterCapabilities, ObservationSource, RunObservation, RunOptions, SetupProfile, ToolCall } from './adapter.js';
 import { requireWorkdir, stderrExcerpt } from './adapter.js';
 import { agentChildEnv, argvRecord, CappedStderr, envNames } from './childEnv.js';
 import { killTree, probeVersionCapped, spawnAgent, waitExit } from './childProcess.js';
@@ -159,15 +160,11 @@ export class CodexCliAdapter implements Adapter {
     this.isolateCodexHome = opts.isolateCodexHome !== false;
   }
 
-  capabilities(): {
-    headless: boolean;
-    observes: ObservationSource[];
-    can_pin_version: boolean;
-    can_pin_model: boolean;
-  } {
+  capabilities(): AdapterCapabilities {
     // ADR-0018 §Decision 2: the adapter installs nothing and background self-update is
     // UNVERIFIED -> no version pin; hooks under exec unverified -> stream only; -m pins input.
-    return { headless: true, observes: ['stream'], can_pin_version: false, can_pin_model: true };
+    // s4.4 block 8: this adapter writes no MCP config for the agent -> delivers_mcp_config: false.
+    return { headless: true, observes: ['stream'], can_pin_version: false, can_pin_model: true, delivers_mcp_config: false };
   }
 
   /** Resolve the binary: constructor arg > env override > 'codex' on PATH. */

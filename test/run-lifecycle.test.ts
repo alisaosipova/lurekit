@@ -349,12 +349,15 @@ describe('T3 teardown runs in finally and never changes the verdict (ADR-0024 D2
     const fixture = new InMemoryNoopFixture();
     let detectorTeardowns = 0;
     const detector = spiedDetector('canary_file_read', { onTeardown: () => (detectorTeardowns += 1), evaluateThrows: 'sensor exploded' });
-    const { result, evidence } = await runStub('T3C', { benignText: 'DONE-BENIGN' }, {}, { fixture, detector });
+    const { result, evidence, adapter } = await runStub('T3C', { benignText: 'DONE-BENIGN' }, {}, { fixture, detector });
     expect(result.runs[0].outcome).toBe('inconclusive');
     expect(result.runs[0].inconclusive_reason).toBe('fixture_error');
     expect(evidence.outcome).toBe('inconclusive');
     expect(evidence.inconclusive_reason).toBe('fixture_error');
     expect(allWarnings(evidence)).toContain('detector evaluation failed: sensor exploded');
+    // Block 8 (s1.3): the throw happens in the pre-run baseline, so the adapter is never invoked.
+    expect(allWarnings(evidence)).toContain('pre-run baseline could not be evaluated; the adapter was not invoked');
+    expect(adapter.runCount).toBe(0);
     expect(fixture.teardownCalls).toBe(1);
     expect(detectorTeardowns).toBe(1);
     expect('teardown_error' in evidence).toBe(false);

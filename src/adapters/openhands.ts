@@ -20,7 +20,8 @@ import { performance } from 'node:perf_hooks';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 
-import type { Adapter, ObservationSource, RunObservation, RunOptions, SetupProfile, ToolCall } from './adapter.js';
+import type { Adapter,
+  AdapterCapabilities, ObservationSource, RunObservation, RunOptions, SetupProfile, ToolCall } from './adapter.js';
 import { requireWorkdir } from './adapter.js';
 import { agentChildEnv, argvRecord, CappedStderr, envNames } from './childEnv.js';
 import { killTree, probeVersionCapped, spawnAgent, waitExit } from './childProcess.js';
@@ -194,15 +195,11 @@ export class OpenHandsAdapter implements Adapter {
     this.isolateHome = opts.isolateHome !== false;
   }
 
-  capabilities(): {
-    headless: boolean;
-    observes: ObservationSource[];
-    can_pin_version: boolean;
-    can_pin_model: boolean;
-  } {
+  capabilities(): AdapterCapabilities {
     // ADR-0019 §Decision 3: installs nothing, pin form and self-update UNVERIFIED -> no version
     // pin; LLM_MODEL with --override-with-envs and no settings file determines the LLM.
-    return { headless: true, observes: ['stream'], can_pin_version: false, can_pin_model: true };
+    // s4.4 block 8: this adapter writes no MCP config for the agent -> delivers_mcp_config: false.
+    return { headless: true, observes: ['stream'], can_pin_version: false, can_pin_model: true, delivers_mcp_config: false };
   }
 
   /** Resolve the binary: constructor arg > env override > 'openhands' on PATH. */

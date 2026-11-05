@@ -66,7 +66,7 @@
       "required": ["detector"],
       "properties": {
         "detector": { "enum": ["canary_egress_http","canary_egress_dns","canary_file_read","canary_command","canary_mcp_tool","fs_diff"] },
-        "match": { "type": "object", "description": "detector-specific canary identifiers (host, token, path, tool name)" }
+        "match": { "type": "object", "description": "Detector-specific canary identifiers. Supported keys per detector, enforced by each sensor's provision() (unknown key or value -> inconclusive(fixture_error), evidence-spec s1.2b): canary_mcp_tool: tool (must be aab_canary_record), event (server_started), server (restrict hits to recorder lines written by that server); canary_egress_http: registry_fetch; fs_diff: paths; canary_command, canary_file_read, canary_egress_dns: none." }
       }
     },
     "benign_task": {

@@ -2,12 +2,15 @@
 // Standalone stdio entrypoint for the inert canary MCP server (shared impl in
 // mcpCanaryServer.ts). A fixture's .mcp.json / profilePatch points the agent under test at
 // `node <this file>` with AAB_MCP_RECORDER (and optionally AAB_MCP_TOKEN, AAB_MCP_SERVER_NAME,
-// AAB_MCP_DESCRIPTION, AAB_MCP_RESULT) in the env; the agent spawns it, and any invocation of the decoy tool is recorded to the run dir for canary_mcp_tool to read.
+// AAB_MCP_DESCRIPTION, AAB_MCP_RESULT, AAB_MCP_INSTRUCTIONS) in the env; the agent spawns it, and
+// any invocation of the decoy tool is recorded to the run dir for canary_mcp_tool to read.
 // On startup it also appends one { event: 'server_started', token, time } record to the same
-// recorder (evidence-spec §1.2b), so an unconsented auto-start by the agent runtime is observable
-// even when no tool is ever called. The harness-owned control child sets AAB_MCP_NO_START_RECORD=1
-// and records no start.
-// It speaks MCP over stdio only — it binds no port and reaches no network.
+// recorder (evidence-spec s1.2b), so an unconsented auto-start by the agent runtime is observable
+// even when no tool is ever called. Every harness-owned copy (the detector's control child, the
+// mcp_stdio fixture child) is launched with the argv flag `--no-start-record` and records no
+// start (block 8). The env form AAB_MCP_NO_START_RECORD is ignored: a value in the operator's
+// shell cannot blind the signal.
+// It speaks MCP over stdio only -- it binds no port and reaches no network.
 
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
@@ -15,11 +18,12 @@ import {
   appendServerStarted,
   createCanaryMcpServer,
   ENV_DESCRIPTION,
-  ENV_NO_START_RECORD,
+  ENV_INSTRUCTIONS,
   ENV_RECORDER,
   ENV_RESULT,
   ENV_SERVER_NAME,
   ENV_TOKEN,
+  NO_START_RECORD_FLAG,
 } from './mcpCanaryServer.js';
 
 async function main(): Promise<void> {
@@ -33,10 +37,13 @@ async function main(): Promise<void> {
   const name = process.env[ENV_SERVER_NAME] || undefined;
   const description = process.env[ENV_DESCRIPTION] || undefined;
   const result = process.env[ENV_RESULT] || undefined;
-  if (process.env[ENV_NO_START_RECORD] !== '1') {
+  const instructions = process.env[ENV_INSTRUCTIONS] || undefined;
+  // Block 8 (evidence-spec s1.2b): only the argv flag suppresses the start record. The env form
+  // is deliberately not consulted.
+  if (!process.argv.slice(2).includes(NO_START_RECORD_FLAG)) {
     await appendServerStarted(recorderPath, token);
   }
-  const server = createCanaryMcpServer({ recorderPath, token, name, description, result });
+  const server = createCanaryMcpServer({ recorderPath, token, name, description, result, instructions });
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }

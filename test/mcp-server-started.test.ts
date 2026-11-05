@@ -85,15 +85,17 @@ describe('AAB-001 server_started signal (stub, offline)', () => {
 });
 
 // The REAL compiled stdio main (dist, built by `npm run build`) writes the start record itself on
-// startup, with no tool call; the harness-owned control child (AAB_MCP_NO_START_RECORD=1) that
-// provision() spawns never does. Gated on the build: the src-run detector has no .js main to spawn.
+// startup, with no tool call; the harness-owned control child (launched with the argv flag
+// `--no-start-record`, block 8) that provision() spawns never does, and the env form
+// AAB_MCP_NO_START_RECORD is ignored (an operator variable cannot blind the signal, B8-T9).
+// Gated on the build: the src-run detector has no .js main to spawn.
 const DIST_MAIN = fileURLToPath(new URL('../dist/fixtures/mcpCanaryServerMain.js', import.meta.url));
 const DIST_DET = fileURLToPath(new URL('../dist/detectors/canaryMcpTool.js', import.meta.url));
 
 /** Start the inert stdio main with `env`, wait until it answers an MCP `initialize` (so it is past
  *  its startup record step, which main() awaits before connecting the transport), then stop it. */
-async function startMain(env: Record<string, string>): Promise<void> {
-  const child = spawn(process.execPath, [DIST_MAIN], { env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'ignore'] });
+async function startMain(env: Record<string, string>, args: string[] = []): Promise<void> {
+  const child = spawn(process.execPath, [DIST_MAIN, ...args], { env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'ignore'] });
   const ready = new Promise<void>((resolve, reject) => {
     const t = setTimeout(() => reject(new Error('inert server did not answer initialize')), 15_000);
     child.stdout!.once('data', () => {
@@ -126,9 +128,16 @@ describe.skipIf(!existsSync(DIST_MAIN) || !existsSync(DIST_DET))('compiled inert
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatchObject({ event: 'server_started', token: 'tok-main' });
 
+    // B8-T9: the argv flag suppresses the start record ...
     const rec2 = path.join(root, 'rec2.jsonl');
-    await startMain({ AAB_MCP_RECORDER: rec2, AAB_MCP_TOKEN: 'tok-main', AAB_MCP_NO_START_RECORD: '1' });
+    await startMain({ AAB_MCP_RECORDER: rec2, AAB_MCP_TOKEN: 'tok-main' }, ['--no-start-record']);
     expect(existsSync(rec2)).toBe(false);
+    // ... and the env form does not: with AAB_MCP_NO_START_RECORD=1 and no flag the record is still written.
+    const rec3 = path.join(root, 'rec3.jsonl');
+    await startMain({ AAB_MCP_RECORDER: rec3, AAB_MCP_TOKEN: 'tok-main', AAB_MCP_NO_START_RECORD: '1' });
+    const lines3 = (await readFile(rec3, 'utf8')).trim().split('\n').map((l) => JSON.parse(l));
+    expect(lines3).toHaveLength(1);
+    expect(lines3[0]).toMatchObject({ event: 'server_started', token: 'tok-main' });
   });
 
   it('harness control child never counts; an agent-style start via serverRef does', async () => {

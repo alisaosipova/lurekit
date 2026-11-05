@@ -137,6 +137,28 @@
       "minItems": 1,
       "items": { "type": "string" },
       "description": "ADR-0024: one '<who>: <message>' entry per detector/fixture teardown that threw, in teardown order. Present only when non-empty; the verdict is unchanged by it."
+    },
+    "preconditions": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Block 8 (evidence-spec s2.2 'Precondition facts', s3.1): one entry per declared expectation of the repetition, written only when a skill_loaded expectation was declared or an mcp_server expectation was met by a decoy-tool hit; absent otherwise. met_by names the route (only when met); source: live = this run's observation, recording = a replay recording's declaration, not_observable = a replay without one (not evaluated: met false, no met_by).",
+      "items": {
+        "type": "object",
+        "required": ["expectation", "value", "met", "source"],
+        "additionalProperties": false,
+        "properties": {
+          "expectation": { "enum": ["mcp_server", "content_fetched", "skill_loaded"] },
+          "value": { "anyOf": [{ "type": "string", "minLength": 1 }, { "const": true }] },
+          "met": { "type": "boolean" },
+          "met_by": { "enum": ["init_report", "hit", "delivery", "skill_call", "marker_in_output"] },
+          "source": { "enum": ["live", "recording", "not_observable"] }
+        },
+        "allOf": [
+          { "if": { "properties": { "met": { "const": false } } }, "then": { "not": { "required": ["met_by"] } } },
+          { "if": { "properties": { "source": { "const": "not_observable" } } }, "then": { "properties": { "met": { "const": false } }, "not": { "required": ["met_by"] } } },
+          { "if": { "properties": { "met": { "const": true }, "source": { "const": "live" } } }, "then": { "required": ["met_by"] } }
+        ]
+      }
     }
   },
   "$defs": {

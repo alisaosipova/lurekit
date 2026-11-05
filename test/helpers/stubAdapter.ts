@@ -11,6 +11,7 @@ import path from 'node:path';
 
 import type {
   Adapter,
+  AdapterCapabilities,
   McpServerStatus,
   ObservationSource,
   RunObservation,
@@ -45,6 +46,14 @@ export interface StubScript {
   // reported `connected` (as a real agent that loaded the fixture config would). Set to override
   // (e.g. [] to emulate a fixture server that never connected, evidence-spec §3.1).
   mcpServers?: McpServerStatus[];
+  // evidence-spec s3.1 skill_loaded (block 8). Default: one `Skill` tool call per skill dir in
+  // profile.skills, named after the dir (as a real agent that loaded the planted skill and
+  // invoked it would report). `null` = no Skill call at all (emulates an agent that never loaded
+  // the skill); a list = exactly these skill names are called.
+  skillCalls?: string[] | null;
+  // canary_mcp_tool trigger (block 8): the `server` field of the recorder line the stub appends
+  // (default: the sensor's match.server when set, else aab-canary).
+  mcpServerName?: string;
   // evidence-spec s3.1 content_fetched: emulate an agent that actually read the fixture content
   // over loopback (a real GET, so the fixture's own passive counter sees it). For each loopback
   // URL in profile.env under a known content-location name (AAB_ISSUE_FEED_URL,
@@ -259,13 +268,8 @@ export class StubAdapter implements Adapter {
 
   constructor(private readonly script: StubScript = {}) {}
 
-  capabilities(): {
-    headless: boolean;
-    observes: ObservationSource[];
-    can_pin_version: boolean;
-    can_pin_model: boolean;
-  } {
-    return { headless: true, observes: ['stream', 'hook'], can_pin_version: true, can_pin_model: true };
+  capabilities(): AdapterCapabilities {
+    return { headless: true, observes: ['stream', 'hook'], can_pin_version: true, can_pin_model: true, delivers_mcp_config: true };
   }
 
   async run(
@@ -293,7 +297,7 @@ export class StubAdapter implements Adapter {
 
     let streamExtra: string[] = [];
     if (this.script.trigger) {
-      streamExtra = await produceSignal(this.script.trigger, runDir, toolCalls);
+      streamExtra = await produceSignal(this.script.trigger, runDir, toolCalls, this.script.mcpServerName);
     }
     if (this.script.tamper) {
       for (const kind of this.script.tamper) await applyTamper(kind, runDir, this.script.tamperOutside);
@@ -312,6 +316,11 @@ export class StubAdapter implements Adapter {
     if (this.script.mcpToolName) {
       toolCalls.push(tc(this.script.mcpToolName, {}));
     }
+    // s3.1 skill_loaded: the Skill tool call shape observed live (evidence-spec s4.3).
+    const skills = this.script.skillCalls === null
+      ? []
+      : this.script.skillCalls ?? (profile.skills ?? []).map((dir) => path.basename(dir));
+    for (const skill of skills) toolCalls.push(tc('Skill', { skill }));
     if (this.script.writeFile) {
       if (!profile.workdir) throw new Error('StubAdapter.run: profile.workdir is required for writeFile');
       await mkdir(profile.workdir, { recursive: true });
@@ -389,6 +398,7 @@ async function produceSignal(
   kind: DetectorKind,
   runDir: string,
   toolCalls: ToolCall[],
+  serverName?: string,
 ): Promise<string[]> {
   if (kind === 'canary_command') {
     const meta = JSON.parse(
@@ -443,17 +453,19 @@ async function produceSignal(
   }
   if (kind === 'canary_mcp_tool') {
     // Simulate the agent invoking the decoy MCP tool by writing the same recorder entry the
-    // inert server's handler would have written, and recording the tool call on the stream.
+    // inert server's handler would have written (with its `server` provenance, s1.2b block 8),
+    // and recording the tool call on the stream.
     const meta = JSON.parse(
       await readFile(path.join(runDir, 'canary_mcp_tool.canary.json'), 'utf8'),
-    ) as { tool: string; token: string; recorderFile: string };
+    ) as { tool: string; token: string; recorderFile: string; server?: string };
     const args = { note: 'ack', token: meta.token };
+    const server = serverName ?? meta.server ?? 'aab-canary';
     await appendFile(path.join(runDir, meta.recorderFile), JSON.stringify({ event: 'server_started', token: meta.token, time: 0 }) + '\n'); // the agent-spawned server records its start first (evidence-spec §1.2b)
     await appendFile(
       path.join(runDir, meta.recorderFile),
-      JSON.stringify({ tool: meta.tool, args, time: 0 }) + '\n',
+      JSON.stringify({ tool: meta.tool, args, time: 0, server }) + '\n',
     );
-    toolCalls.push(tc(meta.tool, args));
+    toolCalls.push(tc(`mcp__${server}__${meta.tool}`, args));
     return [];
   }
   throw new Error(`StubAdapter cannot produce a signal for detector "${kind}"`);
