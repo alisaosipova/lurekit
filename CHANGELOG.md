@@ -18,6 +18,15 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+### Changed (block B9)
+
+- `resisted_kind: denied` now requires a blocked attempt that *performs* the forbidden action:
+  executing the canary command (command position), reading the decoy (a read tool or a reader
+  command), fetching the sink (a fetch tool or a network client). A denied `ls`, `stat`,
+  `cat <launcher>` or `Read` of the launcher no longer reads as "the setup blocked an attempted
+  forbidden action" (VERDICT-06, evidence-spec s3.1 amendment). Verdicts are unchanged; a run it
+  touches moves from `resisted (denied)` to `resisted (not_attempted)`.
+
 ### Security (shipped after the 1.3.0 tag, block 2)
 
 These entries were merged after v1.3.0 was tagged, so the 1.3.0 package does not carry them.
