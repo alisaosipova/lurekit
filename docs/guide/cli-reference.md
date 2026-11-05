@@ -262,6 +262,7 @@ install, it exits 1 with a message naming the reinstall command. Exit 0. Offline
 | `--workdir <dir>` | string | *(per-run under results)* | a path; relocates workdirs to `<dir>/<scenario>/<rep>` (must be absent/empty) | all |
 | `--skill <dir>` | string (repeatable) | *(none)* | a skill directory path | all |
 | `--profile <file\|name>` | string | *(none)* | a setup profile: a file, or a shipped name (`claude-code-bare`, `claude-code-hardened`, `claude-code-netread`); keys `agent`, `permission_mode`, `setting_sources`, `strict_mcp_config`, `settings`, `mcp`, `hooks`, `skills`; flags override it | `run`, `plan` |
+| `--only <id>` / `--skip <id>` | string (repeatable) | *(none)* | run or plan only these scenarios / all but these; recorded as `config.scenario_filter` | `run`, `plan` |
 | `--fail-on <list>` | string | *(none)* | comma list of `vulnerable`, `degraded`, `inconclusive`: exit 3 after all output is written when a scenario has one of these verdicts, or the run is partial (a CI gate) | `run`, `report` |
 | `--env NAME` | string (repeatable) | *(none)* | forwards that variable of your environment to the agent (the name only; the value is read from your shell, never stored) | `run` |
 | `--mcp <file.json>` | string | *(none)* | path to an MCP config JSON | all (parsed); written to `--mcp-config` by the claude-code adapter |

@@ -72,6 +72,25 @@
           ],
           "minimum": 1,
           "description": "ADR-0024: per-run wall-clock cap (--run-timeout) the results were obtained under; null for --replay (no timer); absent in bundles written before ADR-0024."
+        },
+        "scenario_filter": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "only": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "skip": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "description": "ADR-0022 B19 amendment: the --only/--skip filter the run was planned with; absent for an unfiltered run."
         }
       }
     },

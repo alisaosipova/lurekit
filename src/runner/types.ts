@@ -87,6 +87,8 @@ export interface RunConfig {
   budget_usd?: number; // hard cost cap; the runner stops when the next run could exceed it
   // ADR-0024 D1: per-run wall-clock cap in ms; undefined arms no timer (replay, direct runner use).
   run_timeout_ms?: number;
+  // ADR-0022 B19: the --only/--skip filter, recorded in the manifest.
+  scenario_filter?: { only?: string[]; skip?: string[] };
 }
 
 /** Deterministic id source injected by the caller. The runner never generates ids or reads
@@ -292,6 +294,7 @@ export interface RunManifest {
     // ADR-0024 D4: the per-run cap the results were obtained under; null for --replay (no
     // timer). Optional in the type so manifests written before ADR-0024 stay valid.
     run_timeout_ms?: number | null;
+    scenario_filter?: { only?: string[]; skip?: string[] };
   };
   // corpus_digest_full: set only on a published bundle that withheld/excluded scenarios
   // (ADR-0017, evidence-spec s2.3): the run's original digest; corpus_digest then covers the

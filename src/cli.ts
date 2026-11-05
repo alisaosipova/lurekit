@@ -212,7 +212,7 @@ const STRING_FLAGS = new Set([
 ]);
 const NUMBER_FLAGS = new Set(['k', 'budget', 'run-timeout']);
 const NUMBER_FLAG_EXAMPLE: Record<string, string> = { k: '3', budget: '5', 'run-timeout': String(DEFAULT_RUN_TIMEOUT_S) };
-const MULTI_FLAGS = new Set(['skill', 'allow-host', 'withhold', 'exclude', 'env']);
+const MULTI_FLAGS = new Set(['skill', 'allow-host', 'withhold', 'exclude', 'env', 'only', 'skip']);
 /** Explicit allowlist of boolean flags: only the ones main()/a command actually reads. Anything
  *  else is rejected, so a typo or a mis-quoted flag can never be silently ignored (a single
  *  token like "--withhold AAB-003" once nearly published a withheld scenario). */
@@ -324,6 +324,18 @@ function writeOutput(output: string, text: string, deps: CliDeps): void {
   const abs = path.resolve(deps.cwd(), output);
   writeFileSync(abs, text, 'utf8');
   deps.stderr(`wrote ${abs}\n`);
+}
+
+/** ADR-0022 B19 (FEATURE-05): apply --only/--skip before the plan; an unknown id is an error. */
+function filterScenarios<T extends { id: string }>(scenarios: T[], flags: Flags): { kept: T[]; filter?: { only?: string[]; skip?: string[] } } {
+  const only = flags.multi.get('only') ?? [];
+  const skip = flags.multi.get('skip') ?? [];
+  if (only.length === 0 && skip.length === 0) return { kept: scenarios };
+  const ids = new Set(scenarios.map((s) => s.id));
+  const unknown = [...only, ...skip].filter((id) => !ids.has(id));
+  if (unknown.length) throw new Error(`--only/--skip: no scenario ${unknown.join(', ')} in this corpus\nnext: lurekit list`);
+  const kept = scenarios.filter((s) => (only.length === 0 || only.includes(s.id)) && !skip.includes(s.id));
+  return { kept, filter: { ...(only.length ? { only } : {}), ...(skip.length ? { skip } : {}) } };
 }
 
 export function cmdValidate(flags: Flags, deps: CliDeps): number {
@@ -718,11 +730,14 @@ export async function cmdPlan(flags: Flags, deps: CliDeps): Promise<number> {
     deps.stderr(`${problem}\n`);
     return 1;
   }
-  const { scenarios, errors } = loadScenarioDir(dir);
+  const loaded = loadScenarioDir(dir);
+  const { errors } = loaded;
+  const { kept: scenarios, filter: scenarioFilter } = filterScenarios(loaded.scenarios, flags);
   if (errors.length) deps.stderr(`warning: ${errors.length} scenario file(s) failed to load (run 'validate')\n`);
   const hint = `lurekit plan${flags._[0] !== undefined ? ` ${corpus.shown}` : ''}`;
   const profile = buildProfile(flags, deps, hint);
   const cfg = buildConfig(flags, deps, hint);
+  if (scenarioFilter) cfg.scenario_filter = scenarioFilter;
   const kIssue = kProblem(flags, hint);
   if (kIssue) {
     deps.stderr(`refusing to plan: ${kIssue}\n`);
@@ -876,7 +891,9 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
     deps.stderr(`refusing to run: ${problem}\n`);
     return 1;
   }
-  const { scenarios, errors } = loadScenarioDir(dir);
+  const loadedRun = loadScenarioDir(dir);
+  let scenarios = loadedRun.scenarios;
+  const errors = loadedRun.errors;
   if (errors.length) {
     const first = errors[0];
     deps.stderr(
@@ -888,6 +905,10 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
   const hint = `lurekit run${flags._[0] !== undefined ? ` ${corpus.shown}` : ''}`;
   const profile = buildProfile(flags, deps, hint);
   const cfg = buildConfig(flags, deps, hint);
+  // ADR-0022 B19: --only/--skip narrow the corpus before the plan; recorded in the manifest.
+  const filtered = filterScenarios(scenarios, flags);
+  scenarios = filtered.kept;
+  if (filtered.filter) cfg.scenario_filter = filtered.filter;
   // ADR-0022 amendment: report flags are checked before the prompt and any spawn, not after a paid run.
   const spendProblem = preSpendProblem(flags, deps, `${hint} --model ${typedPath(profile.model)}`);
   if (spendProblem) {
@@ -1091,6 +1112,11 @@ export function cmdReport(flags: Flags, deps: CliDeps): number {
     // ADR-0024 B13a: an empty or cut-off manifest (a run killed mid-write before durable writes).
     deps.stderr(`report: ${manifestPath} is empty or not valid JSON (${(err as Error).message}); nothing rendered\n`);
     return 1;
+  }
+  const scenarioFilter = manifest.config?.scenario_filter;
+  if (scenarioFilter) {
+    const f = scenarioFilter;
+    deps.stderr(`note: filtered run (${[f.only?.length ? `only ${f.only.join(',')}` : '', f.skip?.length ? `skip ${f.skip.join(',')}` : ''].filter(Boolean).join('; ')}); compare it only with runs of the same filter\n`);
   }
   if (manifest.partial) {
     deps.stderr(`note: partial run: ${manifest.partial.completed_scenarios} of ${manifest.partial.planned_scenarios} scenarios completed before it stopped; the report covers those only\n`);
@@ -1405,6 +1431,7 @@ Commands:
                    --env NAME (repeatable; forwards that variable of your environment to the agent)
                    --profile <file|name> (a setup profile, e.g. claude-code-hardened; flags override it)
                    --fail-on <verdicts> (run and report: exit 3 when a scenario is vulnerable,degraded,inconclusive)
+                   --only <id> / --skip <id> (repeatable; run or plan a subset, recorded in the manifest)
                    --settings/--hooks <file.json>  claude-code only: forwarded in the single
                                     --settings file, observe hooks appended last (ADR-0020)
                    --setting-sources <csv>  claude-code only: load only these setting sources
@@ -1455,7 +1482,7 @@ self-test scratch) lives under --results; nothing is written to the system temp 
 
 /** ADR-0022 B16d (UX-06): the flags each command reads; anything else is refused. */
 const PROFILE_FLAGS = ['agent', 'agent-version', 'env', 'hooks', 'mcp', 'model', 'permission-mode', 'profile', 'setting-sources', 'settings', 'skill', 'workdir'];
-const CONFIG_FLAGS = ['budget', 'isolation', 'k', 'mode', 'results', 'run-timeout', 'vulnerable-if'];
+const CONFIG_FLAGS = ['budget', 'isolation', 'k', 'mode', 'results', 'run-timeout', 'vulnerable-if', 'only', 'skip'];
 const COMMAND_FLAGS: Record<string, readonly string[]> = {
   validate: [],
   list: ['format'],

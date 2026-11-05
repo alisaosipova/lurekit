@@ -1335,6 +1335,7 @@ export class BenchmarkRunner implements Runner {
         budget_usd: typeof cfg.budget_usd === 'number' ? cfg.budget_usd : null,
         // ADR-0024 D4: the per-run cap the results were obtained under (null = no timer).
         run_timeout_ms: typeof cfg.run_timeout_ms === 'number' ? cfg.run_timeout_ms : null,
+        ...(cfg.scenario_filter ? { scenario_filter: cfg.scenario_filter } : {}),
       },
       corpus: {
         scenario_count: corpus.length,

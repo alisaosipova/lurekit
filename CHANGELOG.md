@@ -18,6 +18,13 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+### Added (block B19)
+
+- `run` and `plan --only <id>` / `--skip <id>` (repeatable): measure a subset, for example to
+  re-measure the one surface a report flagged. The plan, cost estimate, budget and manifest
+  describe exactly the subset; the manifest records `config.scenario_filter` and `report` notes a
+  filtered run. An unknown id is refused before anything is spent (FEATURE-05).
+
 ### Fixed (blocks B10c, B13b)
 
 - Harness sinks and the canary MCP server's recorder are appended without following a symlink

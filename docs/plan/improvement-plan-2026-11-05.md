@@ -643,10 +643,10 @@ in the B10/B13 status.
 ## Finding status (maintained per merge)
 
 Closed (implemented): VERDICT-01..11 and 14; SECURITY-01..09, 11;
-ENGINE-02, 03, 04, 05, 08, 09 (sequential-by-design note), 10, 11, 15, 16; UX-01..15, 17, 18; DOCS-01..14; FEATURE-07.
+ENGINE-02, 03, 04, 05, 08, 09 (sequential-by-design note), 10, 11, 15, 16; UX-01..15, 17, 18; DOCS-01..14; FEATURE-05, FEATURE-07.
 Closed (rejected by this plan as guardrails): SECURITY-10, FEATURE-16, FEATURE-17.
 Partly done: VERDICT-12 (group reap; feed path token open), FEATURE-04 (SARIF locations; action.yml deferred).
 Open: VERDICT-12, VERDICT-15, ENGINE-01, ENGINE-07,
 ENGINE-12, ENGINE-13, ENGINE-14, UX-16,
-FEATURE-01, FEATURE-04, FEATURE-05, FEATURE-06, FEATURE-09, FEATURE-12, FEATURE-13,
+FEATURE-01, FEATURE-04, FEATURE-06, FEATURE-09, FEATURE-12, FEATURE-13,
 FEATURE-14, FEATURE-15.

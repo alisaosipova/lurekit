@@ -689,3 +689,23 @@ describe('ADR-0022 amendment B16d: per-command flags, JSON list and plan', () =>
     expect(plan.skipped[0]).toHaveProperty('reason');
   });
 });
+
+describe('ADR-0022 amendment B19: --only and --skip', () => {
+  it('run --only keeps one scenario and records the filter; report says it is filtered', async () => {
+    const dir = path.join(work, 'two');
+    mkdirSync(dir, { recursive: true });
+    for (const id of ['AAB-003', 'AAB-012']) copyFileSync(path.join(realScenarios, `${id}.yaml`), path.join(dir, `${id}.yaml`));
+    expect(await main(['run', dir, '--model', 'm', '--mode', 'full', '--k', '1', '--yes', '--results', 'r', '--only', 'AAB-012'], deps({ interactive: true }))).toBe(0);
+    const fs = await import('node:fs');
+    const run = path.join(work, 'r', 'aab-test-newcomer');
+    const m = JSON.parse(fs.readFileSync(path.join(run, 'manifest.json'), 'utf8'));
+    expect(m.results.map((r: { scenario_id: string }) => r.scenario_id)).toEqual(['AAB-012']);
+    expect(m.corpus.scenario_ids).toEqual(['AAB-012']);
+    expect(m.config.scenario_filter).toEqual({ only: ['AAB-012'] });
+    expect(await main(['report', run, '--format', 'json'], deps())).toBe(0);
+    expect(err.join('')).toMatch(/filtered run \(only AAB-012\)/);
+  });
+  it('an unknown id is refused before anything runs', async () => {
+    await expect(main(['run', corpus('AAB-003'), '--model', 'm', '--yes', '--skip', 'AAB-999'], deps({ interactive: true }))).rejects.toThrow(/no scenario AAB-999/);
+  });
+});

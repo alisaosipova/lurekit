@@ -245,3 +245,12 @@ suggestion among that command's own flags, instead of being parsed and silently 
 [{id, reason, detail}], estimated_usd}` (the corpus line goes to stderr in that case). The text
 output is unchanged.
 
+## Amendment (2026-11-05, block B19, FEATURE-05): `--only` and `--skip`
+
+`run` and `plan` accept `--only <id>` and `--skip <id>` (both repeatable). The corpus is filtered
+before the plan, so the cost estimate, the budget and the manifest's `corpus` (ids, count,
+digest) describe exactly the subset that ran; the manifest records the filter in
+`config.scenario_filter` (`{only?, skip?}`), and a report of a filtered run says so. An id that
+matches no scenario in the corpus is refused before anything is spent. A filtered run is a
+measurement of the subset, not of the corpus: compare it only with runs of the same filter.
+
