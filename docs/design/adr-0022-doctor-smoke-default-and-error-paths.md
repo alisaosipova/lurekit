@@ -254,3 +254,11 @@ digest) describe exactly the subset that ran; the manifest records the filter in
 matches no scenario in the corpus is refused before anything is spent. A filtered run is a
 measurement of the subset, not of the corpus: compare it only with runs of the same filter.
 
+## Amendment (2026-11-05, FEATURE-15): pinned install recipes per agent
+
+doctor's install line for codex-cli is a pinned `npm install --prefix .aab-runs/_bin/codex-<v>
+@openai/codex@<v>` plus `export AAB_CODEX_BIN=...` (version 0.166.0, the one verified on the
+installed binary), parallel to the Claude Code recipe; an npm-global codex install is a `warn`
+with that recipe as the fix. The OpenHands version in its recipe is one constant. Cursor stays
+unpinnable (ADR-0016). doctor stays read-only: it prints recipes, it installs nothing.
+

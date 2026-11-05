@@ -103,6 +103,19 @@ export interface AgentInfo {
  *  single constant lives in src/report/guidance.ts (ADR-0023 amendment). */
 export const PINNED_CLAUDE_FALLBACK = PUBLISHED_CLAUDE_VERSION;
 
+/** FEATURE-15: the Codex CLI version verified on the installed binary (NOTES, 2026-11-03), and
+ *  the OpenHands version the adapter was reconciled against; both feed the install recipes. */
+export const PINNED_CODEX_VERSION = '0.166.0';
+export const PINNED_OPENHANDS_VERSION = '1.16.0';
+
+/** A pinned, per-batch Codex install, parallel to pinnedClaudeRecipe: npm --prefix under
+ *  .aab-runs, never -g. (The npm pin form is plain npm semantics; NOTES records it as not stated
+ *  in Codex's own docs.) */
+export function pinnedCodexRecipe(version: string): string {
+  const dir = `.aab-runs/_bin/codex-${version}`;
+  return `npm install --prefix ${dir} @openai/codex@${version} && export ${CODEX_BIN_ENV}="$PWD/${dir}/node_modules/.bin/codex"`;
+}
+
 /** NOTES "Second auto-update": a separate `npm install --prefix <dir>` (not -g) is the verified
  *  way to keep a batch on one version. The prefix lives under .aab-runs (never the temp dir). */
 export function pinnedClaudeRecipe(version: string): string {
@@ -132,14 +145,14 @@ export const AGENTS: Record<AgentId, AgentInfo> = {
     id: 'codex-cli',
     envVar: CODEX_BIN_ENV,
     defaultBin: 'codex',
-    install: 'npm install -g @openai/codex',
+    install: pinnedCodexRecipe(PINNED_CODEX_VERSION),
     login: 'export CODEX_API_KEY=<your key>',
   },
   openhands: {
     id: 'openhands',
     envVar: OPENHANDS_BIN_ENV,
     defaultBin: 'openhands',
-    install: 'uv tool install openhands==1.16.0 --python 3.12',
+    install: `uv tool install openhands==${PINNED_OPENHANDS_VERSION} --python 3.12`,
     login: 'export LLM_API_KEY=<your key>',
   },
 } as Record<AgentId, AgentInfo>;
@@ -265,6 +278,15 @@ export function checkUpdate(info: AgentInfo, bin: BinaryFinding, platform: NodeJ
       status: 'warn',
       summary: 'Cursor CLI auto-updates by default and has no versioned install (NOTES); the adapter records version drift per run',
       fix: 'agent --version   (before and after a batch; compare with the agent_version_reported in evidence)',
+    };
+  }
+  if (info.id === 'codex-cli' && /[\\/](?:lib[\\/])?node_modules[\\/]@openai[\\/]codex[\\/]/.test(bin.path) && !bin.path.includes('.aab-runs')) {
+    // FEATURE-15: a shared npm-global install can change under a batch (any later `npm i -g`).
+    return {
+      id: 'update',
+      status: 'warn',
+      summary: 'npm-global install: a later `npm install -g` changes the version under a batch; pin one install per batch',
+      fix: pinnedCodexRecipe(semver === PINNED_CLAUDE_FALLBACK ? PINNED_CODEX_VERSION : semver),
     };
   }
   return {

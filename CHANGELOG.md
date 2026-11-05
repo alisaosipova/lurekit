@@ -18,6 +18,12 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+### Changed (FEATURE-15)
+
+- doctor prints a pinned per-batch install for codex-cli (`npm install --prefix
+  .aab-runs/_bin/codex-0.166.0 ...`, as for Claude Code) and warns when codex is an npm-global
+  install that a later `npm install -g` can change under a batch.
+
 ### Added (FEATURE-13)
 
 - SARIF `run.properties.remediation` carries the "What to change" mapping as data (surface, its

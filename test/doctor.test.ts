@@ -368,3 +368,16 @@ describe('post-run diagnosis (pure)', () => {
     expect(renderDiagnosis([])).toBe('');
   });
 });
+
+describe('FEATURE-15: pinned install recipes', () => {
+  it('codex-cli gets a pinned --prefix recipe and a warning on an npm-global install', async () => {
+    const { agentInfo, checkUpdate, pinnedCodexRecipe, PINNED_CODEX_VERSION } = await import('../src/doctor.js');
+    expect(agentInfo('codex-cli').install).toBe(pinnedCodexRecipe(PINNED_CODEX_VERSION));
+    expect(agentInfo('codex-cli').install).toMatch(/npm install --prefix \.aab-runs\/_bin\/codex-0\.166\.0 @openai\/codex@0\.166\.0/);
+    const c = checkUpdate(agentInfo('codex-cli'), { check: { id: 'binary', status: 'ok', summary: '' }, path: '/usr/lib/node_modules/@openai/codex/bin/codex.js', version: 'codex-cli 0.166.0' } as never, 'linux');
+    expect(c?.status).toBe('warn');
+    expect(c?.fix).toMatch(/--prefix/);
+    const pinned = checkUpdate(agentInfo('codex-cli'), { check: { id: 'binary', status: 'ok', summary: '' }, path: '/w/.aab-runs/_bin/codex-0.166.0/node_modules/@openai/codex/bin/codex.js', version: 'codex-cli 0.166.0' } as never, 'linux');
+    expect(pinned?.status).toBe('ok');
+  });
+});
