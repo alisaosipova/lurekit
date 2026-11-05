@@ -18,6 +18,15 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+### Fixed (block B10a)
+
+- Concurrent requests to the egress sink or the local registry could leave the tamper witness
+  in a different order than the file, a false `evidence_tampered` on a clean run; appends are now
+  serialised per sink (ENGINE-05, ADR-0025 amendment).
+- The egress sink and the `mcp_http` fixture now use the shared loopback helpers: in-flight
+  connections are dropped at teardown, requests time out after 5 s, and an `mcp_http` request
+  body is capped at 1 MiB (ENGINE-11, ENGINE-15).
+
 ### Added (block B11b)
 
 - `run`/`plan --profile <file|name>` loads a setup profile: a JSON file or a shipped name

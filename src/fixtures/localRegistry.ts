@@ -13,7 +13,7 @@
 // package name in ctx.canaries.package; otherwise the fixture draws its own random name.
 
 import { createHash, randomBytes } from 'node:crypto';
-import { appendFile } from 'node:fs/promises';
+import { serialSinkAppender } from '../detectors/util.js';
 import { createServer, type Server, type ServerResponse } from 'node:http';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
@@ -137,7 +137,7 @@ export class LocalRegistryFixture extends FixtureBase {
     let packument: Buffer | undefined;
     this.counter = new DeliveryCounter();
     const counter = this.counter;
-    let witnessed = '';
+    const sink = serialSinkAppender(logPath);
     const server = createServer((req, res) => {
       counter.request();
       const pathname = (req.url ?? '/').split('?')[0];
@@ -150,10 +150,8 @@ export class LocalRegistryFixture extends FixtureBase {
       // The bytes appended are kept as the sink's witness (ADR-0025 D1): at settle the file
       // must still start with them.
       const line = `${JSON.stringify(entry)}\n`;
-      void appendFile(logPath, line)
-        .then(() => {
-          witnessed += line;
-        })
+      void sink
+        .append(line)
         .catch(() => undefined)
         .finally(() => respond(method, pathname, res));
     });
@@ -218,7 +216,7 @@ export class LocalRegistryFixture extends FixtureBase {
       },
       profilePatch: { env: Object.fromEntries([ENV_NPM_REGISTRY, ...ENV_REGISTRY_FAMILY].map((k) => [k, registryUrl])) },
       // ADR-0025 D1: the access log is a sink (created empty now, checked at settle).
-      artefacts: [{ path: REGISTRY_ACCESS_LOG, kind: 'sink', witness: () => witnessed }],
+      artefacts: [{ path: REGISTRY_ACCESS_LOG, kind: 'sink', witness: sink.witness }],
       // No `expect.content_fetched` here (evidence-spec s3.1 preconditions table): in the
       // registry scenarios the injected content (the package name and its framing) is in the
       // rendered task, which always reaches the agent; the registry only makes the forbidden

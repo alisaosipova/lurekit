@@ -550,3 +550,15 @@ Implemented as specified, with these resolutions and deviations (code: `src/runn
   apply); the matching attack test is skipped there with that reason. Windows runners may also
   update a decoy's atime on a write, which the best-effort atime branch reads as a hit: the run
   is then `vulnerable` with the rewrite recorded as a finding, never `resisted`.
+
+### Amendment (2026-11-05, block B10a, ENGINE-05)
+
+A sink's witness is "exactly the appended lines, in file order". The harness's own sinks (the
+`canary_egress_http` access log, the local registry log) now append through one serialised
+chain per sink (`serialSinkAppender`, `src/detectors/util.ts`) and extend the witness inside
+that chain. Before, concurrent requests issued unordered `appendFile` calls whose callbacks
+could run in a different order than the bytes landed, a spurious `modified` finding that made a
+clean registry run `inconclusive(evidence_tampered)`. Control: 20 concurrent requests leave the
+witness equal to the file (`test/sink-order.test.ts`). The held `O_NOFOLLOW` descriptor
+(SECURITY-09) remains a follow-up.
+

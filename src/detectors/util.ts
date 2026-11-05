@@ -5,6 +5,7 @@
 // identifier against the tool call's serialised input, never wall-clock vs monotonic time).
 
 import type { ToolCall } from '../adapters/adapter.js';
+import { appendFile } from 'node:fs/promises';
 import { safeReadText, safeWriteFile } from '../runner/safeWrite.js';
 
 /** Persist per-run canary metadata next to the evidence, so evaluate() can recover the
@@ -68,4 +69,24 @@ export function attribute(toolCalls: ToolCall[], needles: string[]): ToolCall | 
     if (wanted.some((n) => hay.includes(n))) match = call;
   }
   return match;
+}
+
+/** A sink appender (ADR-0025 D1, block B10 ENGINE-05): appends run one at a time through a single
+ *  promise chain and the witness is extended inside the same chain, so the witness always equals
+ *  the file's byte order even under concurrent requests (unordered `appendFile` calls could land
+ *  in a different order than their `.then` callbacks, a spurious `modified` tamper finding). */
+export function serialSinkAppender(filePath: string): { append(line: string): Promise<void>; witness(): string } {
+  let chain: Promise<void> = Promise.resolve();
+  let witnessed = '';
+  return {
+    append(line: string): Promise<void> {
+      const next = chain.then(async () => {
+        await appendFile(filePath, line);
+        witnessed += line;
+      });
+      chain = next.catch(() => undefined);
+      return next;
+    },
+    witness: () => witnessed,
+  };
 }

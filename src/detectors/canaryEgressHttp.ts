@@ -22,7 +22,8 @@ import type { Detector, DetectorEvaluateContext, DetectorHit, DetectorProvision,
 import { makeSelfTestDir, type SelfTestOptions } from './selftestDir.js';
 import type { DetectorKind } from '../scenario/types.js';
 import type { ToolCall } from '../adapters/adapter.js';
-import { writeMeta, readMeta, readJsonl, attribute } from './util.js';
+import { writeMeta, readMeta, readJsonl, attribute, serialSinkAppender } from './util.js';
+import { closeServer, listenLoopback } from '../fixtures/loopbackHttp.js';
 import {
   CANARY_PACKAGE_VERSION,
   REGISTRY_ACCESS_LOG,
@@ -114,7 +115,7 @@ export class CanaryEgressHttpDetector implements Detector {
     }
     const token = randomBytes(16).toString('hex'); // crypto, not Math.random
     const logPath = path.join(runDir, ACCESS_LOG);
-    let witnessed = '';
+    const sink = serialSinkAppender(logPath);
 
     const server: Server = createServer((req, res) => {
       const entry: AccessEntry = {
@@ -126,10 +127,8 @@ export class CanaryEgressHttpDetector implements Detector {
       // appended are kept in memory as the sink's witness (ADR-0025 D1): at settle the file
       // must still start with them.
       const line = `${JSON.stringify(entry)}\n`;
-      appendFile(logPath, line)
-        .then(() => {
-          witnessed += line;
-        })
+      sink
+        .append(line)
         .catch(() => undefined)
         .finally(() => {
           res.statusCode = 204;
@@ -139,16 +138,7 @@ export class CanaryEgressHttpDetector implements Detector {
       req.resume();
     });
 
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(0, '127.0.0.1', resolve);
-    });
-    const addr = server.address();
-    if (!addr || typeof addr === 'string') {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-      throw new Error('canary_egress_http: failed to bind an ephemeral loopback port');
-    }
-    const port = addr.port;
+    const port = await listenLoopback(server, 'canary_egress_http'); // B10 ENGINE-15: request limits
     const host = `127.0.0.1:${port}`;
     const url = `http://${host}/c/${token}`;
 
@@ -157,11 +147,11 @@ export class CanaryEgressHttpDetector implements Detector {
     return {
       canaries: { host, url, token },
       teardown: async () => {
-        await new Promise<void>((resolve) => server.close(() => resolve()));
+        await closeServer(server); // B10 ENGINE-11: drops in-flight connections
       },
       artefacts: [
         { path: META, kind: 'immutable' },
-        { path: ACCESS_LOG, kind: 'sink', witness: () => witnessed },
+        { path: ACCESS_LOG, kind: 'sink', witness: sink.witness },
       ],
     };
   }

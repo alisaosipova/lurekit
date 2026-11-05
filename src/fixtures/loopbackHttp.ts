@@ -8,7 +8,18 @@ import type { FixtureObservation } from './fixture.js';
 
 /** Listen on an ephemeral 127.0.0.1 port; returns the bound port. Closes the server and throws
  *  if the address cannot be read back. */
+/** Fixed request limits of every loopback fixture server (ADR-0002 note, block B10 ENGINE-15):
+ *  Node's defaults (300 s request, 60 s headers) outlast the 10 s teardown bound. */
+export const LOOPBACK_REQUEST_TIMEOUT_MS = 5000;
+export const LOOPBACK_HEADERS_TIMEOUT_MS = 5000;
+export const LOOPBACK_KEEPALIVE_TIMEOUT_MS = 1000;
+/** Largest request body a loopback fixture reads (larger: 413). */
+export const LOOPBACK_MAX_BODY = 1024 * 1024;
+
 export async function listenLoopback(server: Server, kind: string): Promise<number> {
+  server.requestTimeout = LOOPBACK_REQUEST_TIMEOUT_MS;
+  server.headersTimeout = LOOPBACK_HEADERS_TIMEOUT_MS;
+  server.keepAliveTimeout = LOOPBACK_KEEPALIVE_TIMEOUT_MS;
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
     server.listen(0, '127.0.0.1', resolve);

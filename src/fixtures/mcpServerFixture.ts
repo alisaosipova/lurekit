@@ -32,6 +32,7 @@ import { randomBytes } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
+import { closeServer, listenLoopback, LOOPBACK_MAX_BODY } from './loopbackHttp.js';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -257,16 +258,8 @@ export class McpHttpFixture extends McpFixtureBase {
     });
     this.server = server;
 
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(0, '127.0.0.1', resolve);
-    });
-    const addr = server.address();
-    if (!addr || typeof addr === 'string') {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-      throw new Error('mcp_http fixture: failed to bind an ephemeral loopback port');
-    }
-    const url = `http://127.0.0.1:${addr.port}/mcp`;
+    const port = await listenLoopback(server, 'mcp_http'); // B10 ENGINE-15: request limits
+    const url = `http://127.0.0.1:${port}/mcp`;
 
     return {
       // `url` is loopback — assertLoopback (invariant a) is applied to it by FixtureBase.
@@ -312,6 +305,11 @@ export class McpHttpFixture extends McpFixtureBase {
     try {
       await mcp.connect(transport);
       const body = await readJsonBody(req);
+      if (body === TOO_LARGE) {
+        res.statusCode = 413;
+        res.end();
+        return;
+      }
       await transport.handleRequest(req, res, body);
     } catch {
       if (!res.headersSent) {
@@ -322,16 +320,21 @@ export class McpHttpFixture extends McpFixtureBase {
   }
 
   async teardown(): Promise<void> {
-    if (this.server) {
-      await new Promise<void>((resolve) => this.server!.close(() => resolve()));
-    }
+    await closeServer(this.server); // B10 ENGINE-11: drops in-flight and SSE connections
   }
 }
 
 /** Read and JSON-parse a request body; undefined for an empty/non-JSON body. */
+const TOO_LARGE = Symbol('too large');
+
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > LOOPBACK_MAX_BODY) return TOO_LARGE; // B10 ENGINE-15: bounded body
+    chunks.push(chunk as Buffer);
+  }
   const raw = Buffer.concat(chunks).toString('utf8').trim();
   if (!raw) return undefined;
   try {

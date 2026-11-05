@@ -357,6 +357,12 @@ The replay adapter re-drives a recorded Claude Code run through the same parse/m
      create, read or delete it; after a live claude-code run the CLI prints where they are, and
      the getting-started guide says how to clean them. The opt-in run-scoped `CLAUDE_CONFIG_DIR`
      stays deferred (it changes what the hardened arm measures and needs a live check).
+- *Amendment (2026-11-05, block B10a, ENGINE-11/15): loopback request limits.* Every loopback
+  fixture server is bound through `listenLoopback` and closed through `closeServer`
+  (`closeAllConnections`), including the `canary_egress_http` sink and the `mcp_http` fixture;
+  each carries `requestTimeout` and `headersTimeout` of 5 s and `keepAliveTimeout` of 1 s (Node's
+  defaults outlast the 10 s teardown bound), and the `mcp_http` fixture reads at most 1 MiB of a
+  request body (larger: 413).
 - *Bounded stderr.* The Codex, Cursor and OpenHands adapters keep at most 1 MiB
   (`STDERR_FILE_MAX`) of the agent's stderr in `<agent>-stderr.log`; past that a final line
   `[lurekit: stderr truncated at 1048576 bytes; N more bytes dropped]` is written. Excerpts are
