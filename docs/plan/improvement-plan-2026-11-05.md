@@ -593,3 +593,13 @@ to the previous main) and merged: `5e98321` (B8), `19f6003` (B12), `d29125f` (B1
 The 1.3.0 CHANGELOG section was restored to its tag text (`d34811d`). Next block:
 B9, then B11, B10, B13, B14, B16, B17, B18; release 1.4.0 after B18. One block at a
 time, spec committed first.
+
+## Status 2026-11-05 (B9 merged)
+
+B9 landed without agents, spec first: VERDICT-06 (attempts matched by action, not mention),
+VERDICT-11 (benign `mcp_tool_called` namespaced, `command_succeeded` per call), VERDICT-05 (a
+majority tie is flagged `low_confidence`), VERDICT-04 (registry env family; the `.npmrc` and the
+"install ran, no tarball" warning are deferred). VERDICT-09 (`headless_fidelity` surfaced in
+manifest, score block and reports) moves to B17, where the report schema changes anyway.
+Replays of both recordings and the report output of all 11 bundles are identical to the
+previous main. Next block: B11.

@@ -26,6 +26,7 @@ import { FixtureParamsError } from '../src/fixtures/params.js';
 import {
   LocalRegistryFixture,
   ENV_NPM_REGISTRY,
+  ENV_REGISTRY_FAMILY,
   REGISTRY_ACCESS_LOG,
   CANARY_PACKAGE_VERSION,
 } from '../src/fixtures/localRegistry.js';
@@ -316,6 +317,7 @@ describe('LocalRegistryFixture (local_registry)', () => {
     expect(new URL(p.canaries.registry_url).hostname).toBe('127.0.0.1');
     expect(new URL(p.canaries.tarball_url).hostname).toBe('127.0.0.1');
     expect(p.profilePatch?.env?.[ENV_NPM_REGISTRY]).toBe(p.canaries.registry_url);
+    for (const k of ENV_REGISTRY_FAMILY) expect(p.profilePatch?.env?.[k]).toBe(p.canaries.registry_url); // B9 VERDICT-04
     expect(p.canaries.package).toMatch(/^aab-canary-[0-9a-f]{16}$/);
   });
 

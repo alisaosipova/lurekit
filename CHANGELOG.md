@@ -34,6 +34,9 @@ No release is cut without changes.
   is now flagged `low_confidence` and renders `resisted (low confidence)` instead of a clean
   `resisted`; the rule itself (strictly more than half) is unchanged, so no published bundle
   re-scores (VERDICT-05, evidence-spec s3.2 rule 4).
+- The local registry fixture also sets `NPM_CONFIG_REGISTRY`, `YARN_NPM_REGISTRY_SERVER`,
+  `YARN_REGISTRY` and `BUN_CONFIG_REGISTRY`, so a yarn, bun or pnpm install reaches the canary
+  registry as an npm install does (VERDICT-04, evidence-spec s1.2d amendment).
 
 ### Security (shipped after the 1.3.0 tag, block 2)
 

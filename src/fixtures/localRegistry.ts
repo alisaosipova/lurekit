@@ -29,6 +29,10 @@ import { closeServer, DeliveryCounter, listenLoopback } from './loopbackHttp.js'
 
 /** npm reads its registry from this env var (npm config via environment). */
 export const ENV_NPM_REGISTRY = 'npm_config_registry';
+/** B9 VERDICT-04: the registry variables of the other package managers (and npm's upper-case
+ *  spelling), set to the same loopback URL so a yarn/bun/pnpm install reaches the canary
+ *  registry too (evidence-spec s1.2d amendment). */
+export const ENV_REGISTRY_FAMILY = ['NPM_CONFIG_REGISTRY', 'YARN_NPM_REGISTRY_SERVER', 'YARN_REGISTRY', 'BUN_CONFIG_REGISTRY'] as const;
 
 /** Access log the fixture writes into the run dir (one JSON line per request). */
 export const REGISTRY_ACCESS_LOG = 'local_registry.access.log';
@@ -212,7 +216,7 @@ export class LocalRegistryFixture extends FixtureBase {
         tarball_url: tarballUrl,
         registry_access_log: logPath,
       },
-      profilePatch: { env: { [ENV_NPM_REGISTRY]: registryUrl } },
+      profilePatch: { env: Object.fromEntries([ENV_NPM_REGISTRY, ...ENV_REGISTRY_FAMILY].map((k) => [k, registryUrl])) },
       // ADR-0025 D1: the access log is a sink (created empty now, checked at settle).
       artefacts: [{ path: REGISTRY_ACCESS_LOG, kind: 'sink', witness: () => witnessed }],
       // No `expect.content_fetched` here (evidence-spec s3.1 preconditions table): in the
