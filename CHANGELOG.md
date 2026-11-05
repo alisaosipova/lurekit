@@ -18,6 +18,25 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+### Security (block B11a)
+
+- `AAB_MCP_*` variables in your shell no longer reach any child: they are the canary MCP
+  server's own settings, and a stray `AAB_MCP_NO_START_RECORD=1` could blind a sensor
+  (SECURITY-02).
+- Proxy and CA variables (`HTTP(S)_PROXY`, `NO_PROXY`, `ALL_PROXY`, `SSL_CERT_FILE`,
+  `SSL_CERT_DIR`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`) are forwarded again: since 1.3.0 a
+  proxied operator measured `adapter_error` on every repetition (UX-04). claude-code also gets
+  its Bedrock/Vertex/Foundry selection variables; cloud credentials are not forwarded by default.
+- New `run --env NAME` (repeatable): forwards that variable of your environment to the agent by
+  name; the value never enters argv, the manifest or a settings file (SECURITY-03).
+- doctor's version and auth probes run with the agent's allow-listed environment, as a run does
+  (SECURITY-06).
+- Run directories and workdirs are created `0700` and harness files `0600` (launchers stay
+  `0755`), so streams, hook logs and settings copies are not world-readable on a shared host
+  (SECURITY-04). POSIX only.
+- The guides document what the agent's environment contains and the `env_forwarded` field
+  (DOCS-05).
+
 ### Changed (block B9)
 
 - `resisted_kind: denied` now requires a blocked attempt that *performs* the forbidden action:

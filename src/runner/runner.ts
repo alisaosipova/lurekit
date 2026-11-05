@@ -528,7 +528,7 @@ export class BenchmarkRunner implements Runner {
    *  finding when a symlink sits on the way (unlinked, replaced by a real directory), else
    *  undefined. The benchmark dir itself is the operator's tree and is trusted. */
   private async makeRunDir(benchDir: string, runDir: string): Promise<TamperFinding | undefined> {
-    await mkdir(benchDir, { recursive: true });
+    await mkdir(benchDir, { recursive: true, mode: 0o700 }); // B11a: private (POSIX)
     let planted: TamperFinding | undefined;
     for (let attempt = 0; attempt < 4; attempt++) {
       try {
@@ -668,7 +668,7 @@ export class BenchmarkRunner implements Runner {
         // ADR-0025 D2: the workdir must be a real directory (created without creating through
         // a symlink when it is inside the run dir) and fresh; it is the agent's own tree.
         if (isInside(runDir, workdir)) await safeMkdir(runDir, workdir);
-        else await mkdir(workdir, { recursive: true });
+        else await mkdir(workdir, { recursive: true, mode: 0o700 }); // B11a
         if ((await lstat(workdir)).isSymbolicLink()) {
           throw new Error(`per-run workdir is a symlink: ${workdir}`);
         }
@@ -1363,7 +1363,7 @@ export class BenchmarkRunner implements Runner {
       totals,
     };
     const dir = path.join(cfg.resultsRoot, this.ids.benchmarkRunId);
-    await mkdir(dir, { recursive: true });
+    await mkdir(dir, { recursive: true, mode: 0o700 }); // B11a
     // ADR-0025 D2: the benchmark dir is the trusted root; the manifest never follows a symlink.
     await safeWriteFile(dir, MANIFEST_FILE, JSON.stringify(manifest, null, 2), { replaceDir: true });
     return manifest;

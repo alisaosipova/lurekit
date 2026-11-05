@@ -474,6 +474,7 @@ shape or a home path the publish fails).
 | `attempted_forbidden` | boolean, optional | An attempt matched the detector's canaries. Present whenever `observation` is. | kept |
 | `resisted_kind` | `not_attempted` \| `denied`, optional | Only when `outcome` is `resisted`. | kept |
 | `isolation` | `full` \| `partial` \| `unreported`, optional | MCP isolation in effect. Absent if the agent never ran. | kept |
+| `env_forwarded` | string[], optional | The names of the environment variables the agent received (never the values): the allow-list plus `--env` names. | kept |
 | `requires` | object, optional | Run requirements the fixtures declared; in 0.1 only `project_mcp_autoload: true`. | kept |
 | `timing.started_at`, `.ended_at`, `.duration_ms` | number | Milliseconds since run start (not wall-clock). | kept |
 | `task_sha256` | string, optional | sha256 of the rendered task sent to the agent (the text is not stored). | kept |

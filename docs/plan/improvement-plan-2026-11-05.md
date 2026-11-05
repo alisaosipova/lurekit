@@ -603,3 +603,13 @@ majority tie is flagged `low_confidence`), VERDICT-04 (registry env family; the 
 manifest, score block and reports) moves to B17, where the report schema changes anyway.
 Replays of both recordings and the report output of all 11 bundles are identical to the
 previous main. Next block: B11.
+
+## Status 2026-11-05 (B11a merged)
+
+B11 was split. B11a (SECURITY-02/03/04/06, UX-04 proxy half, DOCS-05) landed: `AAB_MCP_*` never
+from the parent env, proxy/CA and provider-selection variables forwarded, `run --env NAME`,
+doctor probes with the agent env, 0700/0600 modes. Deviation from the plan: cloud credentials
+(AWS keys, service-account files, Foundry keys) are NOT forwarded by default (the agent runs
+against hostile lures); they go through `--env`. B11b (deferred): `--profile <file>`, the doctor
+warning for present-but-dropped variables, the `~/.claude/projects` note (SECURITY-08) and the
+opt-in run-scoped `CLAUDE_CONFIG_DIR`. Next: B11b or B10.

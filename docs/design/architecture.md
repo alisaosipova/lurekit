@@ -317,11 +317,15 @@ The replay adapter re-drives a recorded Claude Code run through the same parse/m
   2. **Network basics are forwarded.** `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `ALL_PROXY`
      (any case), `SSL_CERT_FILE`, `SSL_CERT_DIR`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE` join the
      base list: without them a proxied operator measured `adapter_error` on every repetition.
-     claude-code additionally gets its provider variables: `AWS_REGION`, `AWS_PROFILE`,
-     `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_BEARER_TOKEN_BEDROCK`,
-     `ANTHROPIC_VERTEX_PROJECT_ID`, `CLOUD_ML_REGION`, `GOOGLE_APPLICATION_CREDENTIALS`,
-     `ANTHROPIC_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL` and the `ANTHROPIC_FOUNDRY_` prefix
-     (`CLAUDE_CODE_USE_BEDROCK|VERTEX|FOUNDRY` are already under `CLAUDE_`).
+     claude-code additionally gets its provider selection and routing variables: `AWS_REGION`,
+     `AWS_PROFILE`, `ANTHROPIC_VERTEX_PROJECT_ID`, `CLOUD_ML_REGION`,
+     `ANTHROPIC_FOUNDRY_RESOURCE`, `ANTHROPIC_FOUNDRY_BASE_URL`, `ANTHROPIC_MODEL`,
+     `ANTHROPIC_SMALL_FAST_MODEL` (`CLAUDE_CODE_USE_BEDROCK|VERTEX|FOUNDRY` are already under
+     `CLAUDE_`). Cloud credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
+     `AWS_SESSION_TOKEN`, `AWS_BEARER_TOKEN_BEDROCK`, `GOOGLE_APPLICATION_CREDENTIALS`,
+     `ANTHROPIC_FOUNDRY_API_KEY`) are deliberately not forwarded by default: the agent runs
+     against hostile lures and those credentials reach far beyond the model API. The operator
+     passes them explicitly with `--env NAME`.
   3. **`--env NAME` (repeatable)** on `run` copies the named variable from lurekit's own
      environment into `profile.env` (the operator-declared route ADR-0008 already defines). Only
      the name is on the command line; an unset name is refused before anything is spent. Values

@@ -469,3 +469,45 @@ describe('plan leaves no trace in the cwd', () => {
     expect(existsSync(path.join(work, '.aab-runs'))).toBe(true); // an existing root is kept
   });
 });
+
+describe('ADR-0008 amendment B11a: --env NAME and private run dirs', () => {
+  it('--env forwards a set variable by name into the profile; the value never appears in argv or the manifest', async () => {
+    process.env.LUREKIT_TEST_PROXY_TOKEN = 'value-that-must-not-leak-123';
+    let seen: Record<string, string> | undefined;
+    const stub = new StubAdapter({});
+    const orig = stub.run.bind(stub);
+    stub.run = async (profile, task, signal, opts) => {
+      seen = profile.env;
+      return orig(profile, task, signal, opts);
+    };
+    const code = await main(['run', corpus('AAB-001'), '--model', 'm', '--mode', 'full', '--k', '1', '--yes', '--results', 'r', '--env', 'LUREKIT_TEST_PROXY_TOKEN'], deps({ adapter: () => stub, interactive: true }));
+    expect(code).toBe(0);
+    expect(seen?.LUREKIT_TEST_PROXY_TOKEN).toBe('value-that-must-not-leak-123');
+    const runDir = path.join(work, 'r', 'aab-test-newcomer');
+    const manifest = await import('node:fs').then((fs) => fs.readFileSync(path.join(runDir, 'manifest.json'), 'utf8'));
+    expect(manifest).not.toContain('value-that-must-not-leak-123');
+    if (process.platform !== 'win32') {
+      const fs = await import('node:fs');
+      expect(fs.statSync(runDir).mode & 0o777).toBe(0o700);
+      expect(fs.statSync(path.join(runDir, 'manifest.json')).mode & 0o777).toBe(0o600);
+    }
+  });
+  it('--env refuses an unset name, a value, and AAB_MCP_* before anything runs', async () => {
+    delete process.env.LUREKIT_TEST_UNSET;
+    process.env.AAB_MCP_TOKEN = 'x';
+    for (const [arg, re] of [
+      ['LUREKIT_TEST_UNSET', /--env LUREKIT_TEST_UNSET: the variable is not set/],
+      ['A=B', /--env takes a variable NAME/],
+      ['AAB_MCP_TOKEN', /AAB_MCP_\* are the canary MCP server's own settings/],
+    ] as const) {
+      const d = deps({ adapter: () => { throw new Error('must not build an adapter'); }, interactive: true });
+      let msg = '';
+      try {
+        await main(['run', corpus('AAB-001'), '--model', 'm', '--yes', '--env', arg], d);
+      } catch (e) {
+        msg = (e as Error).message;
+      }
+      expect(msg + err.join(''), arg).toMatch(re);
+    }
+  });
+});

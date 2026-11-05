@@ -261,6 +261,7 @@ install, it exits 1 with a message naming the reinstall command. Exit 0. Offline
 | `--permission-mode <m>` | string | *(agent default)* | per-agent tokens (see table) | all |
 | `--workdir <dir>` | string | *(per-run under results)* | a path; relocates workdirs to `<dir>/<scenario>/<rep>` (must be absent/empty) | all |
 | `--skill <dir>` | string (repeatable) | *(none)* | a skill directory path | all |
+| `--env NAME` | string (repeatable) | *(none)* | forwards that variable of your environment to the agent (the name only; the value is read from your shell, never stored) | `run` |
 | `--mcp <file.json>` | string | *(none)* | path to an MCP config JSON | all (parsed); written to `--mcp-config` by the claude-code adapter |
 | `--settings <file.json>` | string | *(none)* | path to a Claude Code settings JSON | **claude-code only** |
 | `--hooks <file.json>` | string | *(none)* | path to a hooks JSON (event map or `{ "hooks": {...} }`) | **claude-code only** |
@@ -449,3 +450,17 @@ model echo); their live verdicts are provisional.
 - [`../../profiles/README.md`](../../profiles/README.md) -- the reference Claude Code profiles.
 - [`../design/evidence-spec.md`](../design/evidence-spec.md) -- the evidence and detector
   contract; the run-directory layout is section 2.1.
+
+
+## What the agent's environment contains
+
+The agent does not inherit your whole shell environment. It gets: the process basics (`PATH`,
+`HOME`, temp dirs, locale, terminal, shell, user name, the Windows basics), the network basics
+(`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `ALL_PROXY` in any case, `SSL_CERT_FILE`,
+`SSL_CERT_DIR`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`), the Node.js runtime knobs, its own
+auth and configuration variables (for claude-code also the Bedrock/Vertex/Foundry selection
+variables such as `CLAUDE_CODE_USE_BEDROCK` and `AWS_REGION`), and every variable you name with
+`--env`. Cloud credentials (`AWS_SECRET_ACCESS_KEY`, `GOOGLE_APPLICATION_CREDENTIALS`, ...) are not
+forwarded unless you pass them with `--env`, because the agent runs against hostile lures. The
+names that reached the agent (never the values) are recorded per repetition as
+`observation.env_forwarded`.

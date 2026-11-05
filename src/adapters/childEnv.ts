@@ -24,14 +24,31 @@ export const BASE_ENV_ALLOW: EnvAllow = {
     'PATH', 'PATHEXT', 'HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'SYSTEMROOT', 'WINDIR', 'COMSPEC',
     'TMPDIR', 'TEMP', 'TMP', 'LANG', 'LANGUAGE', 'TERM', 'SHELL', 'USER', 'LOGNAME', 'USERNAME',
     'NODE_OPTIONS', 'NODE_PATH', 'NODE_EXTRA_CA_CERTS', 'NODE_NO_WARNINGS',
+    // B11a: network basics (proxy, CA bundles); without them a proxied operator measures nothing.
+    'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE',
   ],
   prefixes: ['LC_', 'AAB_'],
 };
 
+/** Parent-env names never forwarded to any child (B11a, SECURITY-02): the canary MCP server's own
+ *  settings reach it only through the harness, never from the operator's shell. */
+export const NEVER_FROM_PARENT_PREFIXES: readonly string[] = ['AAB_MCP_'];
+
 /** Each agent's own auth/config variables (ADR-0008 amendment; NOTES): forwarded to that agent
  *  only. */
 export const AGENT_ENV_ALLOW: Readonly<Record<AgentId, EnvAllow>> = {
-  'claude-code': { names: ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'DISABLE_AUTOUPDATER'], prefixes: ['CLAUDE_'] },
+  'claude-code': {
+    names: [
+      'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'DISABLE_AUTOUPDATER',
+      // B11a: Bedrock / Vertex / Foundry selection and routing (CLAUDE_CODE_USE_* are under
+      // CLAUDE_). Cloud credentials (AWS keys, service-account files, Foundry keys) are NOT
+      // forwarded by default: they reach far beyond the model API, so the operator passes them
+      // explicitly with --env NAME.
+      'AWS_REGION', 'AWS_PROFILE', 'ANTHROPIC_VERTEX_PROJECT_ID', 'CLOUD_ML_REGION',
+      'ANTHROPIC_FOUNDRY_RESOURCE', 'ANTHROPIC_FOUNDRY_BASE_URL', 'ANTHROPIC_MODEL', 'ANTHROPIC_SMALL_FAST_MODEL',
+    ],
+    prefixes: ['CLAUDE_'],
+  },
   'cursor-cli': { names: ['CURSOR_API_KEY', 'CURSOR_AUTH_TOKEN', 'CURSOR_API_ENDPOINT'] },
   'codex-cli': { names: ['CODEX_API_KEY', 'CODEX_HOME'] },
   openhands: { names: ['LLM_API_KEY', 'LLM_MODEL', 'LLM_BASE_URL'], prefixes: ['OPENHANDS_'] },
@@ -44,6 +61,8 @@ export const AGENT_ENV_ALLOW: Readonly<Record<AgentId, EnvAllow>> = {
  *  process basic and is skipped by the check without being listed here. */
 export const ENV_VALUE_EXEMPT: readonly string[] = [
   'ANTHROPIC_BASE_URL', 'LLM_BASE_URL', 'LLM_MODEL', 'CURSOR_API_ENDPOINT', 'CODEX_HOME', 'DISABLE_AUTOUPDATER',
+  // B11a: published facts (a region, a model id), never secrets.
+  'AWS_REGION', 'CLOUD_ML_REGION', 'ANTHROPIC_MODEL', 'ANTHROPIC_SMALL_FAST_MODEL',
 ];
 
 /** Whether `name` is a process basic (BASE_ENV_ALLOW name or prefix; case-insensitive). */
@@ -65,7 +84,8 @@ export function filterEnv(
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [k, v] of Object.entries(base)) {
-    if (v !== undefined && allowed(k, allow)) env[k] = v;
+    if (v === undefined || NEVER_FROM_PARENT_PREFIXES.some((p) => k.toUpperCase().startsWith(p))) continue;
+    if (allowed(k, allow)) env[k] = v;
   }
   for (const [k, v] of Object.entries(declared)) env[k] = v;
   return env;

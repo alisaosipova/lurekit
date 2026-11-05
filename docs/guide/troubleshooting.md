@@ -41,7 +41,7 @@ each problem. Then match what `run` printed (ADR-0022):
 | `refusing to run: cannot write results under <dir>` | `--results` is not writable | `--results ./lurekit-runs` |
 | `refusing to run: openhands: headless mode always runs always-approve ...` | OpenHands headless cannot ask before tool calls | add `--permission-mode always-approve`, inside your own container or VM |
 | `what went wrong:` ... `is not authenticated for this run` | the agent ran but was not logged in | the `next:` line: `claude auth login`, `agent login`, `export CODEX_API_KEY=...` or `export LLM_API_KEY=...` |
-| `what went wrong:` ... `could not reach its model API` | network or DNS failure | check the network or proxy the agent uses |
+| `what went wrong:` ... `could not reach its model API` | network or DNS failure | check the network; proxy and CA variables are forwarded, other variables the agent needs go through `--env NAME` (see the CLI reference, "What the agent's environment contains") |
 | `what went wrong:` ... `not run: the next repetition could have exceeded --budget` | the budget cap stopped the run | raise `--budget` as the `next:` line suggests |
 
 A run that measured nothing because of such a failure exits 1. A repetition that hangs (a Codex
@@ -103,8 +103,9 @@ the next one.
 
 LureKit never handles credentials. It does not read, store, forward or log API keys or login
 tokens, and no fixture carries a real credential (evidence-spec.md section 5; ADR-0007). The
-Claude Code adapter spawns `claude -p` with the environment of the `lurekit` process plus the
-profile's `env`, so the agent authenticates the way it normally does on that host. Whatever
+Claude Code adapter spawns `claude -p` with an allow-listed subset of the `lurekit` process
+environment (its own auth variables included) plus any `--env NAME` you pass, so the agent
+authenticates the way it normally does on that host. Whatever
 login works for `claude -p` in your shell (a subscription login or an API key in the
 environment) is what the benchmark run uses. LureKit does not distinguish between them.
 

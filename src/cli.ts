@@ -211,7 +211,7 @@ const STRING_FLAGS = new Set([
 ]);
 const NUMBER_FLAGS = new Set(['k', 'budget', 'run-timeout']);
 const NUMBER_FLAG_EXAMPLE: Record<string, string> = { k: '3', budget: '5', 'run-timeout': String(DEFAULT_RUN_TIMEOUT_S) };
-const MULTI_FLAGS = new Set(['skill', 'allow-host', 'withhold', 'exclude']);
+const MULTI_FLAGS = new Set(['skill', 'allow-host', 'withhold', 'exclude', 'env']);
 /** Explicit allowlist of boolean flags: only the ones main()/a command actually reads. Anything
  *  else is rejected, so a typo or a mis-quoted flag can never be silently ignored (a single
  *  token like "--withhold AAB-003" once nearly published a withheld scenario). */
@@ -343,11 +343,27 @@ function buildProfile(flags: Flags, deps: CliDeps, hint = 'lurekit run'): SetupP
       }
     }
   }
+  // ADR-0008 amendment B11a: --env NAME copies a variable of lurekit's own environment into
+  // profile.env by name; the value never enters argv, the manifest or a settings file.
+  const envNames = flags.multi.get('env') ?? [];
+  let profileEnv: Record<string, string> | undefined;
+  if (envNames.length > 0) {
+    const parent = deps.env ? deps.env() : process.env;
+    profileEnv = {};
+    for (const name of envNames) {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new Error(`--env takes a variable NAME (got ${JSON.stringify(name)}); the value is read from your environment\nnext: export ${'MY_VAR'}=... then --env MY_VAR`);
+      if (name.toUpperCase().startsWith('AAB_MCP_')) throw new Error(`--env ${name}: AAB_MCP_* are the canary MCP server's own settings and cannot come from the operator`);
+      const value = parent[name];
+      if (value === undefined) throw new Error(`--env ${name}: the variable is not set in this environment\nnext: export ${name}=... before running lurekit`);
+      profileEnv[name] = value;
+    }
+  }
   return {
     agent,
     agent_version: flags.str.get('agent-version') ?? 'unpinned',
     model,
     workdir,
+    ...(profileEnv ? { env: profileEnv } : {}),
     permission_mode: flags.str.get('permission-mode'),
     settings: flags.str.has('settings') ? readJsonFile(flags.str.get('settings')!) : undefined,
     mcp: flags.str.has('mcp') ? readJsonFile(flags.str.get('mcp')!) : undefined,
@@ -1228,6 +1244,7 @@ Commands:
                    --workdir <dir>  optional BASE for per-run agent workdirs (<dir>/<scenario>/<rep>);
                                     default <results>/<run_id>/<scenario>/<rep>/work
                    --permission-mode <m>  --mcp <file.json>  --skill <dir> (repeatable)
+                   --env NAME (repeatable; forwards that variable of your environment to the agent)
                    --settings/--hooks <file.json>  claude-code only: forwarded in the single
                                     --settings file, observe hooks appended last (ADR-0020)
                    --setting-sources <csv>  claude-code only: load only these setting sources

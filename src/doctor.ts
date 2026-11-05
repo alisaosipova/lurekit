@@ -10,6 +10,7 @@
 // Process access goes through the injectable AgentProbe so the checks are testable offline.
 
 import { spawnSync } from 'node:child_process';
+import { agentChildEnv, harnessChildEnv } from './adapters/childEnv.js';
 
 import type { AgentId } from './scenario/types.js';
 import { resolveAgentBinary, CLAUDE_BIN_ENV } from './adapters/claudeCode.js';
@@ -46,7 +47,8 @@ export interface AgentProbe {
   nodeVersion: string; // process.versions.node, e.g. "26.13.0"
   platform: NodeJS.Platform;
   resolveBinary(spec: string): string | undefined;
-  exec(bin: string, args: string[], timeoutMs: number): ExecResult;
+  /** `agent` selects the child env (ADR-0008 B11a: the agent's allow-listed env, as a run). */
+  exec(bin: string, args: string[], timeoutMs: number, agent?: AgentId): ExecResult;
 }
 
 export function defaultAgentProbe(): AgentProbe {
@@ -55,7 +57,7 @@ export function defaultAgentProbe(): AgentProbe {
     nodeVersion: process.versions.node,
     platform: process.platform,
     resolveBinary: (spec) => resolveAgentBinary(spec),
-    exec: (bin, args, timeoutMs) => {
+    exec: (bin, args, timeoutMs, agent) => {
       // A .js/.mjs/.cjs entry point (codex is codex.js) runs under the current node, as the
       // adapters do, so it also works where shebangs do not (Windows).
       const isScript = /\.(mjs|cjs|js)$/i.test(bin);
@@ -67,6 +69,7 @@ export function defaultAgentProbe(): AgentProbe {
         timeout: timeoutMs,
         killSignal: 'SIGKILL',
         stdio: ['ignore', 'pipe', 'pipe'],
+        env: agent ? agentChildEnv(agent, undefined) : harnessChildEnv(),
       });
       const err = r.error as NodeJS.ErrnoException | undefined;
       return {
@@ -201,7 +204,7 @@ export function checkBinary(info: AgentInfo, probe: AgentProbe): BinaryFinding {
           },
     };
   }
-  const r = probe.exec(resolved, ['--version'], PROBE_TIMEOUT_MS);
+  const r = probe.exec(resolved, ['--version'], PROBE_TIMEOUT_MS, info.id);
   const version = r.status === 0 && !r.error ? versionFromOutput(r.stdout) : undefined;
   if (!version) {
     return {
@@ -332,7 +335,7 @@ export function checkAuth(info: AgentInfo, bin: BinaryFinding, probe: AgentProbe
       // `claude auth status --json` (2.1.318 help: "Show authentication status"): verified to
       // answer offline in well under a second, exit 0 + loggedIn:true when logged in, exit 1 +
       // loggedIn:false when not (NOTES). It starts no session and no model turn.
-      const r = probe.exec(bin.path, ['auth', 'status', '--json'], PROBE_TIMEOUT_MS);
+      const r = probe.exec(bin.path, ['auth', 'status', '--json'], PROBE_TIMEOUT_MS, 'claude-code');
       const s = pickStatus(r.stdout, 'loggedIn', 'authMethod');
       if (s.loggedIn === true) {
         return {
@@ -369,7 +372,7 @@ export function checkAuth(info: AgentInfo, bin: BinaryFinding, probe: AgentProbe
       if (!bin.path) return notChecked('agent status', 'no agent binary to ask');
       // `agent status --format json` (2026.10.22): {"isAuthenticated": false, ...} with no
       // login; answers offline (NOTES). It reports the login only, not CURSOR_API_KEY.
-      const r = probe.exec(bin.path, ['status', '--format', 'json'], PROBE_TIMEOUT_MS);
+      const r = probe.exec(bin.path, ['status', '--format', 'json'], PROBE_TIMEOUT_MS, 'cursor-cli');
       const s = pickStatus(r.stdout, 'isAuthenticated');
       if (s.loggedIn === true) return { id: 'auth', status: 'ok', summary: 'logged in (agent status: isAuthenticated=true)' };
       if (s.loggedIn === false) {

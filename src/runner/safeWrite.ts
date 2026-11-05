@@ -133,7 +133,7 @@ export async function safeMkdir(root: string, dir: string): Promise<void> {
   for (const part of parts) {
     cur = path.join(cur, part);
     try {
-      await mkdir(cur);
+      await mkdir(cur, { mode: 0o700 }); // ADR-0008 amendment B11a: run dirs are private (POSIX)
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
       const st = await lstat(cur);
@@ -176,7 +176,7 @@ export async function safeWriteFile(
   const tmp = `${abs}.${randomBytes(6).toString('hex')}.tmp`;
   let fh: FileHandle | undefined;
   try {
-    fh = await open(tmp, 'wx', opts.mode ?? 0o644);
+    fh = await open(tmp, 'wx', opts.mode ?? 0o600);
     await fh.writeFile(data);
     await fh.close();
     fh = undefined;
