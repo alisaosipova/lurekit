@@ -488,12 +488,15 @@ describe('T5 replay byte-identity (ADR-0024 D4)', () => {
     expect([...evB.keys()].sort()).toEqual([...evA.keys()].sort());
     // task_sha256 hashes the rendered task, which carries this run's random canaries: the one
     // field that legitimately differs between two replays (evidence-spec s4.1).
-    // A benign evidence_ref may carry the absolute results path (ra/ vs rb/): normalised too.
+    // A benign evidence_ref may carry the absolute results path (ra/ vs rb/): normalised too, in
+    // both its raw and its JSON-escaped spelling (on Windows the backslashes are doubled in the
+    // evidence text).
+    const jsonSpelling = (p: string): string => JSON.stringify(p).slice(1, -1);
     const normalise = (text: string): string =>
-      text
-        .replace(/"task_sha256": "[0-9a-f]{64}"/, '"task_sha256": "<canary-dependent>"')
-        .split(path.join(tmp, 'ra')).join('<results>')
-        .split(path.join(tmp, 'rb')).join('<results>');
+      [path.join(tmp, 'ra'), path.join(tmp, 'rb')]
+        .flatMap((p) => [p, jsonSpelling(p)])
+        .reduce((acc, p) => acc.split(p).join('<results>'),
+          text.replace(/"task_sha256": "[0-9a-f]{64}"/, '"task_sha256": "<canary-dependent>"'));
     for (const [key, text] of evA) {
       expect(normalise(evB.get(key) ?? ''), key).toBe(normalise(text));
       expect(text).not.toMatch(/"timed_out"|"elapsed_ms"|"teardown_error"/);
