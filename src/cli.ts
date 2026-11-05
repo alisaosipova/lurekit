@@ -43,6 +43,7 @@ import { getDetector, IMPLEMENTED_DETECTORS } from './detectors/index.js';
 import { fixturesForScenario } from './fixtures/index.js';
 import { BenchmarkRunner, Budget, DEFAULT_RUN_TIMEOUT_S, K_MAX, K_MIN, MAX_RUN_TIMEOUT_S, estimatedRunUsd, validK } from './runner/runner.js';
 import type { RunConfig, RunManifest, RunnerIds, RunMeta, EvidenceRecord } from './runner/types.js';
+import { diffRuns, renderDiffText } from './report/diff.js';
 import { report, REPOSITORY_URL, colorEnabled, terminalWidth, type ReportFormat, type EvidenceLookup, type SurfaceLookup, type ReMeasureContext } from './report/index.js';
 import { planPublish, readRunDir, writeBundle, formatPlanFailure, selectEvidence, defaultBundleDir } from './report/publish.js';
 import {
@@ -216,7 +217,7 @@ const MULTI_FLAGS = new Set(['skill', 'allow-host', 'withhold', 'exclude', 'env'
 /** Explicit allowlist of boolean flags: only the ones main()/a command actually reads. Anything
  *  else is rejected, so a typo or a mis-quoted flag can never be silently ignored (a single
  *  token like "--withhold AAB-003" once nearly published a withheld scenario). */
-const BOOLEAN_FLAGS = new Set(['help', 'version', 'redact-home', 'yes', 'allow-no-evidence']);
+const BOOLEAN_FLAGS = new Set(['help', 'version', 'redact-home', 'yes', 'allow-no-evidence', 'fail-on-regression']);
 
 /** Strict parser: throws (exit 1 via the bin's error path) before any command runs on
  *  an unknown --name, a --name=value form, a flag token containing whitespace, or a
@@ -336,6 +337,40 @@ function filterScenarios<T extends { id: string }>(scenarios: T[], flags: Flags)
   if (unknown.length) throw new Error(`--only/--skip: no scenario ${unknown.join(', ')} in this corpus\nnext: lurekit list`);
   const kept = scenarios.filter((s) => (only.length === 0 || only.includes(s.id)) && !skip.includes(s.id));
   return { kept, filter: { ...(only.length ? { only } : {}), ...(skip.length ? { skip } : {}) } };
+}
+
+/** diff <runA> <runB> [--format text|json] [--fail-on-regression] (ADR-0026). */
+export function cmdDiff(flags: Flags, deps: CliDeps): number {
+  const [a, b] = flags._;
+  if (!a || !b) {
+    deps.stderr('diff: needs two run directories\nnext: lurekit diff <runA> <runB>\n');
+    return 1;
+  }
+  const load = (dir: string): RunManifest | undefined => {
+    const p = path.join(path.resolve(deps.cwd(), dir), 'manifest.json');
+    try {
+      return JSON.parse(readFileSync(p, 'utf8')) as RunManifest;
+    } catch (e) {
+      deps.stderr(`diff: cannot read ${p} (${(e as NodeJS.ErrnoException).code ?? (e as Error).message})\nnext: pass two run directories that hold a manifest.json\n`);
+      return undefined;
+    }
+  };
+  const ma = load(a);
+  const mb = ma && load(b);
+  if (!ma || !mb) return 1;
+  const fmt = flags.str.get('format') ?? 'text';
+  if (fmt !== 'text' && fmt !== 'json') {
+    deps.stderr(`diff: --format must be text or json (got ${JSON.stringify(fmt)})\n`);
+    return 1;
+  }
+  const d = diffRuns(ma, mb);
+  for (const n of d.notes) deps.stderr(`note: ${n}; the comparison mixes measurement conditions\n`);
+  deps.stdout(fmt === 'json' ? JSON.stringify(d, null, 2) + '\n' : renderDiffText(d));
+  if (flags.bool.has('fail-on-regression') && d.counts.regressed > 0) {
+    deps.stderr(`gate: --fail-on-regression tripped by ${d.rows.filter((r) => r.transition === 'regressed').map((r) => r.id).join(', ')} (exit 3)\n`);
+    return 3;
+  }
+  return 0;
 }
 
 export function cmdValidate(flags: Flags, deps: CliDeps): number {
@@ -1307,7 +1342,7 @@ export async function cmdDoctor(flags: Flags, deps: CliDeps): Promise<number> {
 }
 
 /** Commands main() dispatches; the demo banner names only commands that exist. */
-export const COMMANDS: readonly string[] = ['run', 'validate', 'list', 'plan', 'selftest', 'report', 'publish', 'demo', 'doctor'];
+export const COMMANDS: readonly string[] = ['run', 'validate', 'list', 'plan', 'selftest', 'report', 'publish', 'demo', 'doctor', 'diff'];
 
 /** The demo banner (ADR-0021). Every value comes from the bundled manifest. */
 /** `scenariosDir` is the shipped corpus path as the user should type it (relative to their cwd),
@@ -1459,6 +1494,8 @@ Commands:
                    --scenarios <dir>  the run's scenario corpus (default: the shipped corpus): its
                                   source URLs pass the gate; with --withhold/--exclude the
                                   published corpus_digest is recomputed from it
+  diff <runA> <runB>  Compare two runs scenario by scenario (same / regressed / improved / changed);
+                   --format text|json, --fail-on-regression exits 3 when B is worse anywhere.
   demo             Print a published run that ships with the package (no agent, no auth, no cost),
                    rendered exactly like 'report', with a banner saying it is not your setup.
                    --format text|markdown|json|sarif (default: text on stdout, markdown into
@@ -1491,6 +1528,7 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
   run: [...PROFILE_FLAGS, ...CONFIG_FLAGS, 'output', 'replay', 'format', 'fail-on', 'yes'],
   report: ['output', 'format', 'fail-on', 'results'],
   publish: ['out', 'allow-host', 'withhold', 'exclude', 'redact-home', 'allow-no-evidence', 'scenarios', 'results'],
+  diff: ['format', 'fail-on-regression'],
   // demo and doctor keep their own, older refusals ("only --format and --output", "doctor accepts only").
 };
 
@@ -1545,6 +1583,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     case 'publish': return cmdPublish(flags, deps);
     case 'demo': return cmdDemo(flags, deps);
     case 'doctor': return cmdDoctor(flags, deps);
+    case 'diff': return cmdDiff(flags, deps);
     default: {
       const near = closestCommand(command);
       const next = near ? `next: lurekit ${near}   (did you mean "${near}"?)` : 'next: lurekit --help';

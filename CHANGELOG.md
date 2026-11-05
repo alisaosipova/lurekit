@@ -18,6 +18,13 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+### Added (block B20)
+
+- `lurekit diff <runA> <runB>`: per-scenario verdict transitions between two runs (`same`,
+  `regressed`, `improved`, `changed`, `only in A/B`), with notes when `k`, the rule, the mode,
+  the corpus or the filter differ; `--format json`; `--fail-on-regression` exits 3 when run B is
+  worse anywhere (FEATURE-06, ADR-0026).
+
 ### Added (block B19)
 
 - `run` and `plan --only <id>` / `--skip <id>` (repeatable): measure a subset, for example to

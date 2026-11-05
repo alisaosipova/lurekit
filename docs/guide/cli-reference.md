@@ -480,3 +480,12 @@ after `.aab-runs` or your results path when you no longer need them.
 Each command accepts only its own flags; a flag that belongs to another command is refused with
 the list the command accepts. `lurekit list --format json` and `lurekit plan --format json` print
 JSON on stdout (for `plan`, the corpus line goes to stderr).
+
+## `lurekit diff <runA> <runB>`
+
+Compares two runs from their manifests (no agent, no evidence needed): one row per scenario with
+its verdict in each run and the transition (`same`, `regressed`, `improved`, `changed`,
+`only in A`, `only in B`; worse means `resisted` < `degraded`/`inconclusive` < `vulnerable`).
+Differences in `k`, the vulnerable_if rule, the mode, the corpus digest or the scenario filter
+are printed as notes. `--format json` prints the rows and counts; `--fail-on-regression` exits 3
+when any scenario regressed, for a CI check that a setup change made nothing worse.
