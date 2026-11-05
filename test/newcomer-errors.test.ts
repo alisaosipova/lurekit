@@ -140,7 +140,9 @@ describe('run: smoke by default, plan + confirmation before a live launch', () =
   it('an agent without a published run says so instead of estimating', async () => {
     const stub = new StubAdapter({});
     await main(['run', corpus('AAB-005'), '--agent', 'cursor-cli', '--model', 'gpt-5'], deps({ adapter: () => stub }));
-    expect(errText()).toContain('estimated cost: no published run yet for cursor-cli, no estimate');
+    // ADR-0022 amendment (block 3): the s3.3 per-run estimate is named on both lines.
+    expect(errText()).toContain('estimated cost: unknown for cursor-cli (no published run); each repetition is charged an estimated 0.25 USD against --budget');
+    expect(errText()).toContain('budget cap: none (add --budget <usd> to stop before a repetition that could exceed it) (cursor-cli reports no per-run cost; each repetition is charged an estimated 0.25 USD)');
   });
 
   it('--replay never asks and needs no --yes (zero cost)', async () => {
@@ -238,7 +240,7 @@ describe('run: newcomer error paths say what happened and the next command', () 
   it('--budget reached mid-run: the remaining repetitions are named, with a higher cap to try (exit 0)', async () => {
     const stub = new StubAdapter({ cost: 1, benignText: 'SUMMARY: ok' });
     const code = await main(
-      ['run', corpus('AAB-003'), '--model', 'sonnet', '--k', '3', '--budget', '1.5', '--yes', '--results', path.join(work, 'runs')],
+      ['run', corpus('AAB-003'), '--model', 'sonnet', '--mode', 'full', '--k', '3', '--budget', '1.5', '--yes', '--results', path.join(work, 'runs')],
       deps({ adapter: () => stub }),
     );
     expect(code).toBe(0);

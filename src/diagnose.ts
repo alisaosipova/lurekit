@@ -9,7 +9,7 @@
 import type { AgentId } from './scenario/types.js';
 import { agentInfo } from './doctor.js';
 
-export type IssueCategory = 'tampered' | 'budget' | 'timeout' | 'binary' | 'permission' | 'auth' | 'network' | 'model' | 'adapter';
+export type IssueCategory = 'tampered' | 'budget' | 'timeout' | 'benign' | 'binary' | 'permission' | 'auth' | 'network' | 'model' | 'adapter';
 
 export interface RepIssue {
   scenario_id: string;
@@ -30,7 +30,7 @@ export interface Diagnosis {
   evidence_path?: string;
 }
 
-const PATTERNS: Array<[Exclude<IssueCategory, 'tampered' | 'budget' | 'timeout' | 'adapter'>, RegExp]> = [
+const PATTERNS: Array<[Exclude<IssueCategory, 'tampered' | 'budget' | 'timeout' | 'benign' | 'adapter'>, RegExp]> = [
   ['binary', /not found or not executable|failed to spawn agent binary|\bENOENT\b|\bEACCES\b/],
   ['permission', /permission_mode: always-approve|permission_mode "[^"]*" is not available|unknown permission_mode token/],
   [
@@ -44,7 +44,7 @@ const PATTERNS: Array<[Exclude<IssueCategory, 'tampered' | 'budget' | 'timeout' 
   ['model', /Model metadata for .* not found|unknown model|invalid model|model_not_found|\bmodel\b.*\b(does not exist|not found)/i],
 ];
 
-export const CATEGORY_ORDER: readonly IssueCategory[] = ['tampered', 'budget', 'timeout', 'binary', 'permission', 'auth', 'network', 'model', 'adapter'];
+export const CATEGORY_ORDER: readonly IssueCategory[] = ['tampered', 'budget', 'timeout', 'benign', 'binary', 'permission', 'auth', 'network', 'model', 'adapter'];
 
 /** Category of one repetition, or undefined when it measured something / needs no advice. */
 export function classifyRep(rep: RepIssue): { category: IssueCategory; example: string } | undefined {
@@ -62,6 +62,11 @@ export function classifyRep(rep: RepIssue): { category: IssueCategory; example: 
   if (rep.inconclusive_reason === 'run_timeout') {
     const why = rep.warnings.find((w) => /^run timed out after /.test(w));
     return { category: 'timeout', example: why ?? rep.warnings[0] ?? 'run_timeout' };
+  }
+  // Block 3 (evidence-spec s3.1 "Benign haystack"): the adapter reported no reply text.
+  if (rep.inconclusive_reason === 'benign_unevaluated') {
+    const why = rep.warnings.find((w) => w.startsWith('benign not evaluated: '));
+    return { category: 'benign', example: why ?? rep.warnings[0] ?? 'benign_unevaluated' };
   }
   for (const [cat, re] of PATTERNS) {
     const hit = rep.warnings.find((w) => re.test(w));
@@ -114,6 +119,11 @@ function advice(cat: IssueCategory, ctx: DiagnoseContext): { what: string; next:
         next: `inspect the stalled repetition's stream file, or re-run with a higher cap, e.g. --run-timeout ${higher}`,
       };
     }
+    case 'benign':
+      return {
+        what: 'the adapter reported no reply text, so the benign check could not be evaluated; they are inconclusive(benign_unevaluated), not passes',
+        next: "inspect the stream file; if the agent did reply, the adapter's reply-text shape needs a NOTES entry (docs/design/NOTES-verified-facts.md)",
+      };
     case 'binary':
       return {
         what: `the ${ctx.agent} binary could not be launched`,

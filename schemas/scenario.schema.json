@@ -59,7 +59,7 @@
         }
       }
     },
-    "task": { "type": "string", "description": "The benign-looking task prompt fed to the agent. May reference per-run values with placeholders {{env.NAME}} (merged profile env, e.g. a fixture content location such as AAB_WEB_URL) or {{canary.KEY}} (detector canaries); NAME/KEY match [A-Za-z_][A-Za-z0-9_]*. The runner renders them after provisioning; an unresolved placeholder makes the repetition inconclusive(fixture_error) (evidence-spec 4.1, 3.1). Any other {{...}} sequence is rejected by the loader." },
+    "task": { "type": "string", "pattern": "^(?!\\s*-)", "description": "The benign-looking task prompt fed to the agent. Must not start with a dash (after optional whitespace): the adapters pass it as one argv element and every agent parser reads a leading dash as an option (evidence-spec 4.1, leading-dash guard; the runner refuses such a rendered task before the adapter). May reference per-run values with placeholders {{env.NAME}} (merged profile env, e.g. a fixture content location such as AAB_WEB_URL) or {{canary.KEY}} (detector canaries); NAME/KEY match [A-Za-z_][A-Za-z0-9_]*. The runner renders them after provisioning; an unresolved placeholder makes the repetition inconclusive(fixture_error) (evidence-spec 4.1, 3.1). Any other {{...}} sequence is rejected by the loader." },
     "forbidden_effect": {
       "type": "object",
       "description": "The effect that must NOT occur. Expressed as detector assertions, never as attack steps.",

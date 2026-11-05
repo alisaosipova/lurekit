@@ -73,8 +73,11 @@ Only `y` or `yes` launches. `--yes` launches without the prompt. When stdin is n
 `--yes` is absent the run is refused (exit 1) with a message naming `--yes`, so CI never launches
 a live agent by accident. `--mode full` (k=3) asks the same way; `--replay` never asks (zero
 cost). The estimate comes from the published run shipped as the demo (claude-code on sonnet
-only); other agents print "no published run yet, no estimate". A binary that cannot be found is
-refused before the prompt with the install or `AAB_*_BIN` fix.
+only); other agents print "unknown for <agent> (no published run); each repetition is charged an
+estimated 0.25 USD against --budget", and the `budget cap:` line repeats the per-repetition
+estimate. A finished run whose manifest carries `spend_basis` prints `spend: <usd> USD
+(estimated|mixed basis; the agent reported no per-run cost)` on stderr. A binary that cannot be
+found is refused before the prompt with the install or `AAB_*_BIN` fix.
 
 Pre-spend validation (ADR-0022 amendment): before the plan, the prompt and any agent spawn,
 `run` checks `--format` (json, markdown or sarif), that the directory of `--output` exists and is
@@ -210,7 +213,8 @@ and a `fix:` command under each warn/fail line:
   validates, and how many scenarios would run for the agent; `selftest`: every detector's
   positive/negative control passes.
 - `cost`: "about X USD for smoke (k=1), about Y USD for full (k=3) on sonnet, from a published
-  run; other models differ" for claude-code; "no published run yet, no estimate" otherwise.
+  run; other models differ" for claude-code; "no published run yet, no estimate; each repetition
+  is charged an estimated 0.25 USD against --budget" otherwise.
 
 The last line is `Next: lurekit run <corpus> --agent <agent> --model <model> (asks before it
 spends).` with the resolved corpus, `--agent` and `--model` filled in; only a value doctor cannot
@@ -267,10 +271,10 @@ the body would be digested into evidence yet never reach the agent.
 | Flag | Type | Default | Allowed values |
 |------|------|---------|----------------|
 | `--mode <m>` | string | `smoke` | `smoke`, `full` |
-| `--k <n>` | number | `1` (smoke) / `3` (full) | positive integer |
+| `--k <n>` | number | `1` (smoke) / `3` (full) | a whole number from 1 to 10 (`run` and `plan` refuse `0`, negatives, fractions, `Infinity` and values above 10 before anything launches); `--mode smoke` runs k=1, so an explicit `--k` other than 1 with smoke is refused (`use --mode full --k <n> for repetitions`), never silently overridden |
 | `--vulnerable-if <v>` | string | `any` | `any`, `majority` |
 | `--isolation <m>` | string | `container` | `container`, `container+netns` |
-| `--budget <usd>` | number | *(none)* | a number greater than 0 (`run` refuses 0 or less before launching) |
+| `--budget <usd>` | number | *(none)* | a number greater than 0 (`run` refuses 0 or less before launching). Each repetition is charged its reported `cost_usd` when the agent reports a usable one (claude-code; openhands when its stream carries a positive cost), else a per-run estimate: the published per-repetition figure for claude-code, 0.25 USD for any other agent. The plan's `budget cap:` line says so for an agent without a published run, and the manifest records `spend_basis` (`estimated`/`mixed`) when an estimate was charged |
 | `--run-timeout <seconds>` | number | `180` | `run` only: a whole number >= 1 and <= 2147483 (the Node timer maximum; refused before launching otherwise). A repetition still running past it is stopped (the agent's whole process tree is killed) and scored `inconclusive(run_timeout)`; a detector hit before the stop still scores `vulnerable`. Recorded as `config.run_timeout_ms` in the manifest. Ignored by `--replay` (ADR-0024). |
 | `--results <dir>` | string | `.aab-runs` | a path; `report`/`publish` also read it to list run directories, and `publish` writes its default bundle under it |
 | `--yes` | boolean | off | `run` only: launch a live run without the `Launch? [y/N]` prompt (required when stdin is not a terminal) |

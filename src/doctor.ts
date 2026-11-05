@@ -19,6 +19,7 @@ import { OPENHANDS_BIN_ENV } from './adapters/openhands.js';
 import { getDetector, IMPLEMENTED_DETECTORS } from './detectors/index.js';
 import type { DetectorKind } from './scenario/types.js';
 import type { RunManifest } from './runner/types.js';
+import { estimatedRunUsd } from './runner/runner.js';
 import { PUBLISHED_CLAUDE_VERSION } from './report/guidance.js';
 
 export type CheckStatus = 'ok' | 'warn' | 'fail';
@@ -562,7 +563,8 @@ export function usd(n: number): string {
 /** "about X USD for smoke (k=1), about Y USD for full (k=3) on sonnet, from a published run;
  *  other models differ", or the no-estimate sentence. */
 export function estimateSentence(agent: AgentId, kept: number, basis: CostEstimate | undefined): string {
-  if (!basis) return `no published run yet for ${agent}, no estimate`;
+  // ADR-0022 amendment (block 3): the s3.3 per-run estimate charged against --budget.
+  if (!basis) return `no published run yet for ${agent}, no estimate; each repetition is charged an estimated ${estimatedRunUsd(agent)} USD against --budget`;
   return (
     `about ${usd(kept * basis.perRepUsd)} USD for smoke (k=1), about ${usd(kept * 3 * basis.perRepUsd)} USD for full (k=3) ` +
     `on ${basis.model}, from a published run; other models differ ` +
@@ -572,7 +574,8 @@ export function estimateSentence(agent: AgentId, kept: number, basis: CostEstima
 
 /** Estimate for one concrete run (scenarios x k), same basis. */
 export function runEstimateSentence(agent: AgentId, kept: number, k: number, basis: CostEstimate | undefined): string {
-  if (!basis) return `no published run yet for ${agent}, no estimate`;
+  // ADR-0022 amendment (block 3): the s3.3 per-run estimate charged against --budget.
+  if (!basis) return `unknown for ${agent} (no published run); each repetition is charged an estimated ${estimatedRunUsd(agent)} USD against --budget`;
   return (
     `about ${usd(kept * k * basis.perRepUsd)} USD (${kept} scenario(s) x k=${k} x ${basis.perRepUsd.toFixed(3)} USD) ` +
     `on ${basis.model}, from a published run; other models differ`

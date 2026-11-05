@@ -68,3 +68,41 @@ and digesting a body that never reaches the agent.
 - Whether hook groups from a `--settings` file merge with project-scope groups on a live
   `claude` is still UNVERIFIED (NOTES § Claude Code); the offline stub models a merge.
 - `--skill <dir>` is still not consumed by the claude-code adapter; out of scope here.
+
+## Amendment (2026-11-04, block 3): fixture `profilePatch` allow-list
+
+Status: specced before the code (block 3, verdict arithmetic); normative text in evidence-spec
+s4.3 "profilePatch merging note"; test plan evidence-spec s3.3 B3-T7.
+
+This ADR made `profile.settings` and `profile.hooks` reach the agent. That raised the stakes of
+the fixture patch merge in `src/runner/runner.ts` (`mergeProfilePatch`), which was `{ ...base,
+...patch }` followed by per-key corrections: a fixture could introduce a `settings` or `hooks`
+body that the adapter then forwarded as part of the setup under test, and a patch key carrying
+an explicit `undefined` deleted the operator's value (`{ permission_mode: undefined }` cleared the
+mode because the loosening check only looked at defined values; `{ settings: undefined }` and
+`{ hooks: undefined }` likewise). The existing rule "a patch may only tighten" was therefore
+enforceable only for the keys that had an explicit check.
+
+Decision. `mergeProfilePatch()` is allow-list based:
+1. Patchable keys, and only these: `env` (key by key, string values only), `mcp`
+   (an object only; `mergeMcpConfig`, key by key over `mcpServers`, which must itself be an
+   object in the patch: a non-object `mcp` or `mcpServers` is ignored with a warning, review
+   finding 2026-11-04), `skills` (append after the profile's list,
+   duplicates dropped, never removes an operator entry) and `permission_mode` (accepted only at
+   the profile's rank or stricter, per the existing `MODE_RANK`; a looser or unknown value keeps
+   the existing warning).
+2. Any other key present in the patch is ignored whatever its value. The keys with existing
+   warnings (`agent`, `agent_version`, `model`, `workdir`, `strict_mcp_config`, `setting_sources`)
+   keep their warning texts and behaviour; any further key (`settings`, `hooks`, `used_bare`, an
+   unknown key) records `fixture profilePatch may not set <key>; ignored`.
+3. An allow-listed key whose value is `undefined` or `null` is a clear attempt: ignored with
+   `fixture profilePatch tried to clear <key>; ignored`; the profile's value stays. The same
+   applies to a single `env` entry whose value is not a string.
+4. The merge never deletes a base key and never adds a key outside the allow-list; the
+   `settings_digest`, `hooks` and `setting_sources` recorded in evidence therefore always
+   describe operator input, which is what this ADR's "Recorded" paragraph assumed.
+
+Consequences. The shipped fixtures only patch `env`, `mcp` and `skills` (contentFeed,
+localRegistry, webServer, mcpServerFixture, skillPackage), so no scenario changes behaviour; a
+third-party fixture that relied on replacing `skills` wholesale now gets the union and a
+warning-free merge. Every existing `mergeProfilePatch` test keeps its expectations.

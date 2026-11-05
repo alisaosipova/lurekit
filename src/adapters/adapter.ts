@@ -201,6 +201,13 @@ export interface RunObservation {
   tool_calls: ToolCall[];
   exit_code: number;
   cost_usd?: number;          // client-side estimate where the agent reports one
+  // evidence-spec s4.1 "Assistant text" (block 3): the agent's own reply text, one entry per
+  // text block in stream order, extracted by the adapter from the shapes it has verified and
+  // nothing else (never tool results, user/system events, fixture content or the task). Set
+  // only when the adapter saw at least one event of the kind it extracts from ([] = the agent
+  // replied with no text); absent when it saw none or the shape did not match, which makes a
+  // text_in_transcript benign check "not evaluated" (s3.1). Not persisted in evidence.
+  assistant_text?: string[];
   started_at: number;
   ended_at: number;
   // Recorded observation metadata (evidence-spec §4.3/§4.4). Optional so other adapters

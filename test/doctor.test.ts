@@ -219,7 +219,7 @@ describe('cost estimate from the shipped published run', () => {
   it('other agents have no published run, so no estimate', () => {
     for (const agent of ['cursor-cli', 'codex-cli', 'openhands'] as const) {
       expect(costBasis(agent, demoManifest)).toBeUndefined();
-      expect(estimateSentence(agent, 7, undefined)).toBe(`no published run yet for ${agent}, no estimate`);
+      expect(estimateSentence(agent, 7, undefined)).toBe(`no published run yet for ${agent}, no estimate; each repetition is charged an estimated 0.25 USD against --budget`);
     }
   });
 });

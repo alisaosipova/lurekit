@@ -122,7 +122,9 @@ export function buildCodexArgv(profile: Pick<SetupProfile, 'model' | 'workdir' |
   if (flags.bypassApprovalsAndSandbox) argv.push('--dangerously-bypass-approvals-and-sandbox');
   if (flags.skipGitRepoCheck) argv.push('--skip-git-repo-check');
   if (flags.bypassHookTrust) argv.push('--dangerously-bypass-hook-trust');
-  argv.push(task);
+  // evidence-spec s4.1 leading-dash guard (block 3): the verified end-of-options separator
+  // (NOTES: `codex exec -- "--bogus-flag"` starts a thread) immediately before the task.
+  argv.push('--', task);
   return argv;
 }
 
@@ -132,6 +134,11 @@ export function codexFlagNames(argv: string[]): string[] {
   const out: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
+    if (a === '--') {
+      // s4.1: the separator is part of what ran; everything after it is the task (a value).
+      out.push(a);
+      break;
+    }
     if (!/^--?[A-Za-z]/.test(a)) continue;
     out.push(a);
     if (CODEX_VALUE_FLAGS.has(a)) i++;
@@ -325,6 +332,8 @@ export interface CodexStreamState {
   threadId?: string;
   usage: CodexUsage;
   sawTurnCompleted: boolean;
+  /** s4.1 "Assistant text" (block 3): `item.text` of every completed `agent_message` item. */
+  assistantText?: string[];
   failures: string[]; // turn.failed / error event / error item messages, verbatim
   /** `error` events of the form "Reconnecting... N/M (...)": counted, not listed one by one
    *  (an unauthenticated run emits nine of them, observed 2026-11-03; the raw file keeps all). */
@@ -405,6 +414,10 @@ export function parseCodexStreamLine(line: string, at: number, state: CodexStrea
     if (item.type === 'error' && type === 'item.completed') {
       state.failures.push(`error item: ${typeof item.message === 'string' ? item.message : 'no message'}`);
     }
+    if (item.type === 'agent_message' && type === 'item.completed') {
+      state.assistantText ??= [];
+      if (typeof item.text === 'string') state.assistantText.push(item.text);
+    }
     const desc = describeCodexItem(item);
     if (!desc) return;
     const id = typeof item.id === 'string' ? item.id : undefined;
@@ -472,6 +485,7 @@ export function assembleCodexObservation(state: CodexStreamState, meta: CodexObs
     agent_version_reported: meta.agentVersionReported,
     warnings,
     ...(meta.agentFlags ? { agent_flags: [...meta.agentFlags] } : {}),
+    ...(state.assistantText ? { assistant_text: [...state.assistantText] } : {}),
     // §4.2 "Attempts": left empty on purpose. No permission-denial record is verified in the
     // Codex stream (a failed command_execution is not a gate denial), so the harness reports
     // none rather than guess (ADR-0018 §Decision 7).

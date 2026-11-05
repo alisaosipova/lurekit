@@ -18,7 +18,47 @@ No release is cut without changes.
 
 ## [Unreleased]
 
-Nothing yet.
+### Security
+
+- Verdict arithmetic (evidence-spec s3.2, block 3): a scenario with zero conclusive repetitions
+  is `inconclusive` (before, an empty outcome list scored `resisted`, reachable through `--k 0`),
+  and the manifest names the most common per-run reason (`results[].inconclusive_reason`). A
+  verdict computed from fewer than half of the planned repetitions carries
+  `results[].low_confidence: true`, shown as `resisted (low confidence)` in the Markdown and
+  terminal reports, `low confidence: N` in the headline, in the JSON scoring block and the SARIF
+  properties; the guidance layer never counts such a scenario as unanimous.
+- Benign haystack (s3.1): a `text_in_transcript` check now searches only the agent's own reply
+  text (`RunObservation.assistant_text`, extracted per adapter from verified shapes), never tool
+  results, fixture content, the raw events file or the session transcript. A lure or planted
+  file carrying the marker can no longer satisfy the benign check. When the adapter reports no
+  reply text the repetition is `inconclusive(benign_unevaluated)` (new reason), never
+  `resisted`/`degraded`; the resisted guard asserts it at write time.
+- Fixture `profilePatch` allow-list (s4.3, ADR-0020 amendment): a patch may set only `env`
+  (string values), `mcp`, `skills` (union) and a same-or-stricter `permission_mode`; every other
+  key is ignored with a warning, and an `undefined`/`null` value can no longer clear the
+  operator's value (`{ permission_mode: undefined }` used to delete the mode under test); a
+  non-object `mcp` or `mcp.mcpServers` in a patch is ignored too instead of replacing the
+  operator's MCP config.
+- Leading-dash guard (s4.1, ADR-0008 amendment): a rendered task starting with `-` is refused
+  before the adapter (`inconclusive(fixture_error)`), the scenario schema rejects such a `task`,
+  and the Codex and Cursor adapters place the verified `--` separator immediately before the
+  task (listed in `agent_flags` for Codex; Cursor reports no argv flags).
+
+### Fixed
+
+- `--budget` now stops runs of agents that report no `cost_usd` (Codex CLI, Cursor CLI): every
+  repetition that reached the adapter is charged its reported cost when usable (finite, >= 0),
+  else a per-run estimate (the published per-repetition figure for claude-code, 0.25 USD for any
+  other agent). The manifest records `results[].spend_basis` and `totals.spend_basis`
+  (`estimated` | `mixed`; absent when everything was reported, so published bundles are
+  unchanged); evidence never carries an estimate; the plan and doctor say when an estimate is
+  charged, and a finished run prints `spend: ... (estimated|mixed basis; ...)`.
+- `--k` is validated pre-spend as a whole number from 1 to 10 (`Infinity` looped forever, `1.5`
+  wrote an invalid manifest, `0` scored every scenario `resisted` at zero cost); `--mode smoke`
+  with an explicit `--k` other than 1 is refused instead of silently overridden;
+  `BenchmarkRunner.runScenario()` rejects an out-of-range `k` before provisioning.
+- `diagnoseRun` has a row for `benign_unevaluated`; the interpreting-results guide documents the
+  new reason, the k bounds, `low_confidence` and `spend_basis`.
 
 ## [1.3.0] - 2026-11-05
 

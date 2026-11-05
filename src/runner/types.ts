@@ -50,7 +50,33 @@ export type InconclusiveReason =
   | 'run_timeout' // ADR-0024: the per-run timer (--run-timeout) fired before the adapter returned
   // ADR-0025: a harness artefact of this repetition was modified, removed, replaced or
   // symlinked during the run; see `artefacts` and the `evidence tampered:` warnings.
-  | 'evidence_tampered';
+  | 'evidence_tampered'
+  // Block 3 (evidence-spec s3.1 "Benign haystack"): the adapter reported no assistant_text, so
+  // a text_in_transcript benign check could not be evaluated; never resisted/degraded.
+  | 'benign_unevaluated';
+
+/** Severity order of the inconclusive reasons, most severe first (evidence-spec s3.2 rule 2):
+ *  breaks a tie when a scenario's repetitions are all inconclusive for different reasons. */
+export const INCONCLUSIVE_SEVERITY: readonly InconclusiveReason[] = [
+  'evidence_tampered',
+  'detector_unverified',
+  'precondition_failed',
+  'fixture_error',
+  'run_timeout',
+  'adapter_error',
+  'benign_unevaluated',
+  'budget_exhausted',
+  'isolation_failure',
+];
+
+/** What a repetition's charged cost was based on (evidence-spec s3.3, block 3): the agent's own
+ *  reported `cost_usd` (a finite number >= 0) or the harness's per-run estimate. */
+export type CostBasis = 'reported' | 'estimated';
+
+/** Manifest spelling of the basis over a set of charged repetitions (s2.3): `estimated` when
+ *  every charged repetition was estimated, `mixed` when some were reported and some estimated;
+ *  absent (undefined) when every charged repetition reported its own cost, or none was charged. */
+export type SpendBasis = 'estimated' | 'mixed';
 
 export interface RunConfig {
   k: number; // runs per scenario
@@ -184,6 +210,9 @@ export interface SingleRun {
   isolation?: IsolationMarker; // §4.3 (absent for a repetition that never reached the adapter)
   attempted_forbidden?: boolean; // §3.1 (absent for a repetition that never reached the adapter)
   resisted_kind?: ResistedKind; // §3.1 (only when outcome is resisted)
+  // s3.3 (block 3): what `cost_usd` (the charged amount) was based on; absent for a repetition
+  // that never reached the adapter (charged 0, no basis).
+  cost_basis?: CostBasis;
   // ADR-0024: in-memory only, set when the evidence record could not be written (the warnings
   // then exist nowhere else); the CLI diagnosis reads them from here.
   warnings?: string[];
@@ -200,6 +229,12 @@ export interface ScenarioResult {
   isolation?: IsolationMarker; // weakest isolation over the runs (partial > unreported > full)
   // §3.1/§3.2: only when verdict is resisted — `denied` if any resisted run was denied.
   resisted_kind?: ResistedKind;
+  // s3.2 (block 3): fewer than half of the planned repetitions were conclusive; only when true.
+  low_confidence?: true;
+  // s3.2 (block 3): only when the verdict is inconclusive: the most common per-run reason.
+  inconclusive_reason?: InconclusiveReason;
+  // s3.3 (block 3): basis of spend_usd over the charged repetitions; absent when all reported.
+  spend_basis?: SpendBasis;
 }
 
 /** Why a scenario was dropped at plan time (for logging; plan never throws). */
@@ -261,6 +296,12 @@ export interface RunManifest {
     strict_mcp_config?: boolean;
     // §2.3/§3.1: only when verdict is resisted; reporters show it next to the verdict (§6.1).
     resisted_kind?: ResistedKind;
+    // s2.3/s3.2 (block 3): written only when true (2 * conclusive < runs, verdict not inconclusive).
+    low_confidence?: true;
+    // s2.3/s3.2 (block 3): only on an inconclusive verdict; the most common per-run reason.
+    inconclusive_reason?: InconclusiveReason;
+    // s2.3/s3.3 (block 3): estimated | mixed; absent when every charged repetition reported.
+    spend_basis?: SpendBasis;
   }>;
   totals: {
     resisted: number;
@@ -268,6 +309,8 @@ export interface RunManifest {
     degraded: number;
     inconclusive: number;
     spend_usd: number;
+    // s2.3/s3.3 (block 3): same rule as results[].spend_basis over every repetition of the run.
+    spend_basis?: SpendBasis;
   };
   // evidence-spec section 2.3 / ADR-0017 "Excluding a scenario": set only in a published bundle by
   // `publish --exclude`: scenario ids whose results were left out as an operator-declared

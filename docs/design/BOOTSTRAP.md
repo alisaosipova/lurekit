@@ -164,6 +164,28 @@ adapter (ADR-0016), `publish` (ADR-0017), Codex CLI adapter (ADR-0018, `8c53c74`
     sites, `src/diagnose.ts`, `schemas/evidence.schema.json`; tests
     `test/evidence-integrity.test.ts`, `test/safe-write.test.ts`.
 
+21. **Verdict arithmetic (block 3).** SPECCED and IMPLEMENTED 2026-11-04 (tests
+    `test/verdict-arithmetic.test.ts` B3-T1..B3-T9; `test/verdict-arithmetic-review.test.ts`
+    adversarial review; `test/benign-strip-task.test.ts` rewritten for the assistant-text
+    haystack). Amendments, no
+    new ADR: evidence-spec s2.2 (benign evaluation, cost facts), s2.3 (`low_confidence`,
+    `inconclusive_reason`, `spend_basis`), s3.1 (benign haystack = `assistant_text` only, new
+    reason `benign_unevaluated`, `benignEvaluated` guard input), s3.2 (aggregation: zero
+    conclusive -> inconclusive with the most common reason; fewer than half conclusive ->
+    `low_confidence`), s3.3 (`--k` 1..10, smoke k=1, estimated per-run spend for agents that
+    report no cost, test plan B3-T1..B3-T9), s4.1 (leading-dash guard, assistant text), s4.3
+    (profilePatch allow-list); architecture.md ADR-0004/0006/0008 amendments; ADR-0020 and
+    ADR-0022 amendments; schemas `manifest` (`low_confidence`, `inconclusive_reason`,
+    `spend_basis`), `evidence` (`benign_unevaluated`), `report` (`low_confidence`), `scenario`
+    (`task` pattern). Code to touch: `src/runner/runner.ts` (`aggregateOutcomes`, `Budget`,
+    `checkBenign`/haystack, `mergeProfilePatch`, `canScoreResisted`, leading-dash guard,
+    `writeManifest`), `src/runner/types.ts`, `src/adapters/{adapter,claudeCode,replay,codexCli,
+    cursorCli,openhands}.ts` (`assistant_text`, `--` separator), `src/cli.ts`
+    (`preSpendProblem`, plan text), `src/doctor.ts`, `src/diagnose.ts`, `src/report/*`,
+    `docs/guide/interpreting-results.md` (k section, inconclusive table row). Invariants: the
+    claude-sample replay stays byte-identical (T5), published bundles keep validating, no
+    `confidence` string changes.
+
 ## Reuse from mcp-review-check (landscape §3.2, ADR-0001)
 Protocol client (`src/protocol/*`), fixture servers (`test/fixtures/*-server.mjs`),
 reporters (`src/report/{json,markdown,sarif}.ts`), the OIDC trusted-publishing release

@@ -81,7 +81,8 @@ describe('CodexCliAdapter.capabilities (ADR-0018 §Decision 2)', () => {
 describe('permission_mode grammar and argv (§4.1 invariant 1)', () => {
   it('builds the base headless argv and adds no loosening flag when mode is undefined', () => {
     const argv = buildCodexArgv({ model: MODEL, workdir: '/w', permission_mode: undefined }, TASK);
-    expect(argv).toEqual(['exec', '--json', '-C', '/w', '-m', MODEL, TASK]);
+    // s4.1 leading-dash guard (block 3): the verified `--` separator sits right before the task.
+    expect(argv).toEqual(['exec', '--json', '-C', '/w', '-m', MODEL, '--', TASK]);
     for (const f of LOOSENING) expect(argv).not.toContain(f);
   });
 
@@ -91,17 +92,17 @@ describe('permission_mode grammar and argv (§4.1 invariant 1)', () => {
       TASK,
     );
     expect(argv.slice(6)).toEqual([
-      '--sandbox', 'workspace-write', '--skip-git-repo-check', '--dangerously-bypass-hook-trust', TASK,
+      '--sandbox', 'workspace-write', '--skip-git-repo-check', '--dangerously-bypass-hook-trust', '--', TASK,
     ]);
     expect(buildCodexArgv({ model: MODEL, workdir: '/w', permission_mode: 'yolo' }, TASK).slice(6))
-      .toEqual(['--dangerously-bypass-approvals-and-sandbox', TASK]);
+      .toEqual(['--dangerously-bypass-approvals-and-sandbox', '--', TASK]);
     expect(buildCodexArgv({ model: MODEL, workdir: '/w', permission_mode: 'approve-for-me' }, TASK).slice(6))
-      .toEqual(['--approve-for-me', TASK]);
+      .toEqual(['--approve-for-me', '--', TASK]);
   });
 
   it('sandbox=read-only emits only --sandbox read-only', () => {
     expect(buildCodexArgv({ model: MODEL, workdir: '/w', permission_mode: 'sandbox=read-only' }, TASK).slice(6))
-      .toEqual(['--sandbox', 'read-only', TASK]);
+      .toEqual(['--sandbox', 'read-only', '--', TASK]);
   });
 
   it('rejects unknown, bad-valued and conflicting tokens rather than dropping them', () => {
@@ -130,7 +131,9 @@ describe('permission_mode grammar and argv (§4.1 invariant 1)', () => {
 
   it('codexFlagNames drops values, task, workdir and model', () => {
     const argv = buildCodexArgv({ model: MODEL, workdir: '/w', permission_mode: 'sandbox=read-only' }, TASK);
-    expect(codexFlagNames(argv)).toEqual(['--json', '-C', '-m', '--sandbox']);
+    // The separator is part of what ran (s4.1) and is listed; nothing after it is.
+    expect(codexFlagNames(argv)).toEqual(['--json', '-C', '-m', '--sandbox', '--']);
+    expect(codexFlagNames(['exec', '--json', '--', '--not-a-flag'])).toEqual(['--json', '--']);
   });
 });
 
@@ -143,7 +146,9 @@ describe('CodexCliAdapter.run against the stub', () => {
     expect(argv[argv.indexOf('-m') + 1]).toBe(MODEL);
     expect(argv[argv.indexOf('-C') + 1]).toBe(h.profile.workdir);
     for (const f of LOOSENING) expect(argv).not.toContain(f);
-    expect(obs.agent_flags).toEqual(['--json', '-C', '-m']);
+    expect(obs.agent_flags).toEqual(['--json', '-C', '-m', '--']);
+    // s4.1: `--` immediately precedes the (hashed) task in the argv record.
+    expect(argv.at(-2)).toBe('--');
   });
 
   it('parses items into one ToolCall per item.id, skipping non-tool items', async () => {

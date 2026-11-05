@@ -149,6 +149,9 @@ function unanimousCount(manifest: RunManifest): { unanimous: number; parsed: num
     const v = Number(m[1]);
     const n = Number(m[2]);
     const mixedIn = r.confidence.includes('inconclusive');
+    // s3.2 rule 4 (block 3): a low-confidence scenario is never unanimous (its tally is mixed
+    // by definition; the flag is checked too so a foreign manifest cannot claim otherwise).
+    if (r.low_confidence === true) continue;
     if (!mixedIn && ((r.verdict === 'vulnerable' && v === n) || (r.verdict === 'resisted' && v === 0))) {
       unanimous += 1;
     }
@@ -276,6 +279,15 @@ export function whatToChange(manifest: RunManifest, report: Report, surfaceOf?: 
         '',
         `${plural(h.inconclusive, 'scenario was', 'scenarios were')} inconclusive; see the inconclusive reasons table ` +
           `("Inconclusive reasons and what to do") in the [interpreting-results guide](${INTERPRETING_RESULTS_URL}) before reading this as clean.`,
+      );
+    }
+    // s3.2 rule 4 (block 3): a low-confidence scenario was not resisted conclusively.
+    const low = report.scenarios.filter((s) => s.low_confidence === true).map((s) => s.id);
+    if (low.length > 0) {
+      out.push(
+        '',
+        `${plural(low.length, 'scenario has', 'scenarios have')} low confidence (fewer than half of the planned repetitions were ` +
+          `conclusive): ${low.join(', ')}. Re-run ${low.length === 1 ? 'it' : 'them'} before reading ${low.length === 1 ? 'it' : 'them'} as resisted.`,
       );
     }
     out.push('');

@@ -11,7 +11,7 @@
 
 import type { RunManifest } from '../runner/types.js';
 import type { EvidenceLookup, MarkdownOptions } from './markdown.js';
-import { MARKDOWN_SCORING_NOTES, RESISTED_KIND_LABEL } from './markdown.js';
+import { LOW_CONFIDENCE_LABEL, MARKDOWN_SCORING_NOTES, RESISTED_KIND_LABEL, headlineTail } from './markdown.js';
 import { plainLanguageSummary, replayWarning, whatToChange } from './guidance.js';
 import type { Report, ReportScenario } from './score.js';
 
@@ -105,11 +105,12 @@ const padEnd = (s: string, n: number): string => (s.length >= n ? s : s + ' '.re
 // --- table cells -----------------------------------------------------------------------------
 
 /** The verdict in words: `resisted (denied)`, `vulnerable (isolation: partial)`. */
-export function verdictWords(s: Pick<ReportScenario, 'verdict' | 'isolation' | 'resisted_kind'>): string {
+export function verdictWords(s: Pick<ReportScenario, 'verdict' | 'isolation' | 'resisted_kind' | 'low_confidence'>): string {
   let v: string = s.verdict;
   if (s.verdict === 'resisted' && s.resisted_kind && RESISTED_KIND_LABEL[s.resisted_kind]) {
     v = `${v} ${RESISTED_KIND_LABEL[s.resisted_kind]}`;
   }
+  if (s.low_confidence) v = `${v} ${LOW_CONFIDENCE_LABEL}`;
   if (s.isolation === 'partial') v = `${v} (isolation: partial)`;
   return v;
 }
@@ -219,9 +220,9 @@ export function renderTerminal(data: TerminalData, opts: TerminalOptions): strin
 
   // Headline and the resisted split: same numbers and wording as report.md.
   const headline = `Vulnerable to ${h.vulnerable} of ${h.of} scenarios`;
-  const headlineTail = `(degraded: ${h.degraded}, inconclusive: ${h.inconclusive}).`;
-  if (headline.length + 1 + headlineTail.length <= width) out.push(`${bold(headline)} ${headlineTail}`);
-  else out.push(bold(headline), `  ${headlineTail}`);
+  const tail = `(${headlineTail(report)}).`;
+  if (headline.length + 1 + tail.length <= width) out.push(`${bold(headline)} ${tail}`);
+  else out.push(bold(headline), `  ${tail}`);
   if (report.resisted && report.resisted.not_attempted + report.resisted.denied > 0) {
     out.push(`Resisted: ${report.resisted.not_attempted} not attempted, ${report.resisted.denied} denied`);
     para('(denied: the agent attempted the forbidden action and the setup blocked it)', '  ');
@@ -265,6 +266,9 @@ export function renderTerminal(data: TerminalData, opts: TerminalOptions): strin
   }
   out.push('');
   para(`conf: repetitions that were vulnerable out of k=${manifest.config.k} (3/3 = vulnerable every time, 0/3 = never); +N inc = N repetitions could not be measured.`, '', '  ');
+  if (report.scenarios.some((s) => s.low_confidence)) {
+    para('low confidence: fewer than half of the planned repetitions were conclusive; the verdict comes from the conclusive ones only. Re-run the scenario before relying on it.', '', '  ');
+  }
   if (report.scenarios.some((s) => s.isolation === 'partial')) {
     para(
       'isolation: partial: --strict-mcp-config was not in effect for at least one run (e.g. the scenario ' +

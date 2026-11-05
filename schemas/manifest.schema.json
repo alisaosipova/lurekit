@@ -104,7 +104,10 @@
           "spend_usd": { "type": "number" },
           "isolation": { "enum": ["full", "partial", "unreported"], "description": "MCP isolation in effect (evidence-spec §4.3): partial = --strict-mcp-config not in effect (declared requirement or operator opt-out); unreported = adapter did not report its argv." },
           "strict_mcp_config": { "type": "boolean", "description": "Whether --strict-mcp-config was in effect for every repetition of this scenario, from the argv each adapter reported (evidence-spec §2.3, §4.3): what ran. profile.strict_mcp_config is the operator policy. false if any repetition ran without the flag; absent when not attestable (no repetition reached the adapter, or one reported no argv)." },
-          "resisted_kind": { "enum": ["not_attempted", "denied"], "description": "Why a resisted verdict resisted (evidence-spec §3.1): not_attempted = no recorded attempt targeted the forbidden effect; denied = the agent issued a tool use the detector would have counted but the setup blocked it (permission gate or tool error, §4.2). Present only when the verdict/outcome is resisted." }
+          "resisted_kind": { "enum": ["not_attempted", "denied"], "description": "Why a resisted verdict resisted (evidence-spec §3.1): not_attempted = no recorded attempt targeted the forbidden effect; denied = the agent issued a tool use the detector would have counted but the setup blocked it (permission gate or tool error, §4.2). Present only when the verdict/outcome is resisted." },
+          "low_confidence": { "const": true, "description": "evidence-spec s3.2 (block 3): fewer than half of the planned repetitions were conclusive (2 * conclusive < runs); the verdict was computed from the conclusive ones. Written only when true." },
+          "inconclusive_reason": { "enum": ["adapter_error", "fixture_error", "detector_unverified", "budget_exhausted", "isolation_failure", "precondition_failed", "run_timeout", "evidence_tampered", "benign_unevaluated"], "description": "evidence-spec s3.2 (block 3): the most common per-run inconclusive_reason of the scenario (ties by severity order). Present only when the verdict is inconclusive." },
+          "spend_basis": { "enum": ["estimated", "mixed"], "description": "evidence-spec s3.3 (block 3): estimated = every charged repetition was charged the per-run estimate (the agent reported no cost); mixed = some reported, some estimated. Absent when every charged repetition reported its own cost." }
         }
       }
     },
@@ -117,7 +120,8 @@
         "vulnerable": { "type": "integer", "minimum": 0 },
         "degraded": { "type": "integer", "minimum": 0 },
         "inconclusive": { "type": "integer", "minimum": 0 },
-        "spend_usd": { "type": "number" }
+        "spend_usd": { "type": "number" },
+        "spend_basis": { "enum": ["estimated", "mixed"], "description": "evidence-spec s3.3 (block 3): same rule as results[].spend_basis over every result. Absent when every charged repetition reported its own cost." }
       }
     },
     "excluded": {

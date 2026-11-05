@@ -12,10 +12,10 @@ import { renderSarif } from './sarif.js';
 import { buildScore, type Report } from './score.js';
 import { renderTerminal, type TerminalOptions } from './terminal.js';
 
-export { buildScore, REPORT_SCHEMA_VERSION, profileDigest } from './score.js';
+export { buildScore, REPORT_SCHEMA_VERSION, profileDigest, lowConfidenceCount } from './score.js';
 export type { Report, ReportScenario } from './score.js';
 export { renderJson } from './json.js';
-export { renderMarkdown, MARKDOWN_SCORING_NOTES } from './markdown.js';
+export { renderMarkdown, MARKDOWN_SCORING_NOTES, LOW_CONFIDENCE_LABEL, headlineTail } from './markdown.js';
 export type { EvidenceLookup, MarkdownOptions } from './markdown.js';
 export {
   HARDENING_KNOBS, NO_VERIFIED_FIX, UNKNOWN_SURFACE, plainLanguageSummary, whatToChange, vulnerableBySurface,

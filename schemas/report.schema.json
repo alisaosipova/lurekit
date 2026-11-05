@@ -34,7 +34,8 @@
           "source": { "type": "string" },
           "evidence_ref": { "type": "string" },
           "isolation": { "enum": ["full", "partial", "unreported"], "description": "MCP isolation in effect (evidence-spec §4.3): partial = --strict-mcp-config not in effect (declared requirement or operator opt-out); unreported = adapter did not report its argv." },
-          "resisted_kind": { "enum": ["not_attempted", "denied"], "description": "Why a resisted verdict resisted (evidence-spec §3.1): not_attempted = no recorded attempt targeted the forbidden effect; denied = the agent issued a tool use the detector would have counted but the setup blocked it (permission gate or tool error, §4.2). Present only when the verdict/outcome is resisted." }
+          "resisted_kind": { "enum": ["not_attempted", "denied"], "description": "Why a resisted verdict resisted (evidence-spec §3.1): not_attempted = no recorded attempt targeted the forbidden effect; denied = the agent issued a tool use the detector would have counted but the setup blocked it (permission gate or tool error, §4.2). Present only when the verdict/outcome is resisted." },
+          "low_confidence": { "const": true, "description": "evidence-spec s3.2 (block 3): carried from the manifest; fewer than half of the planned repetitions were conclusive. Written only when true." }
         }
       }
     },

@@ -27,6 +27,12 @@ export interface StubScript {
   throwError?: string; // if set, run() rejects with this message (adapter error)
   trigger?: DetectorKind; // produce this detector's signal in the run dir
   benignText?: string; // text to place in the transcript (for text_in_transcript)
+  // evidence-spec s4.1 "Assistant text" (block 3): what the stub reports as the agent's reply.
+  // Default: [benignText] when set, else [] (an evaluated, empty reply). `null` = the field is
+  // absent (the adapter reported no reply text: benign check not evaluated, s3.1).
+  assistantText?: string[] | null;
+  // s3.3 (block 3): report no cost_usd at all (the stream's result event carries none either).
+  noCost?: boolean;
   extraToolCalls?: ToolCall[]; // additional scripted tool calls
   writeFile?: { rel: string; content: string }; // write a file into workdir (for file_written)
   // Tidy this workdir-relative file as the text-tidy skill's stated job (evidence-spec s3.1
@@ -343,14 +349,17 @@ export class StubAdapter implements Adapter {
       );
     }
     lines.push(...streamExtra);
-    lines.push(JSON.stringify({ type: 'result', total_cost_usd: this.script.cost ?? 0 }));
+    lines.push(JSON.stringify(this.script.noCost ? { type: 'result' } : { type: 'result', total_cost_usd: this.script.cost ?? 0 }));
     const rawPath = await this.writeStream(runDir, lines, options);
 
     return {
       raw_events_path: rawPath,
       tool_calls: toolCalls,
       exit_code: this.script.exitCode ?? 0,
-      cost_usd: this.script.cost ?? 0,
+      ...(this.script.noCost ? {} : { cost_usd: this.script.cost ?? 0 }),
+      ...(this.script.assistantText === null
+        ? {}
+        : { assistant_text: this.script.assistantText ?? (this.script.benignText ? [this.script.benignText] : []) }),
       started_at: this.script.startedAt ?? 1000,
       ended_at: this.script.endedAt ?? 1500,
       effective_model: profile.model,

@@ -363,6 +363,9 @@ export interface OpenHandsStreamState {
   /** Events whose `kind` the parser does not interpret, kept raw (ADR-0019 §Decision 6). */
   unknownEvents: Record<string, unknown>[];
   failures: string[]; // AgentErrorEvent / UserRejectObservation / blocked hooks, verbatim
+  /** s4.1 "Assistant text" (block 3, shape UNVERIFIED): `text` of `llm_message.content[]`
+   *  entries with `type: "text"` on MessageEvent with `source: "agent"`; set once seen. */
+  assistantText?: string[];
 }
 
 export function newOpenHandsStreamState(): OpenHandsStreamState {
@@ -466,6 +469,17 @@ export function applyOpenHandsEvent(evt: Record<string, unknown>, at: number, st
         `HookExecutionEvent blocked ${typeof evt.hook_event_type === 'string' ? evt.hook_event_type : 'hook'}: ${typeof evt.reason === 'string' ? evt.reason : 'no reason'}`,
       );
     }
+  } else if (kind === 'MessageEvent' && evt.source === 'agent') {
+    // s4.1 "Assistant text" (block 3): the agent's own message; shape UNVERIFIED, so only the
+    // named form is read and the field stays absent when it never matches.
+    const llm = asRecord(evt.llm_message);
+    if (Array.isArray(llm?.content)) {
+      state.assistantText ??= [];
+      for (const entry of llm.content as unknown[]) {
+        const e = asRecord(entry);
+        if (e && e.type === 'text' && typeof e.text === 'string') state.assistantText.push(e.text);
+      }
+    }
   } else if (typeof kind === 'string' && KNOWN_NON_TOOL_KINDS.has(kind)) {
     // Not a tool call; kept verbatim in the raw file.
   } else {
@@ -547,6 +561,7 @@ export function assembleOpenHandsObservation(state: OpenHandsStreamState, meta: 
     agent_version_reported: meta.agentVersionReported,
     warnings,
     ...(meta.agentFlags ? { agent_flags: [...meta.agentFlags] } : {}),
+    ...(state.assistantText ? { assistant_text: [...state.assistantText] } : {}),
     // §4.2 "Attempts": empty on purpose. Headless is NeverConfirm, so no permission gate refuses
     // calls; UserRejectObservation semantics are UNVERIFIED (ADR-0019 §Decision 8).
     attempts: [],

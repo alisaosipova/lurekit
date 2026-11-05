@@ -28,6 +28,9 @@ export interface ReportScenario {
   isolation?: IsolationMarker;
   /** §3.1: why a resisted scenario resisted (carried from the manifest); only on resisted. */
   resisted_kind?: ResistedKind;
+  /** s3.2 (block 3): carried from the manifest; fewer than half of the planned repetitions
+   *  were conclusive. Present only when true. */
+  low_confidence?: true;
 }
 
 /** The §6.2 scoring block. Versioned so a published number is comparable across tool versions. */
@@ -62,6 +65,7 @@ export function buildScore(manifest: RunManifest): Report {
     evidence_ref: `${r.scenario_id}/0/evidence.json`,
     ...(r.isolation ? { isolation: r.isolation } : {}),
     ...(r.verdict === 'resisted' && r.resisted_kind ? { resisted_kind: r.resisted_kind } : {}),
+    ...(r.low_confidence === true && r.verdict !== 'inconclusive' ? { low_confidence: true as const } : {}),
   }));
   const resisted = { not_attempted: 0, denied: 0 };
   for (const r of results) {
@@ -83,6 +87,11 @@ export function buildScore(manifest: RunManifest): Report {
     resisted,
     scoring_notes: SCORING_NOTES,
   };
+}
+
+/** s3.2 rule 4: the number of low-confidence scenarios in the scoring block. */
+export function lowConfidenceCount(report: Report): number {
+  return report.scenarios.filter((s) => s.low_confidence === true).length;
 }
 
 /** sha256 over a key-sorted serialization of the profile summary, so the digest is independent

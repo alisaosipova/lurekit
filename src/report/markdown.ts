@@ -7,7 +7,7 @@
 
 import type { EvidenceRecord } from '../runner/types.js';
 import type { RunManifest } from '../runner/types.js';
-import type { Report } from './score.js';
+import { lowConfidenceCount, type Report } from './score.js';
 import { INTERPRETING_RESULTS_URL, plainLanguageSummary, replayWarning, whatToChange, type ReMeasureContext, type SurfaceLookup } from './guidance.js';
 
 /** Resolve the evidence record for a scenario (the CLI reads it from disk). Pure data in. */
@@ -39,12 +39,24 @@ export const RESISTED_KIND_LABEL: Record<string, string> = {
   denied: '(denied)',
 };
 
-function verdictCell(verdict: string, isolation: string | undefined, resistedKind?: string): string {
+/** s3.2 rule 4 (block 3): label shown next to a verdict computed from fewer than half of the
+ *  planned repetitions. */
+export const LOW_CONFIDENCE_LABEL = '(low confidence)';
+
+function verdictCell(verdict: string, isolation: string | undefined, resistedKind?: string, lowConfidence?: boolean): string {
   let v = verdict;
   if (verdict === 'resisted' && resistedKind && RESISTED_KIND_LABEL[resistedKind]) {
     v = `${v} ${RESISTED_KIND_LABEL[resistedKind]}`;
   }
+  if (lowConfidence) v = `${v} ${LOW_CONFIDENCE_LABEL}`;
   return isolation === 'partial' ? `${v} ${PARTIAL_MARKER}` : v;
+}
+
+/** The headline parenthetical: `degraded: D, inconclusive: I[, low confidence: N]` (N only when > 0). */
+export function headlineTail(report: Report): string {
+  const h = report.headline;
+  const low = lowConfidenceCount(report);
+  return `degraded: ${h.degraded}, inconclusive: ${h.inconclusive}${low > 0 ? `, low confidence: ${low}` : ''}`;
 }
 
 /** Optional inputs for the prescriptive layers (ADR-0021). */
@@ -71,7 +83,7 @@ export function renderMarkdown(
   if (replay) out.push(`> **Warning:** ${cell(replay)}`, '');
   out.push(plainLanguageSummary(manifest, report, opts.surfaceOf), '');
   // Headline line (§6.1): "vulnerable to N of M scenarios".
-  out.push(`**Vulnerable to ${h.vulnerable} of ${h.of} scenarios** (degraded: ${h.degraded}, inconclusive: ${h.inconclusive}).`, '');
+  out.push(`**Vulnerable to ${h.vulnerable} of ${h.of} scenarios** (${headlineTail(report)}).`, '');
   // §6.2: resisted split (§3.1) — the model declined vs the setup denied an attempted action.
   if (report.resisted && report.resisted.not_attempted + report.resisted.denied > 0) {
     out.push(
@@ -90,7 +102,7 @@ export function renderMarkdown(
   out.push('|---|---|---|---|---|');
   for (const s of report.scenarios) {
     const name = byId.get(s.id)?.name ?? '';
-    out.push(`| ${cell(s.id)} | ${cell(name)} | ${cell(verdictCell(s.verdict, s.isolation, s.resisted_kind))} | ${cell(s.confidence)} | ${cell(s.source)} |`);
+    out.push(`| ${cell(s.id)} | ${cell(name)} | ${cell(verdictCell(s.verdict, s.isolation, s.resisted_kind, s.low_confidence))} | ${cell(s.confidence)} | ${cell(s.source)} |`);
   }
   out.push('');
   if (report.scenarios.some((s) => s.isolation === 'partial')) {

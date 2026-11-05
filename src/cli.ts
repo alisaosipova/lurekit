@@ -41,7 +41,7 @@ import { parseSettingSourcesCsv } from './adapters/adapter.js';
 import type { AgentId } from './scenario/types.js';
 import { getDetector, IMPLEMENTED_DETECTORS } from './detectors/index.js';
 import { fixturesForScenario } from './fixtures/index.js';
-import { BenchmarkRunner, Budget, DEFAULT_RUN_TIMEOUT_S, MAX_RUN_TIMEOUT_S } from './runner/runner.js';
+import { BenchmarkRunner, Budget, DEFAULT_RUN_TIMEOUT_S, K_MAX, K_MIN, MAX_RUN_TIMEOUT_S, estimatedRunUsd, validK } from './runner/runner.js';
 import type { RunConfig, RunManifest, RunnerIds, RunMeta, EvidenceRecord } from './runner/types.js';
 import { report, REPOSITORY_URL, colorEnabled, terminalWidth, type ReportFormat, type EvidenceLookup, type SurfaceLookup, type ReMeasureContext } from './report/index.js';
 import { planPublish, readRunDir, writeBundle, formatPlanFailure, selectEvidence, defaultBundleDir } from './report/publish.js';
@@ -369,6 +369,8 @@ function buildConfig(flags: Flags, deps: CliDeps, hint = 'lurekit run'): RunConf
     throw new Error(`--vulnerable-if must be any|majority\nnext: ${hint} --vulnerable-if any   (or majority)`);
   }
   const isolation = (flags.str.get('isolation') ?? 'container') as 'container' | 'container+netns';
+  // s3.3 (block 3): bounds and the smoke rule are checked by kProblem() (pre-spend for run,
+  // before the preview for plan); here only the default is chosen.
   const k = flags.num.get('k') ?? (mode === 'smoke' ? 1 : 3);
   return {
     k,
@@ -520,6 +522,22 @@ function noRunDirMessage(command: 'report' | 'publish', given: string | undefine
   );
 }
 
+/** evidence-spec s3.3 / ADR-0022 amendment (block 3): --k is a whole number from 1 to 10, and
+ *  --mode smoke runs k=1 (an explicit --k other than 1 with smoke is refused, never silently
+ *  overridden). Returns the refusal text, or undefined. */
+function kProblem(flags: Flags, hint: string): string | undefined {
+  const k = flags.num.get('k');
+  if (k === undefined) return undefined;
+  if (!validK(k)) {
+    return `--k must be a whole number from ${K_MIN} to ${K_MAX} (got ${k}).\nnext: ${hint} --k 3`;
+  }
+  const mode = flags.str.get('mode') ?? 'smoke';
+  if (mode === 'smoke' && k !== 1) {
+    return `--mode smoke runs k=1; use --mode full --k <n> for repetitions.\nnext: ${hint} --mode full --k ${k}`;
+  }
+  return undefined;
+}
+
 /** ADR-0022 amendment (pre-spend validation): every run flag that would otherwise only fail after
  *  the agent ran (and was paid for) is checked first. Returns the refusal text, or undefined. */
 function preSpendProblem(flags: Flags, deps: CliDeps, hint: string): string | undefined {
@@ -546,6 +564,8 @@ function preSpendProblem(flags: Flags, deps: CliDeps, hint: string): string | un
       return `cannot write --output ${output}: its directory ${parent} is not writable (${code}).\nnext: ${hint} --output ./report.md`;
     }
   }
+  const kIssue = kProblem(flags, hint);
+  if (kIssue) return kIssue;
   const budget = flags.num.get('budget');
   if (budget !== undefined && !(Number.isFinite(budget) && budget > 0)) {
     return `--budget must be a number of USD greater than 0 (got ${budget}).\nnext: ${hint} --budget 5`;
@@ -610,6 +630,11 @@ export async function cmdPlan(flags: Flags, deps: CliDeps): Promise<number> {
   const hint = `lurekit plan${flags._[0] !== undefined ? ` ${corpus.shown}` : ''}`;
   const profile = buildProfile(flags, deps, hint);
   const cfg = buildConfig(flags, deps, hint);
+  const kIssue = kProblem(flags, hint);
+  if (kIssue) {
+    deps.stderr(`refusing to plan: ${kIssue}\n`);
+    return 1;
+  }
   deps.stdout(corpusLine(corpus));
   const runner = new BenchmarkRunner({
     ids: makeIds(deps.newRunId()),
@@ -662,9 +687,12 @@ function makeEvidenceLookup(runDir: string, manifest: RunManifest): EvidenceLook
 /** ADR-0022: the plan a live run prints before it asks. */
 function launchPlanText(kept: number, skipped: number, profile: SetupProfile, cfg: RunConfig): string {
   const basis = planCostBasis(profile.agent);
+  // ADR-0022 amendment (block 3): an agent with no published basis is charged the s3.3 estimate
+  // per repetition against --budget; the cap line says so.
+  const estimateNote = basis ? '' : ` (${profile.agent} reports no per-run cost; each repetition is charged an estimated ${estimatedRunUsd(profile.agent)} USD)`;
   const budget = typeof cfg.budget_usd === 'number'
-    ? `${cfg.budget_usd} USD (--budget): the runner stops before a repetition that could exceed it`
-    : 'none (add --budget <usd> to stop before a repetition that could exceed it)';
+    ? `${cfg.budget_usd} USD (--budget): the runner stops before a repetition that could exceed it${estimateNote}`
+    : `none (add --budget <usd> to stop before a repetition that could exceed it)${estimateNote}`;
   return (
     `\nplan: ${kept} scenario(s) will run, ${skipped} skipped; k=${cfg.k} (${cfg.mode}), ` +
     `${kept * cfg.k} launch(es) of ${profile.agent} (model=${profile.model})\n` +
@@ -832,7 +860,9 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
 
     // Same steps as BenchmarkRunner.run (plan -> runScenario per kept -> writeManifest), unrolled
     // so each scenario prints a progress line and a stalled agent is visible (ADR-0022).
-    const budget = new Budget(cfg.budget_usd);
+    // s3.3 (block 3): a repetition that reports no usable cost is charged the published
+    // per-repetition basis of this agent when one exists, else the per-agent estimate.
+    const budget = new Budget(cfg.budget_usd, planCostBasis(profile.agent)?.perRepUsd ?? estimatedRunUsd(profile.agent));
     const results: ScenarioResult[] = [];
     for (const [i, scenario] of plan.kept.entries()) {
       deps.stderr(`[${i + 1}/${plan.kept.length}] ${scenario.id}  ${scenario.name}\n`);
@@ -854,6 +884,10 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
     else deps.stdout(rendered + '\n');
 
     deps.stderr(`\nmanifest: ${path.join(runDir, 'manifest.json')}\n`);
+    // ADR-0022 amendment (block 3): an estimated or mixed spend is named as such.
+    if (manifest.totals.spend_basis) {
+      deps.stderr(`spend: ${manifest.totals.spend_usd} USD (${manifest.totals.spend_basis} basis; the agent reported no per-run cost)\n`);
+    }
 
     // ADR-0022: say what went wrong and the next command, from the recorded warnings.
     const reps = repIssues(results);
@@ -1161,8 +1195,13 @@ Commands:
                    k, estimated cost, budget cap) and asks "Launch? [y/N]"; --yes skips the
                    prompt, and without a terminal it refuses unless --yes is given.
                    --model <id> (required)  --agent <id> (default claude-code)  --yes
-                   --agent-version <v>  --k <n>  --mode smoke|full  --vulnerable-if any|majority
-                   --budget <usd>  --results <dir> (default .aab-runs)  --isolation container|container+netns
+                   --agent-version <v>  --mode smoke|full  --vulnerable-if any|majority
+                   --k <n>          repetitions per scenario, a whole number 1..10 (default 1 for
+                                    smoke, 3 for full); --mode smoke runs k=1, so an explicit --k
+                                    other than 1 with smoke is refused (use --mode full --k <n>)
+                   --budget <usd>   hard cap; an agent that reports no per-run cost is charged an
+                                    estimate per repetition (see the plan's "budget cap:" line)
+                   --results <dir> (default .aab-runs)  --isolation container|container+netns
                    --run-timeout <seconds>  per-repetition wall-clock cap (default 180, whole
                                     number 1..2147483): a repetition still running past it is stopped
                                     (its process tree is killed) and scored inconclusive(run_timeout);

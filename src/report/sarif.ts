@@ -43,7 +43,7 @@ export function toSarif(manifest: RunManifest, report: Report): Record<string, u
     locations: [
       { physicalLocation: { artifactLocation: { uri: s.evidence_ref } } },
     ],
-    properties: { confidence: s.confidence, ...(s.source ? { source: s.source } : {}) },
+    properties: { confidence: s.confidence, ...(s.source ? { source: s.source } : {}), ...(s.low_confidence ? { low_confidence: true } : {}) },
   }));
 
   return {

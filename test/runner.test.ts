@@ -518,9 +518,10 @@ describe('fixture profilePatch merge (ADR-0002 step 2)', () => {
       },
       warnings,
     );
-    // Shallow replace for non-env fields; env untouched when the patch has none.
+    // mcp shallow-merges (no mcpServers on either side); skills are the union, operator entries
+    // first (block 3 allow-list, evidence-spec s4.3); env untouched when the patch has none.
     expect(merged.mcp).toEqual({ servers: { b: 2 } });
-    expect(merged.skills).toEqual(['s2']);
+    expect(merged.skills).toEqual(['s1', 's2']);
     expect(merged.env).toEqual({ K: 'v' });
     // Tightening permission_mode is allowed; identity fields are pinned with warnings.
     expect(merged.permission_mode).toBe('plan');

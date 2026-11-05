@@ -165,3 +165,34 @@ validated only after a paid run; and a dozen refusals did not say what to type n
    version)` instead of `fail`. Source: NOTES-verified-facts.md, "Auth status without a
    session" (with only the key set, 2.1.318 answered `loggedIn: true`, `authMethod: api_key`;
    no `-p` run with a logged-out status and a set key was made).
+
+## Amendment (2026-11-04, block 3): `--k` bounds, smoke runs k=1, estimated spend in the plan text
+
+Status: specced before the code (block 3, verdict arithmetic); normative text in evidence-spec
+s3.3; test plan evidence-spec s3.3 B3-T4, B3-T5.
+
+1. **`--k` is validated pre-spend**, next to `--budget` and `--run-timeout` in `preSpendProblem`
+   (`src/cli.ts`): a whole number from 1 to 10 inclusive. Refusal text: `refusing to run: --k must
+   be a whole number from 1 to 10 (got <value>).` with `next: <hint> --k 3`. Before, `buildConfig`
+   took any number the parser produced: `0` (every scenario `resisted` at zero cost, evidence-spec
+   s3.2), negatives, fractions (`1.5` ran two repetitions and wrote a manifest the schema rejects)
+   and `Infinity` (`Number("Infinity")` passes the parser's `NaN` check; the repetition loop never
+   ends). The same check applies to `--replay` runs. Why 10: see evidence-spec s3.3.
+2. **`--mode smoke` runs k=1.** An explicit `--k` other than `1` with `--mode smoke` is refused
+   pre-spend: `refusing to run: --mode smoke runs k=1; use --mode full --k <n> for repetitions.`
+   with `next: <hint> --mode full --k <n>`. `--mode smoke --k 1` is accepted (the demo guidance
+   prints that spelling). `--mode full` keeps its default k=3 and accepts 1..10. Neither value is
+   ever silently overridden.
+3. **Plan text for agents that report no cost.** When the agent has no published cost basis
+   (`costBasis()` undefined: every agent but claude-code today) the `estimated cost:` line of the
+   plan says `unknown for <agent> (no published run); each repetition is charged an estimated
+   <usd> USD against --budget`, and the `budget cap:` line appends `(<agent> reports no per-run
+   cost; each repetition is charged an estimated <usd> USD)`. `doctor`'s `cost` check prints the
+   same sentence for such an agent instead of only "no estimate". The amount is the s3.3 per-run
+   estimate (`ESTIMATED_RUN_USD`). A finished run whose manifest carries `spend_basis` prints
+   `spend: <usd> USD (estimated|mixed basis; the agent reported no per-run cost)` on stderr.
+4. **Diagnosis.** `diagnoseRun` (`src/diagnose.ts`) gains a category for `benign_unevaluated`
+   (evidence-spec s3.1): "the adapter reported no reply text, so the benign check could not be
+   evaluated" with the next step "inspect the stream file; if the agent did reply, the adapter's
+   reply-text shape needs a NOTES entry". A run whose scenarios are all `inconclusive` for that
+   reason is "nothing measured" (exit 1) exactly like the other reasons.

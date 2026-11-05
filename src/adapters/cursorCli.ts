@@ -111,13 +111,17 @@ export function buildCursorArgv(
   if (task.startsWith('-')) {
     throw new Error('cursor-cli: task text must not start with "-" (it would be parsed as a CLI option)');
   }
-  const argv = ['-p', task, '--output-format', 'stream-json', '--workspace', requireWorkdir(profile, 'cursor-cli'), '--model', profile.model];
+  const argv = ['-p', '--output-format', 'stream-json', '--workspace', requireWorkdir(profile, 'cursor-cli'), '--model', profile.model];
   if (flags.mode) argv.push('--mode', flags.mode);
   if (flags.sandbox) argv.push('--sandbox', flags.sandbox);
   if (flags.force) argv.push('--force');
   if (flags.trust) argv.push('--trust');
   if (flags.approveMcps) argv.push('--approve-mcps');
   if (opts.disableAutoUpdate) argv.push('--disable-auto-update');
+  // evidence-spec s4.1 leading-dash guard (block 3): every option first, then the verified
+  // end-of-options separator (NOTES: `agent -p -- "--bogus-flag"` gets past the parser), then
+  // the task as the only positional.
+  argv.push('--', task);
   return argv;
 }
 
@@ -296,6 +300,9 @@ export interface CursorStreamState {
   sessionId?: string;
   sawResult: boolean;
   resultIsError?: boolean;
+  /** s4.1 "Assistant text" (block 3, shape UNVERIFIED): `text` of `message.content[]` blocks
+   *  with `type: "text"` on `assistant` events; set once an assistant event was seen. */
+  assistantText?: string[];
 }
 
 export function newCursorStreamState(): CursorStreamState {
@@ -341,6 +348,13 @@ export function parseCursorStreamLine(line: string, at: number, state: CursorStr
     if ('mcp_servers' in evt) {
       const servers = normalizeMcpServers(evt.mcp_servers); // "may be added" (NOTES)
       if (servers) state.mcpServers = servers;
+    }
+  } else if (type === 'assistant') {
+    state.assistantText ??= [];
+    const msg = evt.message as { content?: unknown } | undefined;
+    const content = Array.isArray(msg?.content) ? msg!.content : [];
+    for (const block of content as Array<Record<string, unknown>>) {
+      if (block && block.type === 'text' && typeof block.text === 'string') state.assistantText.push(block.text);
     }
   } else if (type === 'tool_call') {
     const { name, input } = describeCursorToolCall(evt.tool_call);
@@ -395,6 +409,7 @@ export function assembleCursorObservation(state: CursorStreamState, meta: Cursor
     mcp_servers: state.mcpServers,
     agent_version_reported: meta.agentVersionReported,
     warnings: warnings.length > 0 ? warnings : undefined,
+    ...(state.assistantText ? { assistant_text: [...state.assistantText] } : {}),
     // §4.2 "Attempts": left empty on purpose. The Cursor stream format has no verified
     // permission-denial record or error-flagged tool result to derive attempts from (ADR-0016),
     // so the harness reports none rather than guess; a resisted Cursor run is not_attempted.

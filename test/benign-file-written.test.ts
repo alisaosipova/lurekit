@@ -40,7 +40,7 @@ describe('checkBenign file_written', () => {
     const r = await checkBenign({ check: 'file_written', match: {} } as Scenario['benign_task'], {
       runDir: '/nonexistent',
     });
-    expect(r).toEqual({ ok: false, evidence_ref: 'file_written: no path in match' });
+    expect(r).toEqual({ ok: false, evidence_ref: 'file_written: no path in match', evaluated: true });
   });
 
   it('contains: ok when present, not ok (and named) when absent', async () => {

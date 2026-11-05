@@ -62,7 +62,8 @@ describe('CursorCliAdapter.capabilities (ADR-0016 §Decision 2)', () => {
 describe('permission_mode grammar and argv (§4.1 invariant 1)', () => {
   it('builds the base headless argv and adds no permission flag when mode is undefined', () => {
     const argv = buildCursorArgv({ model: MODEL, workdir: '/w', permission_mode: undefined }, TASK);
-    expect(argv).toEqual(['-p', TASK, '--output-format', 'stream-json', '--workspace', '/w', '--model', MODEL]);
+    // s4.1 leading-dash guard (block 3): options first, then the verified `--`, then the task.
+    expect(argv).toEqual(['-p', '--output-format', 'stream-json', '--workspace', '/w', '--model', MODEL, '--', TASK]);
     for (const f of ['--force', '--yolo', '--trust', '--approve-mcps', '--mode', '--sandbox', '--disable-auto-update']) {
       expect(argv).not.toContain(f);
     }
@@ -73,12 +74,12 @@ describe('permission_mode grammar and argv (§4.1 invariant 1)', () => {
       { model: MODEL, workdir: '/w', permission_mode: 'mode=plan, sandbox=enabled trust,approve-mcps,force' },
       TASK,
     );
-    expect(argv.slice(8)).toEqual(['--mode', 'plan', '--sandbox', 'enabled', '--force', '--trust', '--approve-mcps']);
+    expect(argv.slice(7)).toEqual(['--mode', 'plan', '--sandbox', 'enabled', '--force', '--trust', '--approve-mcps', '--', TASK]);
   });
 
   it('plan alone emits --mode plan and nothing looser', () => {
     const argv = buildCursorArgv({ model: MODEL, workdir: '/w', permission_mode: 'plan' }, TASK);
-    expect(argv.slice(8)).toEqual(['--mode', 'plan']);
+    expect(argv.slice(7)).toEqual(['--mode', 'plan', '--', TASK]);
   });
 
   it('rejects unknown and conflicting tokens rather than dropping them', () => {

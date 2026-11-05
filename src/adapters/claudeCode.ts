@@ -366,6 +366,9 @@ export interface StreamState {
   permissionDenials?: Array<{ id?: string; name?: string; input?: unknown; at: number }>;
   /** §4.2 "Attempts": `tool_result` blocks flagged `is_error: true`, in stream order. */
   toolErrors: Array<{ id?: string; at: number }>;
+  /** s4.1 "Assistant text" (block 3): the `text` of every assistant `text` block, in stream
+   *  order; set (possibly empty) once an assistant event was seen. */
+  assistantText?: string[];
 }
 
 export function newStreamState(): StreamState {
@@ -396,7 +399,11 @@ export function parseStreamLine(line: string, at: number, state: StreamState): v
   } else if (type === 'assistant') {
     const msg = evt.message as { content?: unknown } | undefined;
     const content = Array.isArray(msg?.content) ? msg!.content : [];
+    state.assistantText ??= [];
     for (const block of content as Array<Record<string, unknown>>) {
+      if (block && block.type === 'text' && typeof block.text === 'string') {
+        state.assistantText.push(block.text);
+      }
       if (block && block.type === 'tool_use') {
         state.calls.push({
           id: typeof block.id === 'string' ? block.id : undefined,
@@ -546,6 +553,7 @@ export function assembleObservation(
     ...(meta.agentBinaryPath !== undefined ? { agent_binary_path: meta.agentBinaryPath } : {}),
     warnings: warnings.length > 0 ? warnings : undefined,
     ...(meta.agentFlags ? { agent_flags: [...meta.agentFlags] } : {}),
+    ...(state.assistantText ? { assistant_text: [...state.assistantText] } : {}),
     attempts: attemptsFrom(state, toolCalls),
   };
 }

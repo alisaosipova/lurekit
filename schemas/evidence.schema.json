@@ -104,7 +104,8 @@
         "isolation_failure",
         "precondition_failed",
         "run_timeout",
-        "evidence_tampered"
+        "evidence_tampered",
+        "benign_unevaluated"
       ]
     },
     "artefacts": {
