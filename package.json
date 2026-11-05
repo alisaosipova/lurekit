@@ -52,6 +52,7 @@
     "matrix": "node scripts/matrix.mjs",
     "assets:demo": "node scripts/render-demo-svg.mjs",
     "docs:numbers": "node scripts/numbers.mjs",
+    "changelog:check": "node scripts/changelog-frozen.mjs",
     "docs:check": "npm run build && node scripts/numbers.mjs --check && node scripts/catalog.mjs --check && node scripts/matrix.mjs --check && node scripts/render-demo-svg.mjs --check"
   },
   "dependencies": {

@@ -411,6 +411,27 @@ token). CI actions are SHA-pinned. Dev/test deps are allowed more latitude than 
 - A reader auditing the tool has a small runtime surface to review.
 - Provenance-attested releases match the credibility the published report needs.
 
+**Amendment (2026-11-05, block B15): no registry-fetched code in the publish job.** The
+`publish` job of `.github/workflows/release.yml` is the one job that can mint the OIDC token
+for trusted publishing (`id-token: write`). Everything it runs must be pinned: actions by SHA
+(already), dependencies by the lockfile (already: they are installed only in the unprivileged
+`build` job, which hands the tarball over as an artifact). The one exception was
+`npm install -g npm@11.21.0`, an exact version but fetched from the live registry with no
+integrity literal: the only registry-fetched code executed with the publishing credential
+(SECURITY-11). Decision: that step is removed. The job uses the npm bundled with the pinned
+`setup-node` release and asserts, as its first step after `setup-node` and before any `npm`
+command that reaches the registry, that `npm --version` is at least 11.5.1 (the trusted
+publishing minimum, NOTES-verified-facts); on an older bundled npm the step fails the release
+with `bundled npm <v> is older than 11.5.1: raise the node-version pin in release.yml` and
+never installs npm. The comparison is numeric on the three components (a `node -e` one-liner;
+no semver package). The `build` job keeps `npm ci --ignore-scripts` from the lockfile. The
+fallback, should a future npm minimum not be bundled with any supported LTS Node, is
+documented and not built: `npm pack npm@<v>` in the job, compare the tarball's `sha512` with a
+literal committed in release.yml, and `npm install -g ./npm-<v>.tgz` only on a match. The test
+plan of the ADR-0012 amendment of the same date (B15-T4) asserts that release.yml contains no
+`npm install -g` step; the workflow itself is linted (actionlint or `act -n`) in the block's
+verification, not in CI.
+
 ## ADR-0011: Repository layout
 
 **Status:** accepted (2026-11-01), implemented.
@@ -489,6 +510,137 @@ build `dist/` first and cannot ship a stale build; the job checks that the pack 
 A hygiene job fails on any `tmpdir()` call in `src/` or `test/` outside the TMPDIR sentinel test
 (`test/per-run-workdir.test.ts`), and fails on `agent-output.log` in `src/` (retired by
 ADR-0025 D3).
+
+**Amendment (2026-11-05, block B15): timing-tolerant tests, the five CI jobs, frozen released
+CHANGELOG sections.** Specced before the code (improvement plan 2026-11-05, block B15: ENGINE-08,
+DOCS-04, DOCS-01 CI half; SECURITY-11 is the ADR-0010 amendment of the same date). Nothing here
+changes a verdict, an evidence field or a bundle; the block is test hygiene and release
+pipeline only.
+
+(a) **Timing-tolerant tests.** The suite spawns real children and runs real deadlines, and a
+loaded host (CI runner, or the maintainer's box under a benchmark) makes a wall-clock race lose
+sometimes: B3-T2 (`run_timeout_ms: 60` against a stub sleeping 200 ms) reproduced red in 3 of 20
+samples under load. Rules, in priority order:
+1. A test that pins a verdict, an outcome, a manifest field or report bytes never depends on
+   the wall clock. Deadline outcomes are *declared* through the existing seam
+   `BenchmarkRunnerOptions.runWithDeadline` (ADR-0024 D5, `DeadlineRunner`): the injected
+   runner delegates to the real `runWithDeadline` for the call itself and rewrites the result
+   (`completion: 'timed_out'`, `fired: 'timer'`) for exactly the repetitions the test names,
+   as `test/run-lifecycle.test.ts` T2D/T2E already do. The stub adapter neither sleeps nor
+   races a timer. B3-T2 (evidence-spec s3.3) is rewritten this way: `FlakyAdapter`, the 200 ms
+   sleeps and `run_timeout_ms: 60` are removed; the three scenarios (two of three forced
+   timed out; all three forced; none) assert the same manifest fields as before.
+2. Tests whose *subject* is the timer or the kill path (run-lifecycle T1/T1b, the
+   `runWithDeadline` unit tests, child-process T4/T4w/T7) keep real timers. Every bound they
+   assert is derived from a named constant, never a bare literal: the lower bound is
+   `limit - TIMER_EARLY_MS` (Node timers may fire a few milliseconds before `performance.now()`
+   says the limit passed; windows-latest showed 199 for a 200 ms limit) and the upper bound is
+   the production constant that bounds the path (`KILL_GRACE_MS`, `STDIO_DRAIN_MS`,
+   `ABANDON_AFTER_MS`, the test's own `abandonAfterMs`/`graceMs`) plus `LOAD_SLACK_MS`. Both
+   constants live in `test/helpers/deadline.ts` next to `TEST_TIMEOUT_MS`, with a comment on
+   why each has its value. A lower bound asserts "not earlier than"; an upper bound asserts
+   only "did not hang" and is deliberately wide.
+3. Wall-clock *performance* assertions do not belong in the unit suite. The
+   `pseudonymizeMcpServers` 3000-name test (test/publish-gate.test.ts) keeps its functional
+   assertions (increasing placeholders, reserved names skipped, numbering continues across
+   calls); its elapsed-time check becomes a hang guard of 10 s with a comment saying so (the
+   quadratic per-name Set rebuild it was written against is a review item, and a 2 s bound on
+   a loaded runner measured the runner, not the code). No benchmark script is added.
+4. `retry: 1` is allowed only for the two files that drive real processes or real timers,
+   `test/child-process.test.ts` and `test/run-lifecycle.test.ts`, set on each top-level
+   `describe` with a comment citing this amendment. Every other file keeps vitest's default
+   `retry: 0`, so a flaky verdict, evidence, detector or report test fails loudly instead of
+   being retried into green. A retry is a tolerance for the host, never for the code: a test
+   that needs the second attempt on an idle host is a bug.
+5. `vitest.config.ts` keeps the single budget `TEST_TIMEOUT_MS`; no per-test timeouts.
+
+(b) **CI scope: five jobs, and the degraded rule as the workflow enforces it.** The decision
+text above says the replay job asserts "none is vulnerable or degraded"; ci.yml never did that
+for `degraded`, and CONTRIBUTING.md and docs/guide/architecture-overview.md copied the sentence
+(and list two and three jobs respectively). The normative description is:
+- `test` (Linux, macOS, Windows; Node 22 and 24 on every OS, Node 20.19 on Linux only):
+  `npm run typecheck`, `npm run build`, `npm test`, `validate-scenarios` (schema, required
+  `source.primary_url`), `lurekit --version` and `lurekit selftest` (each detector's positive
+  and negative control). Trips on a type error, a failing test, an invalid scenario, a detector
+  whose control fails.
+- `docs` (Linux): `npm run docs:check` (ADR-0023 numbers in README.md and the guides), then
+  regenerates docs/catalog.md, docs/verified-against.md and docs/assets/demo-output.svg and
+  requires a clean `git diff`. Trips on any generated text that drifted from the tree.
+- `replay` (Linux; Node 20.19, 22, 24): runs the corpus against `claude-sample` with `--replay`
+  and asserts: every planned scenario (runnable, applicable to claude-code) wrote an evidence
+  file carrying the replay warning; `totals.vulnerable == 0`; a repetition is `inconclusive`
+  only with `precondition_failed` for an `mcp_server` absent from the recording, and
+  `totals.inconclusive` equals that count; a repetition is `degraded` only when its benign
+  check is `file_written` (the recording holds no file edit, so that check cannot pass; four
+  scenarios replay `degraded` by design), and `totals.degraded` equals that count. It then
+  publishes the run through `publish --redact-home` (must exit 0), and in a second pass runs
+  AAB-018 against `claude-mcp-sample` asserting zero inconclusive results. Trips on a
+  vulnerable replay, an unexplained inconclusive or degraded, a gate refusal.
+- `package` (Linux): `npm pack`, install the tarball, run the installed bin from an EMPTY
+  directory (the 2026-11-03 amendment above), and check that the pack lists `dist/`.
+- `hygiene` (Linux): no `tmpdir()` outside the sentinel test, no `agent-output.log` in `src/`,
+  and (from this block) the frozen-CHANGELOG check of (c).
+CONTRIBUTING.md "How CI validates" and the CI bullet of docs/guide/architecture-overview.md
+carry the same five jobs, by name, and state the degraded rule with its `file_written`
+qualifier. `test/ci-docs.test.ts` parses the `jobs` keys of `.github/workflows/ci.yml` with the
+`yaml` dependency and asserts that each job id appears in both documents and that both contain
+the string `file_written` in their CI passage, so the prose cannot drift from the workflow
+again without a red test.
+
+(c) **Released CHANGELOG sections are frozen.** Once a tag `vX.Y.Z` exists, the `## [X.Y.Z]`
+section of CHANGELOG.md is byte-identical to the same section in `CHANGELOG.md` at that tag.
+A correction or an omission discovered after the tag goes to `[Unreleased]` (or the next
+release section) with a sentence saying which release it belongs to; the released text is
+never edited, because the npm tarball at that version carries the text at the tag and a reader
+comparing the two must find them equal. The check is `scripts/changelog-frozen.mjs` (Node, no
+dependencies, ASCII, `npm run changelog:check`):
+- release tags are `git tag --list 'v*'` filtered to `v<int>.<int>.<int>` with no pre-release
+  suffix (pre-release tags such as `v1.4.0-rc.1` have no Keep-a-Changelog section and are
+  skipped by name);
+- for each tag the section is extracted from `git show <tag>:CHANGELOG.md` and from the
+  working tree: from the `## [X.Y.Z]` heading line to the line before the next `## [` heading
+  or the first link-definition line (`^\[[^\]]+\]: `), whichever comes first, trailing blank
+  lines trimmed. The link footer is excluded on purpose: it legitimately gains a line per
+  release and its `[Unreleased]` compare URL moves;
+- a mismatch prints the tag, the section heading and a unified diff, and the script exits 1;
+  a tag whose CHANGELOG at the tag has no such section exits 1 (a release without notes is a
+  release-process error, not an exemption); no release tag found exits 1 with the hint to
+  fetch tags (fail closed: a shallow checkout must not pass vacuously);
+- it runs in the `hygiene` job on a checkout with `fetch-depth: 0` (tags and their trees are
+  needed; the repository is small), and it is listed in (b).
+State at the time of this amendment: v1.0.0, v1.1.0, v1.1.1 and v1.2.0 pass; v1.3.0 differs
+by the four ADR-0025 bullets inserted into `[1.3.0]` after the tag (commit 6b31161, DOCS-01).
+A check cannot land red, so block B15 moves those four bullets verbatim to
+`[Unreleased] / ### Security` (the "CHANGELOG move" half of DOCS-01 that the plan scheduled
+for B18 is done here; B18 keeps DOCS-02, the Windows amendment bullet and the line-71
+qualifier). After the move the `[1.3.0]` section equals `git show v1.3.0:CHANGELOG.md`.
+
+**Test plan (block B15).** Offline, vitest, no agent. Each test cites the rule it pins.
+- B15-T1 (a.1): `test/verdict-arithmetic.test.ts` B3-T2 drives `BenchmarkRunner` with an
+  injected `runWithDeadline` that forces `timed_out` on the repetitions it names and never
+  sleeps; the three manifests assert `low_confidence: true` and no reason (2 of 3), reason
+  `run_timeout` and no flag (3 of 3), neither (0 of 3), `validateManifest` passes. The file
+  contains no `setTimeout` and no `sleepMs` with a non-zero value in that describe.
+  Verification: the file passes 10 consecutive runs under 20 busy node loops.
+- B15-T2 (a.2): `test/helpers/deadline.ts` exports `TIMER_EARLY_MS` and `LOAD_SLACK_MS`; the
+  cited assertions (run-lifecycle:166, :187, :436; child-process:92, :112, :138-139, :183,
+  :210) reference them or a production constant; a grep in `test/ci-docs.test.ts` asserts
+  that no `Date.now() - t0` bound in those two files is compared to a bare numeric literal.
+- B15-T3 (a.3, a.4): the 3000-name test keeps its functional expectations and a 10 s hang
+  guard; `describe(..., { retry: 1 })` appears only in the two named files (asserted by the
+  same grep test over `test/*.test.ts`).
+- B15-T4 (b): `test/ci-docs.test.ts` as described: five job ids present in both documents,
+  `file_written` present in both CI passages; and, for ADR-0010, `.github/workflows/release.yml`
+  contains no `npm install -g` step.
+- B15-T5 (c): `scripts/changelog-frozen.mjs` exports `extractSection(text, version)` and
+  `compareSections(atTag, working)`; unit tests cover the heading-bounded case, the
+  link-footer-bounded case (the last section of the file), trailing blank trimming, a missing
+  section, and a one-character change; the end-to-end run against the repository is the
+  hygiene job step plus `npm run changelog:check` locally (not a vitest test: the `test` job's
+  shallow checkout has no tags, and the script must fail closed there, not pass).
+- Published bundles under `reports/` and `demo/`, the replay recordings and `report.json` are
+  untouched by this block (no production code changes); `npm run docs:check` is re-run because
+  the README test count is generated from `vitest list` and moving assertions may change it.
 
 ## ADR-0013: Weekly update cadence — **DECISION NEEDED**
 

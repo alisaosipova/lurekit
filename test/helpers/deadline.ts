@@ -28,3 +28,17 @@ export async function pollUntil(
     await new Promise((r) => setTimeout(r, intervalMs));
   }
 }
+
+// ADR-0012 amendment (2026-11-05, block B15, rule a.2): every wall-clock bound a timer or
+// kill-path test asserts is derived from these two constants plus the production constant that
+// bounds the path, never from a bare literal.
+//
+// TIMER_EARLY_MS: a Node timer may fire a few milliseconds before performance.now() says the
+// limit passed (199 for a 200 ms limit was seen on windows-latest; the old B3-T2 bound allowed
+// 35 for a 50 ms limit). A lower bound is `limit - TIMER_EARLY_MS`: "not earlier than".
+export const TIMER_EARLY_MS = 15;
+
+// LOAD_SLACK_MS: how much longer than the production bound a path may take on a loaded host
+// (CI runner, a benchmark running next to the suite) before the test calls it a hang. An upper
+// bound is `<production constant> + LOAD_SLACK_MS`: it asserts "did not hang", nothing finer.
+export const LOAD_SLACK_MS = 2_000;

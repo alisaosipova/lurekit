@@ -34,6 +34,7 @@ import { main, type CliDeps } from '../src/cli.js';
 import { StubAdapter, type StubScript } from './helpers/stubAdapter.js';
 import { InMemoryNoopFixture } from './helpers/inMemoryNoopFixture.js';
 import { mkScratch } from './helpers/scratch.js';
+import { LOAD_SLACK_MS, TIMER_EARLY_MS } from './helpers/deadline.js';
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 const RECORDING = path.join(repoRoot, 'test/fixtures/recordings/claude-sample');
@@ -151,9 +152,11 @@ async function runStub(
 
 // --- T1: timeout ----------------------------------------------------------------------------
 
-describe('T1 per-run timeout (ADR-0024 D1/D3)', () => {
+// ADR-0012 amendment (2026-11-05, block B15, rule a.4): real timers; one retry tolerates the host, never the code.
+describe('T1 per-run timeout (ADR-0024 D1/D3)', { retry: 1 }, () => {
   it('a run that sleeps past run_timeout_ms is inconclusive(run_timeout) with timed_out and elapsed_ms', async () => {
-    const { result, evidence, cfg, runner, scenario } = await runStub('T1', { sleepMs: 5_000, benignText: 'DONE-BENIGN' }, { run_timeout_ms: 200 });
+    const T1_LIMIT_MS = 200;
+    const { result, evidence, cfg, runner, scenario } = await runStub('T1', { sleepMs: 5_000, benignText: 'DONE-BENIGN' }, { run_timeout_ms: T1_LIMIT_MS });
     const run = result.runs[0];
     expect(run.outcome).toBe('inconclusive');
     expect(run.inconclusive_reason).toBe('run_timeout');
@@ -161,30 +164,34 @@ describe('T1 per-run timeout (ADR-0024 D1/D3)', () => {
     expect(evidence.outcome).toBe('inconclusive');
     expect(evidence.inconclusive_reason).toBe('run_timeout');
     expect(evidence.timed_out).toBe(true);
-    // Node timers may fire a millisecond before performance.now() says the limit passed
-    // (seen as 199 on windows-latest), so the bound has a small slack.
-    expect(evidence.elapsed_ms).toBeGreaterThanOrEqual(190);
-    expect(evidence.elapsed_ms).toBeLessThan(5_000);
+    // Bounds from the named constants (ADR-0012 amendment 2026-11-05, rule a.2): the timer may
+    // fire a little early; the upper bound only says the stub's 5 s sleep was not waited out.
+    expect(evidence.elapsed_ms).toBeGreaterThanOrEqual(T1_LIMIT_MS - TIMER_EARLY_MS);
+    expect(evidence.elapsed_ms).toBeLessThan(T1_LIMIT_MS + LOAD_SLACK_MS);
     // The stub rejected on the signal: no observation, the warnings are top-level.
     expect(evidence.observation).toBeUndefined();
     const w = allWarnings(evidence);
     expect(w.some((x) => /^run timed out after \d+ ms \(limit 200 ms\)$/.test(x))).toBe(true);
     expectValid(evidence);
     const manifest = await runner.writeManifest(makeProfile(''), cfg, [scenario], [result], { createdAt: '2026-11-04T00:00:00.000Z', toolVersion: 'test' });
-    expect(manifest.config.run_timeout_ms).toBe(200);
+    expect(manifest.config.run_timeout_ms).toBe(T1_LIMIT_MS);
     const mok = validateManifest(manifest);
     expect(validateManifest.errors ?? []).toEqual([]);
     expect(mok).toBe(true);
   });
 
   it('T1b: an adapter that ignores its signal is abandoned after abandonAfterMs; the run continues', async () => {
+    const T1B_LIMIT_MS = 100;
+    const T1B_ABANDON_MS = 300;
     const { result, evidence, tookMs } = await runStub(
       'T1B',
       { sleepMs: 5_000, ignoreSignal: true, benignText: 'DONE-BENIGN' },
-      { run_timeout_ms: 100 },
-      { abandonAfterMs: 300 },
+      { run_timeout_ms: T1B_LIMIT_MS },
+      { abandonAfterMs: T1B_ABANDON_MS },
     );
-    expect(tookMs).toBeLessThan(3_000);
+    // The run is bounded by the timer plus the abandon window; anything past that plus the
+    // load slack means the non-cooperating stub was waited out (rule a.2).
+    expect(tookMs).toBeLessThan(T1B_LIMIT_MS + T1B_ABANDON_MS + LOAD_SLACK_MS);
     expect(result.runs[0].outcome).toBe('inconclusive');
     expect(result.runs[0].inconclusive_reason).toBe('run_timeout');
     expect(evidence.timed_out).toBe(true);
@@ -214,7 +221,8 @@ describe('T1 per-run timeout (ADR-0024 D1/D3)', () => {
 
 // --- T2: a hit is a hit ------------------------------------------------------------------------
 
-describe('T2 a detector hit outranks every failure (evidence-spec s3.1 rule 1)', () => {
+// ADR-0012 amendment (2026-11-05, block B15, rule a.4): real timers; one retry tolerates the host, never the code.
+describe('T2 a detector hit outranks every failure (evidence-spec s3.1 rule 1)', { retry: 1 }, () => {
   it('signal then throw -> vulnerable, one hit, the throw is only a warning', async () => {
     const { result, evidence } = await runStub('T2A', { trigger: 'canary_file_read', throwAfterSignal: 'boom after signal' });
     expect(result.runs[0].outcome).toBe('vulnerable');
@@ -250,7 +258,8 @@ describe('T2 a detector hit outranks every failure (evidence-spec s3.1 rule 1)',
 
 // --- T2b: the resisted guard --------------------------------------------------------------------
 
-describe('T2b the resisted guard canScoreResisted (ADR-0024 D2)', () => {
+// ADR-0012 amendment (2026-11-05, block B15, rule a.4): real timers; one retry tolerates the host, never the code.
+describe('T2b the resisted guard canScoreResisted (ADR-0024 D2)', { retry: 1 }, () => {
   const completions: RunCompletion[] = ['completed', 'threw', 'timed_out', 'aborted', 'abandoned'];
   it('is true for exactly one row of the truth table', () => {
     let trues = 0;
@@ -320,7 +329,8 @@ class ThrowingTeardownFixture extends InMemoryNoopFixture {
   }
 }
 
-describe('T3 teardown runs in finally and never changes the verdict (ADR-0024 D2/D4)', () => {
+// ADR-0012 amendment (2026-11-05, block B15, rule a.4): real timers; one retry tolerates the host, never the code.
+describe('T3 teardown runs in finally and never changes the verdict (ADR-0024 D2/D4)', { retry: 1 }, () => {
   it('a fixture teardown that throws: resisted stays resisted, teardown_error recorded, detector teardown ran', async () => {
     const fixture = new ThrowingTeardownFixture();
     let detectorTeardowns = 0;
@@ -374,7 +384,8 @@ describe('T3 teardown runs in finally and never changes the verdict (ADR-0024 D2
 
 // --- operator abort ---------------------------------------------------------------------------
 
-describe('operator abort through the caller signal (ADR-0024 D1)', () => {
+// ADR-0012 amendment (2026-11-05, block B15, rule a.4): real timers; one retry tolerates the host, never the code.
+describe('operator abort through the caller signal (ADR-0024 D1)', { retry: 1 }, () => {
   it('an abort during the run -> inconclusive(adapter_error) with the aborted warning; later repetitions are not launched', async () => {
     const root = await tmpRoot();
     const runner = new BenchmarkRunner({ ids: ids('OPA') });
@@ -407,7 +418,8 @@ describe('operator abort through the caller signal (ADR-0024 D1)', () => {
 
 // --- deadline helper ----------------------------------------------------------------------------
 
-describe('runWithDeadline (src/runner/deadline.ts)', () => {
+// ADR-0012 amendment (2026-11-05, block B15, rule a.4): real timers; one retry tolerates the host, never the code.
+describe('runWithDeadline (src/runner/deadline.ts)', { retry: 1 }, () => {
   it('completed / threw without a signal carry no elapsed', async () => {
     const ok = await runWithDeadline(async () => 42, {});
     expect(ok).toEqual({ completion: 'completed', value: 42 });
@@ -420,6 +432,7 @@ describe('runWithDeadline (src/runner/deadline.ts)', () => {
   });
 
   it('the timer fires and the signal fn received is aborted; a value returned afterwards is kept', async () => {
+    const UNIT_LIMIT_MS = 50;
     let seen: AbortSignal | undefined;
     const r = await runWithDeadline(
       (signal) =>
@@ -427,13 +440,13 @@ describe('runWithDeadline (src/runner/deadline.ts)', () => {
           seen = signal;
           signal.addEventListener('abort', () => resolve('partial'), { once: true });
         }),
-      { timeoutMs: 50 },
+      { timeoutMs: UNIT_LIMIT_MS },
     );
     expect(seen?.aborted).toBe(true);
     expect(r.completion).toBe('timed_out');
     expect(r.fired).toBe('timer');
     expect(r.value).toBe('partial');
-    expect(r.elapsedMs).toBeGreaterThanOrEqual(35);
+    expect(r.elapsedMs).toBeGreaterThanOrEqual(UNIT_LIMIT_MS - TIMER_EARLY_MS);
   });
 
   it('an already-aborted caller signal yields aborted; a non-returning fn is abandoned', async () => {
@@ -477,7 +490,8 @@ async function evidenceFiles(dir: string): Promise<Map<string, string>> {
   return out;
 }
 
-describe('T5 replay byte-identity (ADR-0024 D4)', () => {
+// ADR-0012 amendment (2026-11-05, block B15, rule a.4): real timers; one retry tolerates the host, never the code.
+describe('T5 replay byte-identity (ADR-0024 D4)', { retry: 1 }, () => {
   // Two full replays of the 25-scenario recording; well above the shared per-test budget.
   it('--replay ignores --run-timeout: identical evidence bytes, no lifecycle fields, run_timeout_ms null', { timeout: 180_000 }, async () => {
     const tmp = await tmpRoot();
@@ -528,7 +542,8 @@ describe('T5 replay byte-identity (ADR-0024 D4)', () => {
 
 // --- T6: CLI flag ---------------------------------------------------------------------------------
 
-describe('T6 --run-timeout CLI validation (ADR-0024 D1)', () => {
+// ADR-0012 amendment (2026-11-05, block B15, rule a.4): real timers; one retry tolerates the host, never the code.
+describe('T6 --run-timeout CLI validation (ADR-0024 D1)', { retry: 1 }, () => {
   it.each([['0'], ['-5'], ['1.5']])('refuses --run-timeout %s before the prompt with a next: hint', async (value) => {
     const tmp = await tmpRoot();
     const sink = { out: [] as string[], err: [] as string[] };

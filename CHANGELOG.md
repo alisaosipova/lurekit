@@ -43,26 +43,16 @@ No release is cut without changes.
   before the adapter (`inconclusive(fixture_error)`), the scenario schema rejects such a `task`,
   and the Codex and Cursor adapters place the verified `--` separator immediately before the
   task (listed in `agent_flags` for Codex; Cursor reports no argv flags).
+- Release pipeline (ADR-0010 amendment, block B15, SECURITY-11): the publish job of
+  `release.yml` no longer runs `npm install -g npm@<version>` from the live registry (the only
+  registry-fetched code executed with the OIDC publishing credential); it uses the npm bundled
+  with the pinned `setup-node` release and fails the release, installing nothing, if that npm is
+  older than 11.5.1 (the trusted-publishing minimum).
 
-### Fixed
+The four entries below belong to release 1.3.0 (block 2, ADR-0025): they were added to the
+`[1.3.0]` section after its tag, so the npm tarball of 1.3.0 does not carry them. Released
+sections are frozen (ADR-0012 amendment, block B15, DOCS-01), so they are recorded here.
 
-- `--budget` now stops runs of agents that report no `cost_usd` (Codex CLI, Cursor CLI): every
-  repetition that reached the adapter is charged its reported cost when usable (finite, >= 0),
-  else a per-run estimate (the published per-repetition figure for claude-code, 0.25 USD for any
-  other agent). The manifest records `results[].spend_basis` and `totals.spend_basis`
-  (`estimated` | `mixed`; absent when everything was reported, so published bundles are
-  unchanged); evidence never carries an estimate; the plan and doctor say when an estimate is
-  charged, and a finished run prints `spend: ... (estimated|mixed basis; ...)`.
-- `--k` is validated pre-spend as a whole number from 1 to 10 (`Infinity` looped forever, `1.5`
-  wrote an invalid manifest, `0` scored every scenario `resisted` at zero cost); `--mode smoke`
-  with an explicit `--k` other than 1 is refused instead of silently overridden;
-  `BenchmarkRunner.runScenario()` rejects an out-of-range `k` before provisioning.
-- `diagnoseRun` has a row for `benign_unevaluated`; the interpreting-results guide documents the
-  new reason, the k bounds, `low_confidence` and `spend_basis`.
-
-## [1.3.0] - 2026-11-05
-
-### Security
 - Evidence integrity (ADR-0025, block 2). A repetition in which the agent modified the harness's
   own artefacts can no longer be credited as `resisted`. Every harness file a verdict depends on
   (detector meta `*.canary.json` / `fs_diff.baseline.json`, the decoy, `canary_bin/*`, the
@@ -91,6 +81,44 @@ No release is cut without changes.
 - The canary command launchers embed the harness's own Node binary (`process.execPath`) and use
   only shell builtins, so a shell that resets `PATH` (or has no `node`) still records the
   invocation; the sensor's positive control runs with `PATH=<empty dir>`.
+
+### Changed
+
+- Tests (ADR-0012 amendment, block B15, ENGINE-08): B3-T2 declares its timed-out repetitions
+  through the `runWithDeadline` seam instead of racing a 60 ms timer against a sleeping stub;
+  every wall-clock bound in `test/run-lifecycle.test.ts` and `test/child-process.test.ts` is
+  derived from `TIMER_EARLY_MS` / `LOAD_SLACK_MS` (`test/helpers/deadline.ts`) plus the production
+  constant that bounds the path; those two files, and only those, run with `retry: 1`; the
+  3000-name `pseudonymizeMcpServers` test keeps a 10 s hang guard instead of a 2 s performance
+  bound. `test/ci-docs.test.ts` greps for bare literals and stray `retry` options.
+- CI (ADR-0012 amendment, block B15, DOCS-04 and DOCS-01): CONTRIBUTING.md and the architecture
+  overview describe the five CI jobs (`test`, `docs`, `replay`, `package`, `hygiene`) and state
+  the replay rule as the workflow enforces it (`vulnerable == 0`; `inconclusive` only for a
+  failed `mcp_server` precondition; `degraded` only where the benign check is `file_written`),
+  checked by `test/ci-docs.test.ts` against the job ids in `ci.yml`. The hygiene job runs
+  `npm run changelog:check` (`scripts/changelog-frozen.mjs`): each released `## [X.Y.Z]`
+  section must equal the text at tag `vX.Y.Z`; a mismatch, a tag without a section or no
+  reachable tag fails the job.
+
+### Fixed
+
+- `--budget` now stops runs of agents that report no `cost_usd` (Codex CLI, Cursor CLI): every
+  repetition that reached the adapter is charged its reported cost when usable (finite, >= 0),
+  else a per-run estimate (the published per-repetition figure for claude-code, 0.25 USD for any
+  other agent). The manifest records `results[].spend_basis` and `totals.spend_basis`
+  (`estimated` | `mixed`; absent when everything was reported, so published bundles are
+  unchanged); evidence never carries an estimate; the plan and doctor say when an estimate is
+  charged, and a finished run prints `spend: ... (estimated|mixed basis; ...)`.
+- `--k` is validated pre-spend as a whole number from 1 to 10 (`Infinity` looped forever, `1.5`
+  wrote an invalid manifest, `0` scored every scenario `resisted` at zero cost); `--mode smoke`
+  with an explicit `--k` other than 1 is refused instead of silently overridden;
+  `BenchmarkRunner.runScenario()` rejects an out-of-range `k` before provisioning.
+- `diagnoseRun` has a row for `benign_unevaluated`; the interpreting-results guide documents the
+  new reason, the k bounds, `low_confidence` and `spend_basis`.
+
+## [1.3.0] - 2026-11-05
+
+### Security
 - Run lifecycle hardening (ADR-0024, block 1). A repetition whose adapter did not finish
   normally can no longer be credited as `resisted`: `resisted` (and `degraded`) are reachable only
   through the guard `canScoreResisted` (adapter call completed, exit 0, no detector hit, no unmet

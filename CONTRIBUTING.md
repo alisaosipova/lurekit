@@ -92,19 +92,37 @@ Why: this keeps dual licensing possible later without having to track down every
 
 ## How CI validates
 
-On every push and pull request, CI (`.github/workflows/ci.yml`) runs on Linux, macOS and Windows:
+On every push and pull request, CI (`.github/workflows/ci.yml`, actions pinned by SHA) runs
+five jobs (ADR-0012):
 
-- `npm run typecheck` and `npm test` (offline, stub adapter);
-- `node dist/tools/validate-scenarios.js scenarios` (schema, including the required `source.primary_url`);
-- `node dist/cli.js selftest` (each detector's positive and negative control).
-
-A second job (Linux) drives the corpus through the replay adapter on the recorded claude-code run
-in `test/fixtures/recordings/claude-sample` and checks that every planned scenario (runnable and
-applicable to claude-code) wrote an evidence file, that nothing is vulnerable or degraded, and that
-nothing is inconclusive except MCP scenarios (the recording has no MCP server connected). It
-then runs `node dist/cli.js publish --redact-home` on that run, which must pass the redaction gate.
-Replayed results are marked as replays: this proves the pipeline, parser, reporters and publish gate,
-not how an agent behaves on your scenario.
+- `test` (Linux, macOS, Windows; Node 22 and 24 on every OS, Node 20.19 on Linux only):
+  `npm run typecheck`, `npm run build`, `npm test` (offline, stub adapter),
+  `node dist/tools/validate-scenarios.js scenarios` (schema, including the required
+  `source.primary_url`), `lurekit --version` and `lurekit selftest` (each detector's positive
+  and negative control). Trips on a type error, a failing test, an invalid scenario or a
+  detector whose control fails.
+- `docs` (Linux): `npm run docs:check` (every number the README and guides quote), then
+  regenerates `docs/catalog.md`, `docs/verified-against.md` and `docs/assets/demo-output.svg`
+  and requires a clean `git diff`. Trips on generated text that drifted from the tree.
+- `replay` (Linux; Node 20.19, 22, 24): drives the corpus through the replay adapter on the
+  recorded claude-code run in `test/fixtures/recordings/claude-sample` and asserts that every
+  planned scenario (runnable and applicable to claude-code) wrote an evidence file carrying the
+  replay warning; that `totals.vulnerable` is 0; that a repetition is `inconclusive` only with
+  `precondition_failed` for an `mcp_server` the recording does not have (and `totals.inconclusive`
+  equals that count); and that a repetition is `degraded` only when its benign check is
+  `file_written` (a replayed stream carries no workdir edits, so that check cannot pass: four
+  scenarios replay `degraded` by design; `totals.degraded` equals that count). It then runs
+  `node dist/cli.js publish --redact-home` on that run, which must pass the redaction gate, and
+  in a second pass runs AAB-018 against `claude-mcp-sample` asserting zero inconclusive results.
+  Replayed results are marked as replays: this proves the pipeline, parser, reporters and publish
+  gate, not how an agent behaves on your scenario.
+- `package` (Linux): `npm pack`, install the tarball, run the installed bin (`--version`,
+  `validate`, `selftest`, then `doctor`, `demo`, `list`, `plan` from an empty directory) and
+  check that the pack lists `dist/`.
+- `hygiene` (Linux): no `tmpdir()` scratch in `src/` or `test/` outside the TMPDIR sentinel
+  test, no `agent-output.log` in `src/`, and `npm run changelog:check`: every released
+  `## [X.Y.Z]` section of CHANGELOG.md equals the text at tag `vX.Y.Z` (released sections are
+  frozen; a correction goes to `[Unreleased]`).
 
 CI does not launch a live agent. The live run against at least one agent is a manual step performed by
 the maintainer before merge (ADR-0012).

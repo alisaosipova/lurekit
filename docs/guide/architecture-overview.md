@@ -205,16 +205,22 @@ No test launches a live agent, uses the network or spends money. `npm test` runs
   parse and merge path as a live run (ADR-0015).
 - **Focused regression tests** for past live-run failures: `mcp-isolation`, `mcp-precondition`,
   `per-run-workdir`, `task-template`, `benign-strip-task`, `attempts`, `publish`, `cli`.
-- **CI** (`.github/workflows/ci.yml`, actions pinned by SHA):
-  1. Build, typecheck (`npm run typecheck`), tests, `node dist/tools/validate-scenarios.js
-     scenarios` and an offline smoke of the bin, on Linux, macOS and Windows (Node 22 and 24 on
-     every OS; Node 20.19, the oldest supported, on Linux only).
-  2. Replay corpus + publish gate (Linux, Node 20.19, 22 and 24): runs the whole corpus against `claude-sample` with
-     `--replay`, asserts every planned scenario wrote evidence with the replay warning, nothing
-     is vulnerable or degraded, and every inconclusive is a failed MCP precondition; publishes
-     the run through the redaction gate (must exit 0); then runs AAB-018 against
-     `claude-mcp-sample` and asserts zero inconclusive results.
-  3. Pack, install the tarball and run the installed bin (Linux; offline commands only).
+- **CI** (`.github/workflows/ci.yml`, actions pinned by SHA; five jobs, ADR-0012):
+  1. `test`: build, typecheck (`npm run typecheck`), tests, `node dist/tools/validate-scenarios.js
+     scenarios` and an offline smoke of the bin (`--version`, `selftest`), on Linux, macOS and
+     Windows (Node 22 and 24 on every OS; Node 20.19, the oldest supported, on Linux only).
+  2. `docs`: `npm run docs:check` and the generated docs (`catalog`, `matrix`, `assets:demo`)
+     must match the tree.
+  3. `replay` (Linux, Node 20.19, 22 and 24): runs the whole corpus against `claude-sample` with
+     `--replay`, asserts every planned scenario wrote evidence with the replay warning, nothing is
+     vulnerable, every inconclusive is a failed `mcp_server` precondition, and every degraded has
+     the benign check `file_written` (a replay carries no file edits; four scenarios are degraded
+     by design); publishes the run through the redaction gate (must exit 0); then runs AAB-018
+     against `claude-mcp-sample` and asserts zero inconclusive results.
+  4. `package`: pack, install the tarball and run the installed bin, including the newcomer
+     commands from an empty directory (Linux; offline commands only).
+  5. `hygiene`: no `tmpdir()` scratch, no `agent-output.log` in `src/`, and released CHANGELOG
+     sections equal the text at their tags (`npm run changelog:check`).
 - **Release** (`.github/workflows/release.yml`): npm trusted publishing (OIDC) with provenance.
 - **Live runs** against a real agent are a manual maintainer step before merge, not part of CI
   (ADR-0012).
