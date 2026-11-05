@@ -5,6 +5,7 @@
 
 import type { RunManifest, RunOutcome } from '../runner/types.js';
 import type { Report } from './score.js';
+import { HARDENING_KNOBS, type SurfaceLookup } from './guidance.js';
 
 /** Repository URL for the SARIF driver.informationUri (matches the schemas' $id origin). */
 export const REPOSITORY_URL = 'https://github.com/alisaosipova/lurekit';
@@ -13,11 +14,36 @@ export const REPOSITORY_URL = 'https://github.com/alisaosipova/lurekit';
 /** B17: inconclusive is a `warning` (not measured must not read as a pass); resisted is omitted. */
 const LEVEL: Partial<Record<RunOutcome, string>> = { vulnerable: 'error', degraded: 'note', inconclusive: 'warning' };
 
-export function renderSarif(manifest: RunManifest, report: Report): string {
-  return JSON.stringify(toSarif(manifest, report), null, 2) + '\n';
+export function renderSarif(manifest: RunManifest, report: Report, surfaceOf?: SurfaceLookup): string {
+  return JSON.stringify(toSarif(manifest, report, surfaceOf), null, 2) + '\n';
 }
 
-export function toSarif(manifest: RunManifest, report: Report): Record<string, unknown> {
+/** FEATURE-13 (evidence-spec s6.1 amendment): the "What to change" mapping as data, one entry
+ *  per attack surface with a vulnerable scenario and a known hardening knob for this agent. */
+export function remediation(manifest: RunManifest, report: Report, surfaceOf?: SurfaceLookup): Array<Record<string, unknown>> {
+  if (!surfaceOf) return [];
+  const bySurface = new Map<string, string[]>();
+  for (const s of report.scenarios) {
+    if (s.verdict !== 'vulnerable') continue;
+    const surface = surfaceOf(s.id);
+    if (!surface) continue;
+    bySurface.set(surface, [...(bySurface.get(surface) ?? []), s.id]);
+  }
+  const out: Array<Record<string, unknown>> = [];
+  for (const [surface, scenarios] of [...bySurface].sort(([a], [b]) => a.localeCompare(b))) {
+    const knob = HARDENING_KNOBS[surface];
+    out.push({
+      surface,
+      scenarios,
+      ...(knob && knob.agent === manifest.profile.agent
+        ? { setting: knob.setting, run_flags: knob.run_flags, proven_on: knob.proven_on, agent_version: knob.agent_version, trade_off: knob.trade_off }
+        : { setting: null }),
+    });
+  }
+  return out;
+}
+
+export function toSarif(manifest: RunManifest, report: Report, surfaceOf?: SurfaceLookup): Record<string, unknown> {
   const byId = new Map(manifest.results.map((r) => [r.scenario_id, r]));
   const reported = report.scenarios.filter((s) => LEVEL[s.verdict] !== undefined);
 
@@ -67,7 +93,7 @@ export function toSarif(manifest: RunManifest, report: Report): Record<string, u
         originalUriBaseIds: { LUREKIT_RUN: { description: { text: 'the benchmark run directory (results/<benchmark_run_id>/)' } } },
         // B17: one code-scanning category per agent across uploads (GitHub uses the part up to the last '/').
         automationDetails: { id: `lurekit/${manifest.profile.agent}/${manifest.benchmark_run_id}` },
-        properties: { profileDigest: report.profile_digest, headline: report.headline },
+        properties: { profileDigest: report.profile_digest, headline: report.headline, ...(surfaceOf ? { remediation: remediation(manifest, report, surfaceOf) } : {}) },
       },
     ],
   };

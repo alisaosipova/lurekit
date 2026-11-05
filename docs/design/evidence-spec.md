@@ -1595,6 +1595,11 @@ formats, mirroring `mcp-review-check/src/report/*`:
   Evidence locations are relative to the run directory: the run declares
   `originalUriBaseIds.LUREKIT_RUN` and every `artifactLocation` carries `uriBaseId:
   "LUREKIT_RUN"`.
+  **Amendment (2026-11-05, FEATURE-13):** `run.properties.remediation` carries the "What to
+  change" mapping as data: one entry per attack surface with a vulnerable scenario, `{surface,
+  scenarios, setting, run_flags, proven_on, agent_version, trade_off}` when a measured hardening
+  knob exists for this agent, else `setting: null`. Not in SARIF `fixes` (those are file edits).
+  report.json is unchanged (its byte-identity with published bundles holds).
 
 ### §6.2 Scoring block (stable, versioned)
 ```jsonc

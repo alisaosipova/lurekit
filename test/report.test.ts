@@ -272,3 +272,17 @@ describe('B17 VERDICT-09: headless_fidelity reduced is surfaced', () => {
     if (r) expect(r.properties.headless_fidelity).toBe('reduced');
   });
 });
+
+describe('FEATURE-13: SARIF carries the What-to-change mapping', () => {
+  it('run.properties.remediation lists the surface, its vulnerable scenarios and the knob', async () => {
+    const { toSarif } = await import('../src/report/sarif.js');
+    const m = makeManifest();
+    const sarif = toSarif(m, buildScore(m), () => 'settings_hooks_file') as Record<string, any>;
+    const rem = sarif.runs[0].properties.remediation;
+    expect(Array.isArray(rem)).toBe(true);
+    expect(rem[0].surface).toBe('settings_hooks_file');
+    expect(rem[0].scenarios.length).toBeGreaterThan(0);
+    expect(rem[0].run_flags).toMatch(/--setting-sources user/);
+    expect((toSarif(m, buildScore(m)) as Record<string, any>).runs[0].properties.remediation).toBeUndefined();
+  });
+});

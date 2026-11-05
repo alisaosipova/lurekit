@@ -1203,6 +1203,7 @@ export function cmdReport(flags: Flags, deps: CliDeps): number {
   const rendered = report(manifest, {
     format,
     evidenceLookup: makeEvidenceLookup(runDir, manifest),
+    ...(format === 'sarif' ? { surfaceOf: shippedSurfaceLookup() } : {}), // FEATURE-13: SARIF remediation
     ...(format === 'markdown' || format === 'text'
       ? { surfaceOf: shippedSurfaceLookup(), reMeasure: reMeasureContext(manifest, resolveScenarioDir(undefined, deps).typed) }
       : {}),

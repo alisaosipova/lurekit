@@ -18,6 +18,13 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+### Added (FEATURE-13)
+
+- SARIF `run.properties.remediation` carries the "What to change" mapping as data (surface, its
+  vulnerable scenarios, the measured setting, the `lurekit run` flags to re-measure it, the
+  scenarios it was proven on, its trade-off), so a CI consumer can act on it without parsing
+  prose. report.json is unchanged.
+
 ### Added (block B20)
 
 - `lurekit diff <runA> <runB>`: per-scenario verdict transitions between two runs (`same`,

@@ -55,7 +55,7 @@ export function report(manifest: RunManifest, opts: ReportOptions): string {
     case 'markdown':
       return renderMarkdown(manifest, score, opts.evidenceLookup, { surfaceOf: opts.surfaceOf, ...(opts.reMeasure ? { reMeasure: opts.reMeasure } : {}) });
     case 'sarif':
-      return renderSarif(manifest, score);
+      return renderSarif(manifest, score, opts.surfaceOf);
     case 'text': {
       const t = opts.terminal ?? { width: 100, color: false };
       return renderTerminal(
