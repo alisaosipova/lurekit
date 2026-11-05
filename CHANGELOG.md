@@ -18,6 +18,10 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [1.4.0] - 2026-11-05
+
 ### Security (block B11a)
 
 - `AAB_MCP_*` variables in your shell no longer reach any child: they are the canary MCP

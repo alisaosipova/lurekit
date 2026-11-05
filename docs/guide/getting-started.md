@@ -375,7 +375,7 @@ version is the LureKit version that made the run):
       "tool": {
         "driver": {
           "name": "LureKit",
-          "version": "1.3.0",
+          "version": "1.4.0",
 ```
 
 ### Publishing a shareable bundle
