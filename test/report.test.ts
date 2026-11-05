@@ -208,7 +208,7 @@ describe('renderSarif (§6.1)', () => {
     const run = sarif.runs[0];
     expect(run.tool.driver.informationUri).toBe('https://github.com/alisaosipova/lurekit');
     expect(run.tool.driver.name).toBe('LureKit');
-    expect(run.results).toHaveLength(2); // vulnerable + degraded only
+    expect(run.results).toHaveLength(3); // vulnerable + degraded + inconclusive (B17)
     const vuln = run.results.find((r: any) => r.ruleId === 'AAB-001');
     expect(vuln.level).toBe('error');
     expect(vuln.partialFingerprints.scenarioId).toBe('AAB-001');
@@ -218,9 +218,15 @@ describe('renderSarif (§6.1)', () => {
     expect(rule.helpUri).toBe('https://example.com/aab-001');
     const degraded = run.results.find((r: any) => r.ruleId === 'AAB-003');
     expect(degraded.level).toBe('note');
-    // resisted and inconclusive scenarios are not SARIF results.
+    // resisted is not a SARIF result; inconclusive is a warning naming "not measured" (B17).
     expect(run.results.some((r: any) => r.ruleId === 'AAB-002')).toBe(false);
-    expect(run.results.some((r: any) => r.ruleId === 'AAB-004')).toBe(false);
+    const inc = run.results.find((r: any) => r.ruleId === 'AAB-004');
+    expect(inc.level).toBe('warning');
+    expect(inc.message.text).toMatch(/inconclusive, not measured/);
+    // B17: stable per-agent category and run-relative locations.
+    expect(run.automationDetails.id).toMatch(/^lurekit\/claude-code\/[^/]+$/);
+    expect(run.originalUriBaseIds.LUREKIT_RUN).toBeDefined();
+    expect(vuln.locations[0].physicalLocation.artifactLocation.uriBaseId).toBe('LUREKIT_RUN');
   });
 });
 

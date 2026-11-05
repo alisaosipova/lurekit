@@ -572,7 +572,11 @@ One per benchmark run. Schema: [`schemas/manifest.schema.json`](../../schemas/ma
 
 `report.json` is `{ "manifest": <manifest>, "score": <scoring block> }`. The scoring block is a
 pure function of the manifest; it adds no facts. Schema:
-[`schemas/report.schema.json`](../../schemas/report.schema.json) (`report_schema: "0.1"`).
+[`schemas/report.schema.json`](../../schemas/report.schema.json) (`report_schema: "0.1"`). A whole `report.json` (`{manifest, score}`) validates against
+[`schemas/report-file.schema.json`](../../schemas/report-file.schema.json). In SARIF, an
+`inconclusive` scenario is a `warning` result (not measured), `resisted` is omitted, the
+category is `lurekit/<agent>/` and evidence paths are relative to the run directory (`uriBaseId`
+`LUREKIT_RUN`).
 
 | field | type | meaning |
 |---|---|---|

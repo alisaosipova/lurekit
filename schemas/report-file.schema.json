@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alisaosipova/lurekit/schemas/report-file.schema.json",
+  "title": "LureKit report.json",
+  "description": "The report.json file written by `lurekit report --format json` and by publish (evidence-spec s6.1, block B17 FEATURE-07): the run manifest (s2.3) and the scoring block (s6.2) side by side. Validate a report.json against this schema; schemas/report.schema.json covers the scoring block alone.",
+  "type": "object",
+  "required": ["manifest", "score"],
+  "additionalProperties": false,
+  "properties": {
+    "manifest": { "$ref": "https://github.com/alisaosipova/lurekit/schemas/manifest.schema.json" },
+    "score": { "$ref": "https://github.com/alisaosipova/lurekit/schemas/report.schema.json" }
+  }
+}

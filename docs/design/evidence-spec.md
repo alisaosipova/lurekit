@@ -1583,6 +1583,14 @@ formats, mirroring `mcp-review-check/src/report/*`:
   `degraded`) scenario, `ruleId` = scenario id, `helpUri` = source URL, level = error for
   vulnerable / note for degraded, with `partialFingerprints` (scenario id, detector, profile
   digest). Reuse the SARIF shape and the schema fixture from mcp-review-check.
+  **Amendment (2026-11-05, block B17, UX-03/FEATURE-04):** an `inconclusive` scenario is also a
+  result, at level `warning`, its message naming the reason (a scenario that could not be
+  measured must not look like a pass in a code-scanning UI); `resisted` stays omitted.
+  `automationDetails.id` is `lurekit/<agent>/<benchmark_run_id>`, so GitHub code scanning keeps
+  one category per agent (`lurekit/<agent>/`) across uploads instead of a new one per run.
+  Evidence locations are relative to the run directory: the run declares
+  `originalUriBaseIds.LUREKIT_RUN` and every `artifactLocation` carries `uriBaseId:
+  "LUREKIT_RUN"`.
 
 ### §6.2 Scoring block (stable, versioned)
 ```jsonc

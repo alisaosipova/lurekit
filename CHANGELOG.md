@@ -24,6 +24,13 @@ No release is cut without changes.
   exit 3 when a scenario has one of the listed verdicts or the run is partial, naming the
   scenarios on stderr. A CI step can now fail on a weak setup and tell that apart from a tool
   failure (exit 1). Without the flag nothing changes (UX-03, ADR-0022 amendment).
+- SARIF: `inconclusive` scenarios are `warning` results saying they were not measured (they were
+  silently absent, which read like a pass); `automationDetails.id` is `lurekit/<agent>/<run id>`
+  so code scanning keeps one category per agent; evidence locations carry `uriBaseId:
+  LUREKIT_RUN` declared in `originalUriBaseIds` (UX-03, FEATURE-04 location half, evidence-spec
+  s6.1 amendment).
+- `schemas/report-file.schema.json` validates a whole `report.json` (manifest plus scoring
+  block); every committed bundle is checked against it in the tests (FEATURE-07).
 
 ### Fixed (block B14)
 
