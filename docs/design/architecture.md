@@ -371,6 +371,15 @@ The replay adapter re-drives a recorded Claude Code run through the same parse/m
   time. The budget check-then-record, the synchronous version probes and the process-global set
   of tracked agent groups all rely on it; a future `--parallel` needs its own ADR first
   (reserve-then-settle budget, per-run tracking, async probes).
+- *Amendment (2026-11-05, ENGINE-01; closes ADR-0024 D6): Windows binary resolution.* On
+  win32 the PATHEXT candidates (`claude.cmd`, `claude.exe`, ...) are tried before the
+  extension-less POSIX shim npm also installs (which Windows cannot spawn). When the choice is an
+  npm `.cmd` shim, the resolver reads the shim and returns the Node entry it calls
+  (`%dp0%\node_modules\<pkg>\<entry>.js`, relative to the shim), which the adapters launch
+  through `process.execPath` like any `.js` entry: no `cmd.exe`, no `shell: true`. A `.cmd` whose
+  Node entry cannot be found is not launchable: the resolver skips it, and doctor's binary row
+  fails with the fix "set `AAB_*_BIN` to the package's `.js` entry". (A `cmd.exe /d /s /c`
+  fallback is not built: it could not be tested here.)
 - *Bounded stderr.* The Codex, Cursor and OpenHands adapters keep at most 1 MiB
   (`STDERR_FILE_MAX`) of the agent's stderr in `<agent>-stderr.log`; past that a final line
   `[lurekit: stderr truncated at 1048576 bytes; N more bytes dropped]` is written. Excerpts are
