@@ -18,6 +18,12 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+### Fixed (ENGINE-12)
+
+- `fs_diff` hashes watched files streaming instead of reading them whole (a 1.5 GiB file took
+  1.6 GB of memory), at most 64 MiB per file and 256 MiB per watched directory, with a recorded
+  truncation; small files hash as before.
+
 ### Added (ENGINE-13)
 
 - doctor checks that the results directory keeps sub-second file times (a `filesystem` row);

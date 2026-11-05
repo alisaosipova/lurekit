@@ -14,6 +14,7 @@
 
 import { createHash } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, readlink, rm, writeFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
 import path from 'node:path';
 
 import type { Detector, DetectorEvaluateContext, DetectorHit, DetectorProvision, DetectorProvisionOptions } from './detector.js';
@@ -28,6 +29,22 @@ const META = 'fs_diff.baseline.json';
 const DIFF = 'fs_diff.diff.json';
 // Bound on entries hashed under a watched directory (e.g. .cursor/rules).
 const MAX_DIR_ENTRIES = 2000;
+// ENGINE-12: byte bounds. A file is hashed streaming, at most MAX_FILE_BYTES of it (larger: the
+// digest covers that prefix plus the size, marked truncated); a directory snapshot hashes at most
+// MAX_DIR_BYTES in total. Below the bounds the digest equals sha256 of the whole content.
+export const MAX_FILE_BYTES = 64 * 1024 * 1024;
+const MAX_DIR_BYTES = 256 * 1024 * 1024;
+
+/** Streaming sha256 of a file, bounded (ENGINE-12); never holds the file in memory. */
+export async function hashFileBounded(file: string, size: number, cap = MAX_FILE_BYTES): Promise<string> {
+  const h = createHash('sha256');
+  const end = Math.min(size, cap);
+  if (end > 0) {
+    for await (const chunk of createReadStream(file, { start: 0, end: end - 1 })) h.update(chunk as Buffer);
+  }
+  if (size > cap) h.update(`\ntruncated:${size}`);
+  return h.digest('hex');
+}
 
 /** Default watched list (§1.2c): the agent config files named across scenarios/*.yaml. */
 export const DEFAULT_WATCHED_PATHS: readonly string[] = [
@@ -199,13 +216,12 @@ async function snapshotUnsafe(workdir: string, rel: string, runDir: string): Pro
       continue;
     }
     if (st.isFile()) {
-      const buf = await readFile(cur);
-      if (path.posix.basename(rel) === 'settings.json') {
-        const norm = normaliseSettings(buf.toString('utf8'), runDir);
+      if (path.posix.basename(rel) === 'settings.json' && st.size <= MAX_FILE_BYTES) {
+        const norm = normaliseSettings((await readFile(cur)).toString('utf8'), runDir);
         if (norm === undefined) return { exists: false };
         return { exists: true, type: 'file', sha256: sha256(norm) };
       }
-      return { exists: true, type: 'file', sha256: sha256(buf) };
+      return { exists: true, type: 'file', sha256: await hashFileBounded(cur, st.size) };
     }
     if (st.isDirectory()) return { exists: true, type: 'dir', sha256: await hashDir(cur) };
     return { exists: true, type: 'other', sha256: sha256(`other:${st.mode}`) };
@@ -216,10 +232,12 @@ async function snapshotUnsafe(workdir: string, rel: string, runDir: string): Pro
 /** Digest of a directory tree: sorted `relpath type sha256` lines, bounded, no link-following. */
 async function hashDir(root: string): Promise<string> {
   const lines: string[] = [];
+  let bytes = 0;
+  let overBudget = false;
   const walk = async (dir: string, prefix: string): Promise<void> => {
     const names = (await readdir(dir)).sort();
     for (const name of names) {
-      if (lines.length >= MAX_DIR_ENTRIES) return;
+      if (lines.length >= MAX_DIR_ENTRIES || overBudget) return;
       const abs = path.join(dir, name);
       const rel = prefix ? `${prefix}/${name}` : name;
       const st = await lstat(abs);
@@ -227,12 +245,20 @@ async function hashDir(root: string): Promise<string> {
       else if (st.isDirectory()) {
         lines.push(`${rel}\tdir\t-`);
         await walk(abs, rel);
-      } else if (st.isFile()) lines.push(`${rel}\tfile\t${sha256(await readFile(abs))}`);
+      } else if (st.isFile()) {
+        if (bytes + Math.min(st.size, MAX_FILE_BYTES) > MAX_DIR_BYTES) {
+          overBudget = true;
+          return;
+        }
+        bytes += Math.min(st.size, MAX_FILE_BYTES);
+        lines.push(`${rel}\tfile\t${await hashFileBounded(abs, st.size)}`);
+      }
       else lines.push(`${rel}\tother\t-`);
     }
   };
   await walk(root, '');
   if (lines.length >= MAX_DIR_ENTRIES) lines.push(`truncated at ${MAX_DIR_ENTRIES}`);
+  if (overBudget) lines.push(`truncated at ${MAX_DIR_BYTES} bytes`);
   return sha256(lines.join('\n'));
 }
 

@@ -203,6 +203,14 @@ content comparison of a short list of watched paths, nothing more.
 - **Known limits.** A change reverted before the run ends is invisible (before/after only, no
   watcher). Paths not on the watched list are not observed. Teardown does not restore files.
 
+
+**Amendment (2026-11-05, ENGINE-12): byte bounds.** A watched file is hashed streaming, at most
+64 MiB of it; a larger file's digest covers that prefix plus its size (`truncated:<size>`), so a
+change past the first 64 MiB that keeps the size is not seen (recorded limit). A watched
+directory hashes at most 256 MiB in total and then records `truncated at <n> bytes`, like the
+entry cap. Below the bounds the digest is unchanged (sha256 of the content). Paths are never
+skipped by name (no silent `node_modules`/`.git` exclusion).
+
 ### §1.2d `canary_egress_http` registry_fetch mode (package-registry scenarios)
 
 A second mode of the `canary_egress_http` sensor, selected by
