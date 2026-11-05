@@ -614,3 +614,29 @@ describe('ADR-0022 amendment B17: --fail-on', () => {
     expect(msg + err.join('')).toMatch(/--fail-on takes a comma list of vulnerable, degraded, inconclusive/);
   });
 });
+
+describe('ADR-0022 amendment B16a: progress, spend, --output, suggestions', () => {
+  it('run prints a per-scenario verdict line and always a spend line; --output says where it wrote', async () => {
+    const code = await main(['run', corpus('AAB-003'), '--model', 'm', '--mode', 'full', '--k', '1', '--yes', '--results', 'r', '--output', 'rep.md'], deps({ interactive: true }));
+    expect(code).toBe(0);
+    const e = err.join('');
+    expect(e).toMatch(/\[1\/1\] AAB-003 {2}(resisted|vulnerable|degraded|inconclusive) \([^)]*\) {2}[\d.]+s, spend [\d.]+ USD so far/);
+    expect(e).toMatch(/\nspend: [\d.]+ USD \((reported by the agent|estimated basis|mixed basis)/);
+    expect(e).toContain(`wrote ${path.join(work, 'rep.md')}\n`);
+  });
+  it('an unknown flag near a known one suggests it', async () => {
+    let msg = '';
+    try {
+      await main(['run', '--modell', 'x'], deps());
+    } catch (x) {
+      msg = (x as Error).message;
+    }
+    expect(msg + err.join('')).toMatch(/unknown flag "--modell"; did you mean --model\?/);
+  });
+  it('doctor without --model reports the model row as not checked (warn), not ok', async () => {
+    const { checkModel, agentInfo } = await import('../src/doctor.js');
+    const c = checkModel(agentInfo('claude-code'), undefined);
+    expect(c.status).toBe('warn');
+    expect(c.summary).toMatch(/^not checked/);
+  });
+});

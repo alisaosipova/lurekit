@@ -18,6 +18,16 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+### Changed (block B16a)
+
+- `run` prints a line after every scenario with its verdict, confidence, elapsed time and the
+  spend so far, and always prints the final spend with its basis (UX-01).
+- `report`, `run` and `demo --output` write relative to the working directory and print
+  `wrote <path>` (UX-13).
+- An unknown flag close to a known one suggests it (`did you mean --model?`) (UX-18).
+- doctor without `--model` shows the model row as not checked instead of ok, and no longer
+  points at a file that does not ship with the package (UX-12).
+
 ### Added (block B17)
 
 - `run` and `report --fail-on <vulnerable,degraded,inconclusive>`: after all output is written,

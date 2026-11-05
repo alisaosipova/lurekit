@@ -241,7 +241,7 @@ export function checkUpdate(info: AgentInfo, bin: BinaryFinding, platform: NodeJ
         status: 'warn',
         summary:
           'npm-global install: Claude Code auto-updates it in place, which broke two live batches on ' +
-          '2026-11-03 (spawns failed while the file was replaced; NOTES). Pin a separate install for a batch',
+          '2026-11-03 (spawns failed while the file was replaced; see docs/design/NOTES-verified-facts.md in the repository). Pin a separate install for a batch',
         fix: pinnedClaudeRecipe(semver),
       };
     }
@@ -249,7 +249,7 @@ export function checkUpdate(info: AgentInfo, bin: BinaryFinding, platform: NodeJ
       return {
         id: 'update',
         status: 'ok',
-        summary: 'separate npm --prefix install (the pinned-install recipe NOTES verified; not the npm-global copy)',
+        summary: 'separate npm --prefix install (the verified pinned-install recipe; not the npm-global copy)',
       };
     }
     return {
@@ -441,8 +441,8 @@ export function checkModel(info: AgentInfo, model: string | undefined, corpus?: 
   if (model === undefined) {
     return {
       id: 'model',
-      status: 'ok',
-      summary: 'no --model given; lurekit run needs one (it is pinned into the manifest)',
+      status: 'warn',
+      summary: 'not checked: no --model given (lurekit run needs one; it is pinned into the manifest)',
     };
   }
   switch (info.id) {

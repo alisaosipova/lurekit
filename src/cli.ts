@@ -261,7 +261,14 @@ function parseFlags(argv: string[]): Flags {
       } else if (BOOLEAN_FLAGS.has(name)) {
         f.bool.add(name);
       } else {
-        throw new Error(`unknown flag ${JSON.stringify(a)} (run 'lurekit --help' for the list of options)`);
+        const known = [...STRING_FLAGS, ...NUMBER_FLAGS, ...MULTI_FLAGS, ...BOOLEAN_FLAGS];
+        let best: { n: string; d: number } | undefined;
+        for (const k of known) {
+          const d = editDistance(name, k);
+          if (d <= 2 && (best === undefined || d < best.d)) best = { n: k, d };
+        }
+        // ADR-0022 B16a: a near miss names the flag it probably was.
+        throw new Error(`unknown flag ${JSON.stringify(a)}${best ? `; did you mean --${best.n}?` : ''} (run 'lurekit --help' for the list of options)`);
       }
     } else {
       f._.push(a);
@@ -311,6 +318,13 @@ function loadProfileFile(arg: string, deps: CliDeps): Record<string, unknown> {
 }
 
 // --- subcommands ------------------------------------------------------------
+
+/** ADR-0022 B16a: write `--output` relative to the CLI's working directory and say where. */
+function writeOutput(output: string, text: string, deps: CliDeps): void {
+  const abs = path.resolve(deps.cwd(), output);
+  writeFileSync(abs, text, 'utf8');
+  deps.stderr(`wrote ${abs}\n`);
+}
 
 export function cmdValidate(flags: Flags, deps: CliDeps): number {
   const corpus = resolveScenarioDir(flags._[0], deps);
@@ -939,7 +953,12 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
     const results: ScenarioResult[] = [];
     for (const [i, scenario] of plan.kept.entries()) {
       deps.stderr(`[${i + 1}/${plan.kept.length}] ${scenario.id}  ${scenario.name}\n`);
-      results.push(await runner.runScenario(scenario, adapter, profile, cfg, { budget, signal: meta.signal }));
+      const t0 = Date.now();
+      const done = await runner.runScenario(scenario, adapter, profile, cfg, { budget, signal: meta.signal });
+      results.push(done);
+      // ADR-0022 B16a: what just happened, how long it took, what it has cost so far.
+      const spent = Math.round(results.reduce((a, r) => a + r.spend_usd, 0) * 1e4) / 1e4;
+      deps.stderr(`[${i + 1}/${plan.kept.length}] ${scenario.id}  ${done.verdict} (${done.confidence})  ${Math.round((Date.now() - t0) / 100) / 10}s, spend ${spent} USD so far\n`);
       // ADR-0024 B13a: a provisional manifest after every scenario but the last, so a killed
       // run leaves a readable record of what finished.
       if (i < plan.kept.length - 1) {
@@ -958,14 +977,17 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
       reMeasure: reMeasureContext(manifest, corpus.shown),
       terminal: terminalOptions(deps, output !== undefined),
     });
-    if (output) writeFileSync(path.resolve(deps.cwd(), output), rendered, 'utf8');
+    if (output) writeOutput(output, rendered, deps);
     else deps.stdout(rendered + '\n');
 
     deps.stderr(`\nmanifest: ${path.join(runDir, 'manifest.json')}\n`);
     // ADR-0022 amendment (block 3): an estimated or mixed spend is named as such.
-    if (manifest.totals.spend_basis) {
-      deps.stderr(`spend: ${manifest.totals.spend_usd} USD (${manifest.totals.spend_basis} basis; the agent reported no per-run cost)\n`);
-    }
+    // ADR-0022 B16a: the spend is always printed, with its basis.
+    deps.stderr(
+      manifest.totals.spend_basis
+        ? `spend: ${manifest.totals.spend_usd} USD (${manifest.totals.spend_basis} basis; the agent reported no per-run cost)\n`
+        : `spend: ${manifest.totals.spend_usd} USD (reported by the agent)\n`,
+    );
 
     // ADR-0022: say what went wrong and the next command, from the recorded warnings.
     const reps = repIssues(results);
@@ -1050,7 +1072,7 @@ export function cmdReport(flags: Flags, deps: CliDeps): number {
       : {}),
     terminal: terminalOptions(deps, output !== undefined),
   });
-  if (output) writeFileSync(output, rendered, 'utf8');
+  if (output) writeOutput(output, rendered, deps);
   else deps.stdout(rendered + '\n');
   return gateExit(manifest, gate, deps);
 }
@@ -1307,7 +1329,7 @@ export function cmdDemo(flags: Flags, deps: CliDeps): number {
   // machine formats stay parseable, so there it goes to stderr.
   const rendered = format === 'markdown' ? banner + body : body;
   if (format === 'json' || format === 'sarif') deps.stderr(banner);
-  if (output) writeFileSync(path.resolve(deps.cwd(), output), rendered, 'utf8');
+  if (output) writeOutput(output, rendered, deps);
   else deps.stdout(rendered + '\n');
   return 0;
 }
