@@ -767,7 +767,11 @@ export async function cmdPlan(flags: Flags, deps: CliDeps): Promise<number> {
   }
   for (const s of plan.kept) deps.stdout(`KEEP  ${s.id}  ${s.forbidden_effect.detector}  ${s.name}\n`);
   for (const sk of plan.skipped) deps.stdout(`SKIP  ${sk.scenario_id}  ${sk.reason}: ${sk.detail}\n`);
-  deps.stdout(`\nplan: ${plan.kept.length} would run, ${plan.skipped.length} skipped (profile agent=${profile.agent}, model=${profile.model}${settingSourcesNote(profile)})\n`);
+  // UX-15: a per-reason tally of the skips.
+  const tally = Object.entries(plan.skipped.reduce<Record<string, number>>((a, sk) => ((a[sk.reason] = (a[sk.reason] ?? 0) + 1), a), {}))
+    .map(([r, n]) => `${n} ${r}`)
+    .join(', ');
+  deps.stdout(`\nplan: ${plan.kept.length} would run, ${plan.skipped.length} skipped${tally ? ` (${tally})` : ''} (profile agent=${profile.agent}, model=${profile.model}${settingSourcesNote(profile)})\n`);
   deps.stdout(`estimated cost at k=${cfg.k}: ${runEstimateSentence(profile.agent, plan.kept.length, cfg.k, planCostBasis(profile.agent))}\n`);
   return 0;
 }
@@ -1009,7 +1013,7 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
       evidenceLookup: makeEvidenceLookup(runDir, manifest),
       surfaceOf: surfaceLookupFrom(scenarios),
       reMeasure: reMeasureContext(manifest, corpus.typed),
-      terminal: terminalOptions(deps, output !== undefined),
+      terminal: { ...terminalOptions(deps, output !== undefined), evidenceBase: shownPath(runDir, deps) },
     });
     if (output) writeOutput(output, rendered, deps);
     else deps.stdout(rendered + '\n');
@@ -1104,7 +1108,7 @@ export function cmdReport(flags: Flags, deps: CliDeps): number {
     ...(format === 'markdown' || format === 'text'
       ? { surfaceOf: shippedSurfaceLookup(), reMeasure: reMeasureContext(manifest, resolveScenarioDir(undefined, deps).typed) }
       : {}),
-    terminal: terminalOptions(deps, output !== undefined),
+    terminal: { ...terminalOptions(deps, output !== undefined), evidenceBase: shownPath(runDir, deps) },
   });
   if (output) writeOutput(output, rendered, deps);
   else deps.stdout(rendered + '\n');
@@ -1356,7 +1360,7 @@ export function cmdDemo(flags: Flags, deps: CliDeps): number {
   const body = report(manifest, {
     format,
     ...(format === 'markdown' || format === 'text' ? { surfaceOf: shippedSurfaceLookup(), reMeasure: reMeasureContext(manifest, shipped) } : {}),
-    terminal: { ...terminalOptions(deps, output !== undefined), banner: bannerLines },
+    terminal: { ...terminalOptions(deps, output !== undefined), banner: bannerLines, evidenceBase: `${REPOSITORY_URL}/tree/main/reports/${manifest.benchmark_run_id}` },
   });
   const banner = demoBanner(manifest, shipped);
   // The terminal view renders the banner itself; the Markdown gets it as a quote block; the

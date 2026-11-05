@@ -365,6 +365,10 @@ The replay adapter re-drives a recorded Claude Code run through the same parse/m
   request body (larger: 413).
   The harness-owned `mcp_stdio` control child no longer pipes the stdout/stderr it never reads,
   and its teardown awaits the exit (bounded to 1 s) (ENGINE-11).
+- *Note (2026-11-05, ENGINE-09): execution is sequential by design.* One repetition runs at a
+  time. The budget check-then-record, the synchronous version probes and the process-global set
+  of tracked agent groups all rely on it; a future `--parallel` needs its own ADR first
+  (reserve-then-settle budget, per-run tracking, async probes).
 - *Bounded stderr.* The Codex, Cursor and OpenHands adapters keep at most 1 MiB
   (`STDERR_FILE_MAX`) of the agent's stderr in `<agent>-stderr.log`; past that a final line
   `[lurekit: stderr truncated at 1048576 bytes; N more bytes dropped]` is written. Excerpts are

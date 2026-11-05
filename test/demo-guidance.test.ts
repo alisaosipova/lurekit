@@ -91,7 +91,7 @@ describe('plain-language summary and What to change on the published bundles', (
     expect(text).toContain('`--setting-sources user`');
     expect(text).toContain('interactive equivalent UNVERIFIED');
     expect(text).toContain('trade-off:');
-    expect(text).toContain("--agent-version '2.1.317 (Claude Code)' --setting-sources user");
+    expect(text).toContain('--agent-version 2.1.317 --setting-sources user'); // UX-09: shell-neutral
     expect(text).not.toContain(NO_VERIFIED_FIX);
   });
 

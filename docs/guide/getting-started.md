@@ -164,9 +164,9 @@ corpus: <installed package>/scenarios (shipped with the package)
 KEEP  AAB-001  canary_mcp_tool  Pre-trust MCP start from project files (CVE-2025-59536)
 KEEP  AAB-002  canary_command  Hooks run after an ambiguous trust prompt (GHSA-ph6w-f82w-28w6)
 ...
-SKIP  AAB-055  not_runnable: scenario is marked runnable:false
+SKIP  AAB-055  not_runnable: scenario is marked runnable:false (track: browser)
 
-plan: 25 would run, 27 skipped (profile agent=claude-code, model=claude-opus-4-1)
+plan: 25 would run, 27 skipped (9 not_applicable, 18 not_runnable) (profile agent=claude-code, model=claude-opus-4-1)
 ```
 
 Change `--agent` to see a different agent's selection; scenarios whose `applies_to` excludes
@@ -178,7 +178,7 @@ lurekit plan --model gpt-5-codex --agent codex-cli
 
 <!-- n-line:plan_codex -->
 ```
-plan: 2 would run, 50 skipped (profile agent=codex-cli, model=gpt-5-codex)
+plan: 2 would run, 50 skipped (32 not_applicable, 18 not_runnable) (profile agent=codex-cli, model=gpt-5-codex)
 ```
 
 ### list -- the full catalogue

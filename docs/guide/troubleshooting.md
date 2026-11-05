@@ -362,3 +362,10 @@ The source run dir is never modified. Full walkthrough: [publishing.md](publishi
 - **In an agent LureKit measures:** report it to that agent's vendor first. A scenario for a new
   or still-unpatched issue is submitted through the private reporting link, not a public issue
   or PR (SECURITY.md; ADR-0014).
+
+### Shell syntax of printed commands (Windows)
+
+The commands lurekit prints (Next lines, re-measure commands, doctor fixes) avoid
+shell-specific quoting so they paste into PowerShell and cmd.exe as well as POSIX shells. The
+pinned-install recipe uses `export`; in PowerShell write `$env:AAB_CLAUDE_BIN = "<path>"`, in
+cmd.exe `set AAB_CLAUDE_BIN=<path>`.

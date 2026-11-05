@@ -296,7 +296,8 @@ export class BenchmarkRunner implements Runner {
         skipped.push({
           scenario_id: scenario.id,
           reason: 'not_runnable',
-          detail: 'scenario is marked runnable:false',
+          // UX-15: the track says why (all not-runnable rows are the browser track today).
+          detail: `scenario is marked runnable:false (track: ${scenario.track})`,
         });
         continue;
       }

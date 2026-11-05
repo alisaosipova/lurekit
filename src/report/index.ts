@@ -66,7 +66,7 @@ export function report(manifest: RunManifest, opts: ReportOptions): string {
           ...(opts.reMeasure ? { reMeasure: opts.reMeasure } : {}),
           ...(t.banner ? { banner: t.banner } : {}),
         },
-        { width: t.width, color: t.color },
+        { width: t.width, color: t.color, ...(t.evidenceBase ? { evidenceBase: t.evidenceBase } : {}) },
       );
     }
     default: {

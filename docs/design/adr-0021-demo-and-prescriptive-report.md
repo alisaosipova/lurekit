@@ -169,3 +169,18 @@ repo is broken, a human cannot read it").
   kind.
 - **Not changed.** The Markdown reporter, `report.md` in every published bundle, `report.json`,
   SARIF, the publish gate.
+
+## Amendment (2026-11-05, blocks B16e/B18: UX-07, UX-09, UX-14, UX-17)
+
+- `run` prints the terminal view by default, like `demo` and `report`; with `--output` it writes
+  Markdown (UX-07).
+- Re-measure commands give `--agent-version` the leading semver only (`2.1.317`, not
+  `'2.1.317 (Claude Code)'`), so they paste into POSIX shells, PowerShell and cmd.exe alike; the
+  rest of the line uses no shell-specific syntax (UX-09).
+- Below 100 columns the terminal table uses compact verdict labels: `vulnerable*` (the note
+  under the table starts `* = isolation: partial`), `resisted (not att.)`, `(low conf.)`,
+  `(reduced)` (UX-14). The Markdown report is unchanged.
+- The terminal view's `evidence:` lines are prefixed with the run directory as the CLI resolved
+  it, and for `demo` with the published bundle URL, so they open as printed; the renderer takes
+  the prefix as an option and stays pure (UX-17). The Markdown evidence lines are unchanged.
+

@@ -24,8 +24,8 @@ const corpus = loadScenarioDir(path.join(ROOT, 'scenarios')).scenarios;
 const surfaces = new Map(corpus.map((s) => [s.id, s.surface as string]));
 const surfaceOf: SurfaceLookup = (id) => surfaces.get(id);
 
-const render = (width: number, color = false, banner?: string[]): string =>
-  renderTerminal({ manifest, report: buildScore(manifest), surfaceOf, reMeasure: { corpus: 'scenarios' }, ...(banner ? { banner } : {}) }, { width, color });
+const render = (width: number, color = false, banner?: string[], evidenceBase?: string): string =>
+  renderTerminal({ manifest, report: buildScore(manifest), surfaceOf, reMeasure: { corpus: 'scenarios' }, ...(banner ? { banner } : {}) }, { width, color, ...(evidenceBase ? { evidenceBase } : {}) });
 
 /** The result-table rows: from the header line through the blank line after the last row. */
 function tableRows(text: string): string[] {
@@ -110,7 +110,7 @@ describe('renderTerminal on the demo bundle (width 100, no colour)', () => {
     expect(text).toContain('\nSurface settings_hooks_file: AAB-001, AAB-002, AAB-016, AAB-032\n');
     expect(text).toContain('- setting: run Claude Code with --setting-sources user (reference profile\n  <https://github.com/alisaosipova/lurekit/blob/main/profiles/claude-code-hardened.json>');
     // The re-measure command is one unbroken line, indented, after its note.
-    expect(text).toMatch(/\n- re-measure \(add your own --settings\/--mcp\/--hooks\/--skill flags; the manifest does not record\n  their file paths\):\n    lurekit run scenarios --agent claude-code --model sonnet --agent-version '2\.1\.317 \(Claude Code\)' --setting-sources user --permission-mode manual --mode full --k 3 --vulnerable-if majority --budget 8(\n|$)/);
+    expect(text).toMatch(/\n- re-measure \(add your own --settings\/--mcp\/--hooks\/--skill flags; the manifest does not record\n  their file paths\):\n    lurekit run scenarios --agent claude-code --model sonnet --agent-version 2\.1\.317 --setting-sources user --permission-mode manual --mode full --k 3 --vulnerable-if majority --budget 8(\n|$)/);
     expect(text.endsWith('\n')).toBe(false);
   });
 
@@ -130,7 +130,8 @@ describe('width and colour', () => {
     expect(wide.find((r) => r.startsWith('AAB-010 '))).toContain('  pillar.security      ');
     for (const r of wide) expect(r.length).toBeLessThanOrEqual(120);
     const narrow = tableRows(render(80));
-    expect(narrow[0]).toMatch(/^AAB-001 {2}vulnerable \(isolation: partial\) {2}3\/3 {3}Pre-trust MCP start/);
+    // UX-14: below 100 columns the labels are compact (`*` = isolation partial, see the note).
+    expect(narrow[0]).toMatch(/^AAB-001 {2}vulnerable\* +3\/3 {3}Pre-trust MCP start/);
     expect(narrow[0]).not.toContain('CVE-2025-59536');
     for (const r of narrow) expect(r.length).toBeLessThanOrEqual(80);
     expect(narrow).toHaveLength(wide.length);
@@ -240,7 +241,8 @@ describe('lurekit demo and report print the terminal view (CLI)', () => {
     const c = capture();
     expect(await main(['demo'], c.deps)).toBe(0);
     const text = c.out.join('');
-    expect(text).toBe(render(100, false, demoBannerLines(manifest, 'scenarios')) + '\n');
+    // UX-17: demo's evidence lines point at the published bundle.
+    expect(text).toBe(render(100, false, demoBannerLines(manifest, 'scenarios'), `https://github.com/alisaosipova/lurekit/tree/main/reports/${manifest.benchmark_run_id}`) + '\n');
     expect(c.err.join('')).toBe('');
     for (const f of ['markdown', 'md']) {
       const m = capture();

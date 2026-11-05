@@ -32,6 +32,14 @@ No release is cut without changes.
   "reduced"` in the manifest, the scoring block and SARIF properties, and `(reduced fidelity)`
   after the verdict in the Markdown and terminal reports. Published bundles are unchanged.
 
+### Changed (block B16e)
+
+- The terminal view's `evidence:` lines carry the run directory (for `demo`, the published
+  bundle URL), so they open as printed (UX-17); below 100 columns the verdict labels are compact
+  (`vulnerable*`, `resisted (not att.)`) so names are not cut (UX-14); re-measure commands pass
+  `--agent-version 2.1.317` without shell quoting (UX-09); `plan` names the track of a
+  not-runnable scenario and tallies the skips by reason (UX-15).
+
 ### Documentation (block B18)
 
 - Missing from the 1.4.0 notes: evidence integrity on Windows (`aa6b64d`). When the adapter

@@ -25,7 +25,13 @@ export interface TerminalOptions {
   width: number;
   /** Emit ANSI colour codes. */
   color: boolean;
+  /** UX-17: prefix of the `evidence:` lines (the run dir as the CLI resolved it, or the published
+   *  bundle URL for demo) so the line can be opened as printed. */
+  evidenceBase?: string;
 }
+
+/** UX-14: below this width the verdict labels are compact (`vulnerable*`, `resisted (not att.)`). */
+export const COMPACT_BELOW = 100;
 
 /** Everything the terminal view is rendered from (the Markdown report's inputs plus a banner). */
 export interface TerminalData extends MarkdownOptions {
@@ -105,14 +111,14 @@ const padEnd = (s: string, n: number): string => (s.length >= n ? s : s + ' '.re
 // --- table cells -----------------------------------------------------------------------------
 
 /** The verdict in words: `resisted (denied)`, `vulnerable (isolation: partial)`. */
-export function verdictWords(s: Pick<ReportScenario, 'verdict' | 'isolation' | 'resisted_kind' | 'low_confidence' | 'headless_fidelity'>): string {
+export function verdictWords(s: Pick<ReportScenario, 'verdict' | 'isolation' | 'resisted_kind' | 'low_confidence' | 'headless_fidelity'>, compact = false): string {
   let v: string = s.verdict;
   if (s.verdict === 'resisted' && s.resisted_kind && RESISTED_KIND_LABEL[s.resisted_kind]) {
-    v = `${v} ${RESISTED_KIND_LABEL[s.resisted_kind]}`;
+    v = `${v} ${compact && s.resisted_kind === 'not_attempted' ? '(not att.)' : RESISTED_KIND_LABEL[s.resisted_kind]}`;
   }
-  if (s.low_confidence) v = `${v} ${LOW_CONFIDENCE_LABEL}`;
-  if (s.headless_fidelity === 'reduced') v = `${v} (reduced fidelity)`;
-  if (s.isolation === 'partial') v = `${v} (isolation: partial)`;
+  if (s.low_confidence) v = `${v} ${compact ? '(low conf.)' : LOW_CONFIDENCE_LABEL}`;
+  if (s.headless_fidelity === 'reduced') v = `${v} ${compact ? '(reduced)' : '(reduced fidelity)'}`;
+  if (s.isolation === 'partial') v = compact ? `${v}*` : `${v} (isolation: partial)`;
   return v;
 }
 
@@ -240,7 +246,7 @@ export function renderTerminal(data: TerminalData, opts: TerminalOptions): strin
   // Result table: aligned columns, the name truncated to what is left, never wrapped.
   const rows = report.scenarios.map((s) => ({
     id: s.id,
-    verdict: verdictWords(s),
+    verdict: verdictWords(s, width < COMPACT_BELOW),
     kind: s.verdict,
     confidence: confidenceCell(s.confidence),
     source: sourceRef(byId.get(s.id)?.name ?? '', s.source),
@@ -272,7 +278,7 @@ export function renderTerminal(data: TerminalData, opts: TerminalOptions): strin
   }
   if (report.scenarios.some((s) => s.isolation === 'partial')) {
     para(
-      'isolation: partial: --strict-mcp-config was not in effect for at least one run (e.g. the scenario ' +
+      (width < COMPACT_BELOW ? '* = ' : '') + 'isolation: partial: --strict-mcp-config was not in effect for at least one run (e.g. the scenario ' +
         "measures project .mcp.json auto-load), so MCP servers from the operator's own config may have " +
         'been visible to the agent; see the evidence warnings.',
       '', '  ',
@@ -294,7 +300,7 @@ export function renderTerminal(data: TerminalData, opts: TerminalOptions): strin
       const name = byId.get(s.id)?.name ?? '';
       out.push(...wrap(name, width, `${s.id}  `, ' '.repeat(s.id.length + 2)).map((l, i) => (i === 0 ? bold(l) : l)));
       if (s.isolation === 'partial') out.push('  isolation: partial (see the note under the table)');
-      out.push(`  evidence: ${s.evidence_ref}`);
+      out.push(`  evidence: ${opts.evidenceBase ? `${opts.evidenceBase.replace(/[\\/]+$/, '')}/${s.evidence_ref}` : s.evidence_ref}`);
       const ev = data.evidenceLookup?.(s.id);
       if (ev) {
         const hit = ev.detector_hits[0];
