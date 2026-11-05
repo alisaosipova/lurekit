@@ -381,3 +381,22 @@ describe('FEATURE-15: pinned install recipes', () => {
     expect(pinned?.status).toBe('ok');
   });
 });
+
+describe('ENGINE-13: results-root filesystem probe', () => {
+  it('reports ok on a local filesystem and leaves no trace (nor a root it created)', async () => {
+    const { checkResultsFilesystem } = await import('../src/doctor.js');
+    const { mkScratch, rmScratch } = await import('./helpers/scratch.js');
+    const { existsSync, readdirSync } = await import('node:fs');
+    const base = await mkScratch('fsprobe-');
+    try {
+      const root = (await import('node:path')).join(base, 'results');
+      const c = checkResultsFilesystem(root);
+      expect(c.id).toBe('filesystem');
+      expect(['ok', 'warn']).toContain(c.status);
+      expect(existsSync(root)).toBe(false);
+      expect(readdirSync(base)).toEqual([]);
+    } finally {
+      await rmScratch(base);
+    }
+  });
+});

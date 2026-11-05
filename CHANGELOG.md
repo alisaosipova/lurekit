@@ -18,6 +18,12 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+### Added (ENGINE-13)
+
+- doctor checks that the results directory keeps sub-second file times (a `filesystem` row);
+  on a coarse or network filesystem the timestamp-based tamper checks can miss a fast rewrite,
+  and doctor says so. The probe removes everything it writes.
+
 ### Changed (FEATURE-15)
 
 - doctor prints a pinned per-batch install for codex-cli (`npm install --prefix

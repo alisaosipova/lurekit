@@ -54,6 +54,7 @@ import {
   agentInfo,
   checkAuth,
   checkDroppedEnv,
+  checkResultsFilesystem,
   checkBinary,
   checkCorpus,
   checkIsolation,
@@ -1344,6 +1345,7 @@ export async function cmdDoctor(flags: Flags, deps: CliDeps): Promise<number> {
   const perm = checkOpenHandsPermission(info);
   if (perm) checks.push(perm);
   checks.push(checkIsolation());
+  checks.push(checkResultsFilesystem(path.resolve(deps.cwd(), '.aab-runs'))); // ENGINE-13
 
   // Corpus + selftests: the runner's own plan decides what would run, with the detector
   // self-tests run once here and reused (no second control run).

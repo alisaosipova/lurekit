@@ -10,6 +10,8 @@
 // Process access goes through the injectable AgentProbe so the checks are testable offline.
 
 import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { agentChildEnv, harnessChildEnv } from './adapters/childEnv.js';
 
 import type { AgentId } from './scenario/types.js';
@@ -511,6 +513,46 @@ export function checkIsolation(): Check {
     summary:
       '--isolation container|container+netns is an evidence label written to the manifest; lurekit starts no container and needs no docker/podman (run it inside your own container or VM for that boundary)',
   };
+}
+
+/** ENGINE-13 (ADR-0025 D1 precondition): does the results root's filesystem keep sub-second
+ *  mtimes and move ctime with a content write? The tamper rules rely on both. Writes two probe
+ *  files under `<root>/.fsprobe-*` and removes them (and the root, if the probe created it). */
+export function checkResultsFilesystem(root: string): Check {
+  const createdRoot = !existsSync(root);
+  const dir = path.join(root, `.fsprobe-${process.pid}-${Date.now()}`);
+  try {
+    mkdirSync(dir, { recursive: true });
+    const f = path.join(dir, 'probe');
+    writeFileSync(f, 'a');
+    const s1 = statSync(f);
+    const t0 = Date.now();
+    while (Date.now() - t0 < 15) {
+      /* spin 15 ms: well under a second, above any fine-grained clock tick */
+    }
+    writeFileSync(f, 'b');
+    const s2 = statSync(f);
+    const fine = s2.mtimeMs !== s1.mtimeMs;
+    const ctimeMoves = s2.ctimeMs !== s1.ctimeMs;
+    if (fine && ctimeMoves) {
+      return { id: 'filesystem', status: 'ok', summary: `results root keeps sub-second mtimes and ctime moves on write (${root})` };
+    }
+    return {
+      id: 'filesystem',
+      status: 'warn',
+      summary: `results root ${root}: ${fine ? '' : 'mtime granularity is coarser than 15 ms; '}${ctimeMoves ? '' : 'ctime does not move on a write; '}the evidence-tamper checks that compare timestamps can miss a fast rewrite there`,
+      fix: 'use a local filesystem (ext4, APFS, NTFS) for --results, not a network or FAT mount',
+    };
+  } catch (e) {
+    return { id: 'filesystem', status: 'warn', summary: `results root ${root} could not be probed (${(e as Error).message})` };
+  } finally {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      if (createdRoot) rmSync(root, { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
+  }
 }
 
 export function checkOpenHandsPermission(info: AgentInfo): Check | undefined {

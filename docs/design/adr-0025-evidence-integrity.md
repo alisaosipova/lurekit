@@ -572,3 +572,11 @@ extended, verify reports the swap), and a sink unlinked and re-created after the
 keeps receiving lines on the old inode, which verify also reports. `O_NOFOLLOW` is POSIX; on
 Windows the plain append flags are used (recorded limit).
 
+### Amendment (2026-11-05, ENGINE-13): the filesystem-class precondition
+
+The timestamp rules of D1 (sink `size == baseline && mtime moved`, `ctime != mtime`, noread
+mtime) assume the results root keeps sub-second mtimes and moves ctime on a write. `lurekit
+doctor` now probes that (`filesystem` row: two writes 15 ms apart under `.aab-runs/.fsprobe-*`,
+removed afterwards) and warns on a coarse or network filesystem. The content rules (sha256,
+size, inode, witness) do not depend on it. Recording the probe in the manifest is deferred.
+
