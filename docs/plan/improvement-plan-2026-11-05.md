@@ -630,3 +630,12 @@ rename (ENGINE-10). Deferred from these blocks: per-run token in feed/web paths 
 atime probe (VERDICT-15), held `O_NOFOLLOW` sink descriptor (SECURITY-09), doctor filesystem
 probe (ENGINE-13), the stdio control child (ENGINE-11), abortable backoff and the async probe
 (ENGINE-16). Next: B14, B16, B17, B18.
+
+## Status 2026-11-05 (B14 ENGINE-03, B17 UX-03 merged)
+
+B14: ENGINE-03 (one UTF-8 stream decoder in the Claude adapter). B17: UX-03 (`--fail-on`, exit
+3). The B13a fsync now covers only `manifest.json` and `evidence.json`. Still open for 1.5.0:
+B14 (ENGINE-01 Windows shim, ENGINE-07 stream buffering, ENGINE-12 fs_diff byte cap, ENGINE-14
+`clean`), B16 (CLI feedback, 13 UX items), B17 rest (SARIF inconclusive/automation id/uriBaseId,
+report-file schema, VERDICT-09, FEATURE-13), B18 (docs truth-up) and the deferred items listed
+in the B10/B13 status.
