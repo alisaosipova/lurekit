@@ -584,3 +584,12 @@ preserved, unverified, on branches `fix/b8`, `fix/b12` and `fix/b15` (one WIP
 commit each, pushed). To continue a block: check out its branch, read the WIP
 diff against `main`, finish the implementation, then run the block's
 verification commands above before merging. Nothing from wave 1 is on `main`.
+
+## Status 2026-11-05 (wave 1 done)
+
+B8, B12 and B15 were finished from their WIP branches without new agents, verified
+(both tsc configs, build, 1178 tests, docs:check, replay and demo report identical
+to the previous main) and merged: `5e98321` (B8), `19f6003` (B12), `d29125f` (B15).
+The 1.3.0 CHANGELOG section was restored to its tag text (`d34811d`). Next block:
+B9, then B11, B10, B13, B14, B16, B17, B18; release 1.4.0 after B18. One block at a
+time, spec committed first.
