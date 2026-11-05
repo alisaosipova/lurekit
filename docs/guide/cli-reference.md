@@ -261,6 +261,7 @@ install, it exits 1 with a message naming the reinstall command. Exit 0. Offline
 | `--permission-mode <m>` | string | *(agent default)* | per-agent tokens (see table) | all |
 | `--workdir <dir>` | string | *(per-run under results)* | a path; relocates workdirs to `<dir>/<scenario>/<rep>` (must be absent/empty) | all |
 | `--skill <dir>` | string (repeatable) | *(none)* | a skill directory path | all |
+| `--profile <file\|name>` | string | *(none)* | a setup profile: a file, or a shipped name (`claude-code-bare`, `claude-code-hardened`, `claude-code-netread`); keys `agent`, `permission_mode`, `setting_sources`, `strict_mcp_config`, `settings`, `mcp`, `hooks`, `skills`; flags override it | `run`, `plan` |
 | `--env NAME` | string (repeatable) | *(none)* | forwards that variable of your environment to the agent (the name only; the value is read from your shell, never stored) | `run` |
 | `--mcp <file.json>` | string | *(none)* | path to an MCP config JSON | all (parsed); written to `--mcp-config` by the claude-code adapter |
 | `--settings <file.json>` | string | *(none)* | path to a Claude Code settings JSON | **claude-code only** |
@@ -464,3 +465,12 @@ variables such as `CLAUDE_CODE_USE_BEDROCK` and `AWS_REGION`), and every variabl
 forwarded unless you pass them with `--env`, because the agent runs against hostile lures. The
 names that reached the agent (never the values) are recorded per repetition as
 `observation.env_forwarded`.
+
+`lurekit doctor` lists variables set in your shell that look agent-relevant (API keys, tokens,
+proxies, cloud variables) but would not reach the chosen agent, by name only, with the
+`--env NAME` fix.
+
+Claude Code writes its own session transcript for every repetition under
+`~/.claude/projects/` (one directory per workdir). LureKit neither creates nor deletes these;
+after a live claude-code run the CLI reminds you where they are. Delete the directories named
+after `.aab-runs` or your results path when you no longer need them.

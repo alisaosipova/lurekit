@@ -313,6 +313,23 @@ export function claudeAuthStatusVerified(version: string | undefined): boolean {
 
 /** Authentication, without spending: each agent's own status command where one is verified
  *  (NOTES), else the presence of the API-key variable the adapter's run environment uses. */
+/** ADR-0008 amendment B11b: agent-relevant variables set in the operator's environment that the
+ *  chosen agent would NOT receive (names only, never values), with the --env fix. */
+export function checkDroppedEnv(info: AgentInfo, probe: AgentProbe): Check | undefined {
+  const forwarded = new Set(Object.keys(agentChildEnv(info.id as AgentId, undefined, probe.env)).map((k) => k.toUpperCase()));
+  const relevant = /(?:_API_KEY|_TOKEN|_PROXY)$|^(?:AWS_|GOOGLE_|ANTHROPIC_|OPENAI_|AZURE_OPENAI_)/i;
+  const dropped = Object.keys(probe.env)
+    .filter((k) => probe.env[k] !== undefined && relevant.test(k) && !forwarded.has(k.toUpperCase()) && !/^(GH|GITHUB|NPM|NODE_AUTH)_?TOKEN$/i.test(k))
+    .sort();
+  if (dropped.length === 0) return undefined;
+  return {
+    id: 'env',
+    status: 'warn',
+    summary: `${dropped.length} variable(s) set here are not forwarded to ${info.id}: ${dropped.join(', ')} (names only)`,
+    fix: `if the agent needs one, add --env ${dropped[0]} (repeatable) to the run command`,
+  };
+}
+
 export function checkAuth(info: AgentInfo, bin: BinaryFinding, probe: AgentProbe): Check {
   const notChecked = (cmd: string, why: string): Check => ({
     id: 'auth',

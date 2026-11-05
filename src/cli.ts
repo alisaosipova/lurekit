@@ -51,6 +51,7 @@ import {
   type CostEstimate,
   agentInfo,
   checkAuth,
+  checkDroppedEnv,
   checkBinary,
   checkCorpus,
   checkIsolation,
@@ -207,7 +208,7 @@ interface Flags {
 const STRING_FLAGS = new Set([
   'model', 'agent', 'agent-version', 'mode', 'vulnerable-if', 'isolation',
   'results', 'workdir', 'format', 'output', 'permission-mode', 'settings', 'mcp', 'hooks',
-  'replay', 'out', 'setting-sources', 'scenarios',
+  'replay', 'out', 'setting-sources', 'scenarios', 'profile',
 ]);
 const NUMBER_FLAGS = new Set(['k', 'budget', 'run-timeout']);
 const NUMBER_FLAG_EXAMPLE: Record<string, string> = { k: '3', budget: '5', 'run-timeout': String(DEFAULT_RUN_TIMEOUT_S) };
@@ -269,8 +270,44 @@ function parseFlags(argv: string[]): Flags {
   return f;
 }
 
-function readJsonFile(p: string): unknown {
-  return JSON.parse(readFileSync(p, 'utf8'));
+/** Read a JSON file named by `--<flag>`. A relative path that does not exist in the working
+ *  directory but does under the package (e.g. `profiles/settings/allow-loopback-curl.json`)
+ *  resolves to the shipped file (ADR-0008 amendment B11b). Errors name the flag. */
+function readJsonFile(p: string, flag = 'file', deps?: CliDeps): unknown {
+  const local = deps ? path.resolve(deps.cwd(), p) : p;
+  const shipped = path.join(packageRoot(), p);
+  const file = existsSync(local) || path.isAbsolute(p) || !existsSync(shipped) ? local : shipped;
+  let text: string;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch (e) {
+    throw new Error(`--${flag} ${p}: cannot read the file (${(e as NodeJS.ErrnoException).code ?? (e as Error).message})\nnext: check the path, or use a profile shipped with lurekit (ls of the package's profiles/ directory: claude-code-bare, claude-code-hardened, claude-code-netread)`);
+  }
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    throw new Error(`--${flag} ${p}: not valid JSON (${(e as Error).message})`);
+  }
+}
+
+const PROFILE_FILE_KEYS = new Set(['agent', 'permission_mode', 'setting_sources', 'strict_mcp_config', 'settings', 'mcp', 'hooks', 'skills']);
+
+/** Load `--profile <file|name>` (ADR-0008 amendment B11b): the shipped `{"profile": {...}}`
+ *  format or a bare profile object; only the PROFILE_FILE_KEYS are accepted. */
+function loadProfileFile(arg: string, deps: CliDeps): Record<string, unknown> {
+  let p = arg;
+  if (!existsSync(path.resolve(deps.cwd(), arg)) && /^[A-Za-z0-9._-]+$/.test(arg)) {
+    const name = arg.endsWith('.json') ? arg : `${arg}.json`;
+    if (existsSync(path.join(packageRoot(), 'profiles', name))) p = path.join('profiles', name);
+  }
+  const raw = readJsonFile(p, 'profile', deps) as Record<string, unknown>;
+  const body = (raw && typeof raw === 'object' && raw.profile && typeof raw.profile === 'object' ? raw.profile : raw) as Record<string, unknown>;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error(`--profile ${arg}: expected a JSON object (a profile, or {"profile": {...}})`);
+  const bad = Object.keys(body).filter((k) => !PROFILE_FILE_KEYS.has(k));
+  if (bad.length) {
+    throw new Error(`--profile ${arg}: unsupported key(s) ${bad.join(', ')}; a profile file may set ${[...PROFILE_FILE_KEYS].join(', ')}\nnext: pass --model on the command line and credentials with --env NAME`);
+  }
+  return body;
 }
 
 // --- subcommands ------------------------------------------------------------
@@ -313,7 +350,8 @@ export async function cmdSelftest(_flags: Flags, deps: CliDeps): Promise<number>
 /** Build the SetupProfile under test from flags. `--model` is required: pinning the model is a
  *  core reproducibility requirement (ADR-0005), so we never fabricate one. */
 function buildProfile(flags: Flags, deps: CliDeps, hint = 'lurekit run'): SetupProfile {
-  const agent = (flags.str.get('agent') ?? 'claude-code') as AgentId;
+  const fileProfile = flags.str.has('profile') ? loadProfileFile(flags.str.get('profile')!, deps) : {};
+  const agent = (flags.str.get('agent') ?? (fileProfile.agent as string | undefined) ?? 'claude-code') as AgentId;
   const model = flags.str.get('model');
   if (!model) {
     throw new Error(
@@ -330,7 +368,9 @@ function buildProfile(flags: Flags, deps: CliDeps, hint = 'lurekit run'): SetupP
   // §4.3 hardening knob: validated here so a bad value fails before any run starts.
   const settingSources = flags.str.has('setting-sources')
     ? parseSettingSourcesCsv(flags.str.get('setting-sources'))
-    : undefined;
+    : fileProfile.setting_sources !== undefined
+      ? parseSettingSourcesCsv(Array.isArray(fileProfile.setting_sources) ? fileProfile.setting_sources.join(',') : String(fileProfile.setting_sources))
+      : undefined;
   if (settingSources && agent !== 'claude-code') {
     throw new Error(`--setting-sources is a claude-code flag; agent "${agent}" has no equivalent`);
   }
@@ -338,7 +378,7 @@ function buildProfile(flags: Flags, deps: CliDeps, hint = 'lurekit run'): SetupP
   // other agent the body would be digested into evidence yet never reach the agent, so reject.
   if (agent !== 'claude-code') {
     for (const flag of ['settings', 'hooks']) {
-      if (flags.str.has(flag)) {
+      if (flags.str.has(flag) || fileProfile[flag] !== undefined) {
         throw new Error(`--${flag} is only forwarded by the claude-code adapter (ADR-0020); agent "${agent}" would never receive it`);
       }
     }
@@ -364,11 +404,12 @@ function buildProfile(flags: Flags, deps: CliDeps, hint = 'lurekit run'): SetupP
     model,
     workdir,
     ...(profileEnv ? { env: profileEnv } : {}),
-    permission_mode: flags.str.get('permission-mode'),
-    settings: flags.str.has('settings') ? readJsonFile(flags.str.get('settings')!) : undefined,
-    mcp: flags.str.has('mcp') ? readJsonFile(flags.str.get('mcp')!) : undefined,
-    hooks: flags.str.has('hooks') ? readJsonFile(flags.str.get('hooks')!) : undefined,
-    skills: skills && skills.length ? skills : undefined,
+    permission_mode: flags.str.get('permission-mode') ?? (fileProfile.permission_mode as string | undefined),
+    settings: flags.str.has('settings') ? readJsonFile(flags.str.get('settings')!, 'settings', deps) : (fileProfile.settings as SetupProfile['settings']),
+    mcp: flags.str.has('mcp') ? readJsonFile(flags.str.get('mcp')!, 'mcp', deps) : (fileProfile.mcp as SetupProfile['mcp']),
+    hooks: flags.str.has('hooks') ? readJsonFile(flags.str.get('hooks')!, 'hooks', deps) : (fileProfile.hooks as SetupProfile['hooks']),
+    skills: skills && skills.length ? skills : Array.isArray(fileProfile.skills) && fileProfile.skills.length ? (fileProfile.skills as string[]) : undefined,
+    ...(typeof fileProfile.strict_mcp_config === 'boolean' ? { strict_mcp_config: fileProfile.strict_mcp_config } : {}),
     ...(settingSources ? { setting_sources: settingSources } : {}),
   };
 }
@@ -927,6 +968,10 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
     // ADR-0022 amendment: say what to do with the finished run.
     const shownRun = shownPath(runDir, deps);
     deps.stderr(`\nNext: lurekit report ${shownRun} --format text|markdown|json|sarif\n      lurekit publish ${shownRun} --redact-home\n`);
+    // ADR-0008 amendment B11b (SECURITY-08): Claude Code keeps its own session transcripts.
+    if (live && profile.agent === 'claude-code') {
+      deps.stderr('note: Claude Code also kept its own session transcripts of this run under ~/.claude/projects/ (one directory per workdir); lurekit does not delete them.\n');
+    }
     return 0;
   }
 }
@@ -1083,6 +1128,8 @@ export async function cmdDoctor(flags: Flags, deps: CliDeps): Promise<number> {
   const update = checkUpdate(info, bin, probe.platform);
   if (update) checks.push(update);
   checks.push(checkAuth(info, bin, probe));
+  const droppedEnv = checkDroppedEnv(info, probe);
+  if (droppedEnv) checks.push(droppedEnv);
   checks.push(checkModel(info, model, resolveScenarioDir(flags._[0], deps).shown));
   const perm = checkOpenHandsPermission(info);
   if (perm) checks.push(perm);
@@ -1245,6 +1292,7 @@ Commands:
                                     default <results>/<run_id>/<scenario>/<rep>/work
                    --permission-mode <m>  --mcp <file.json>  --skill <dir> (repeatable)
                    --env NAME (repeatable; forwards that variable of your environment to the agent)
+                   --profile <file|name> (a setup profile, e.g. claude-code-hardened; flags override it)
                    --settings/--hooks <file.json>  claude-code only: forwarded in the single
                                     --settings file, observe hooks appended last (ADR-0020)
                    --setting-sources <csv>  claude-code only: load only these setting sources

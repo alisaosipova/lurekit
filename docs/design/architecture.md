@@ -524,7 +524,7 @@ small core, "adding a scenario = one-file PR."
 copies: the copies had already drifted from the canonical files, and two sources of truth for
 the flags a measured run used defeat the point of recording them. Example scripts reference
 `profiles/` directly. The never-populated `src/profile/` directory is removed; profile handling
-stays in the CLI flags (`cli_flags` in each profile file), as there is no `--profile` flag.
+stays in the CLI flags (`cli_flags` in each profile file); since block B11b `--profile <name>` loads the same files (see the ADR-0008 B11b amendment).
 Test scratch lives under the ignored `.aab-test-work/` via `test/helpers/scratch.ts`, never
 `os.tmpdir()` (evidence-spec s2.1).
 

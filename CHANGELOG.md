@@ -18,7 +18,17 @@ No release is cut without changes.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added (block B11b)
+
+- `run`/`plan --profile <file|name>` loads a setup profile: a JSON file or a shipped name
+  (`claude-code-bare`, `claude-code-hardened`, `claude-code-netread`); command-line flags
+  override it; `model` and `env` are refused in a profile file (UX-04). The `profiles/`
+  directory now ships with the package, and a relative `--settings`/`--mcp`/`--hooks` path under
+  `profiles/` resolves to the shipped file; read errors name the flag (UX-10).
+- `doctor` warns, by name only, about agent-relevant variables in your shell that the chosen
+  agent would not receive, with the `--env NAME` fix.
+- After a live claude-code run the CLI notes that Claude Code kept its own session transcripts
+  under `~/.claude/projects/`; the CLI reference documents them (SECURITY-08).
 
 ## [1.4.0] - 2026-11-05
 

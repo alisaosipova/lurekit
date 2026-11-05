@@ -1,8 +1,9 @@
 # Setup profiles
 
 Reference Claude Code setup profiles for `lurekit run`. Each JSON file holds the
-`SetupProfile` fields it sets (`profile`) and the equivalent CLI flags (`cli_flags`). The CLI has
-no `--profile` flag: pass the flags shown below. `--model` (and ideally `--agent-version`) are
+`SetupProfile` fields it sets (`profile`) and the equivalent CLI flags (`cli_flags`). Load one
+with `--profile <name>` (for example `--profile claude-code-hardened`; the profiles ship with the
+package) or pass the flags shown below; flags given on the command line override the profile. `--model` (and ideally `--agent-version`) are
 always required on top and are not part of these files, so the same profile can be measured
 against any pinned model.
 

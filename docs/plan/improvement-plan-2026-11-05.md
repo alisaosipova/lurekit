@@ -613,3 +613,10 @@ doctor probes with the agent env, 0700/0600 modes. Deviation from the plan: clou
 against hostile lures); they go through `--env`. B11b (deferred): `--profile <file>`, the doctor
 warning for present-but-dropped variables, the `~/.claude/projects` note (SECURITY-08) and the
 opt-in run-scoped `CLAUDE_CONFIG_DIR`. Next: B11b or B10.
+
+## Status 2026-11-05 (1.4.0 released, B11b merged)
+
+Release 1.4.0 carries blocks 2, 3, B8, B9, B11a, B12, B15. B11b followed (`--profile`, shipped
+profiles (UX-10), doctor dropped-variable warning, Claude Code transcript note); the opt-in
+run-scoped `CLAUDE_CONFIG_DIR` stays deferred. Remaining for 1.5.0: B10, B13, B14, B16, B17
+(with VERDICT-09), B18.

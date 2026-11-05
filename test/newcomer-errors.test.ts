@@ -511,3 +511,48 @@ describe('ADR-0008 amendment B11a: --env NAME and private run dirs', () => {
     }
   });
 });
+
+describe('ADR-0008 amendment B11b: --profile and dropped variables', () => {
+  const runWith = async (extra: string[]) => {
+    const code = await main(['run', corpus('AAB-003'), '--model', 'm', '--mode', 'full', '--k', '1', '--yes', '--results', 'r', ...extra], deps({ interactive: true }));
+    const fs = await import('node:fs');
+    const mf = path.join(work, 'r', 'aab-test-newcomer', 'manifest.json');
+    return { code, manifest: fs.existsSync(mf) ? JSON.parse(fs.readFileSync(mf, 'utf8')) : undefined };
+  };
+  it('a shipped profile name loads (hardened: setting_sources user, permission manual); flags override it', async () => {
+    const a = await runWith(['--profile', 'claude-code-hardened']);
+    expect(a.code).toBe(0);
+    expect(a.manifest.profile.setting_sources).toEqual(['user']);
+    expect(a.manifest.profile.permission_mode).toBe('manual');
+    rmSync(path.join(work, 'r'), { recursive: true, force: true });
+    const b = await runWith(['--profile', 'claude-code-hardened.json', '--permission-mode', 'plan']);
+    expect(b.manifest.profile.permission_mode).toBe('plan');
+  });
+  it('the netread profile resolves its relative --settings path to the shipped file', async () => {
+    const a = await runWith(['--profile', 'claude-code-netread']);
+    expect(a.code).toBe(0);
+    expect(JSON.stringify(a.manifest.profile)).toContain('settings');
+  });
+  it('a profile file with model or env keys is refused; a missing file names the flag', async () => {
+    writeFileSync(path.join(work, 'p.json'), JSON.stringify({ profile: { agent: 'claude-code', env: { K: 'v' }, model: 'x' } }));
+    for (const [arg, re] of [['p.json', /--profile p\.json: unsupported key\(s\) env, model/], ['nope.json', /--profile nope\.json: cannot read the file/]] as const) {
+      let msg = '';
+      try {
+        await main(['run', corpus('AAB-003'), '--model', 'm', '--yes', '--profile', arg], deps({ interactive: true }));
+      } catch (e) {
+        msg = (e as Error).message;
+      }
+      expect(msg + err.join(''), arg).toMatch(re);
+    }
+  });
+  it('doctor lists agent-relevant variables that would not be forwarded, by name only', async () => {
+    const { checkDroppedEnv, agentInfo } = await import('../src/doctor.js');
+    const c = checkDroppedEnv(agentInfo('claude-code'), probe({ OPENAI_API_KEY: 'sk-x', AWS_SECRET_ACCESS_KEY: 's', ANTHROPIC_API_KEY: 'a', HTTPS_PROXY: 'p', GITHUB_TOKEN: 'g' }));
+    expect(c?.summary).toContain('AWS_SECRET_ACCESS_KEY, OPENAI_API_KEY');
+    expect(c?.summary).not.toContain('ANTHROPIC_API_KEY');
+    expect(c?.summary).not.toContain('HTTPS_PROXY');
+    expect(c?.summary).not.toMatch(/sk-x|GITHUB_TOKEN/);
+    expect(c?.fix).toMatch(/--env AWS_SECRET_ACCESS_KEY/);
+    expect(checkDroppedEnv(agentInfo('claude-code'), probe({ PATH: '/bin' }))).toBeUndefined();
+  });
+});
