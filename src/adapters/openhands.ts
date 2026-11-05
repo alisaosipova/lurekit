@@ -14,6 +14,7 @@
 // Determinism (§4.5): the parse step is the exported pure `observeOpenHandsRun`; tests drive an
 // offline stub binary (test/fixtures/agents/stub-openhands.mjs). No live agent, network or spend.
 
+import { resolveAgentBinary } from './claudeCode.js';
 import { mkdir, readFile, readdir, stat } from 'node:fs/promises';
 import { isInside, safeWriteFile } from '../runner/safeWrite.js';
 import { performance } from 'node:perf_hooks';
@@ -204,7 +205,9 @@ export class OpenHandsAdapter implements Adapter {
 
   /** Resolve the binary: constructor arg > env override > 'openhands' on PATH. */
   private bin(): string {
-    return this.binOverride ?? process.env[OPENHANDS_BIN_ENV] ?? 'openhands';
+    const spec = this.binOverride ?? process.env[OPENHANDS_BIN_ENV] ?? 'openhands';
+    // ENGINE-01: on Windows resolve PATHEXT and npm .cmd shims to a spawnable entry.
+    return process.platform === 'win32' ? (resolveAgentBinary(spec) ?? spec) : spec;
   }
 
   async run(profile: SetupProfile, task: string, signal: AbortSignal, options: RunOptions = {}): Promise<RunObservation> {

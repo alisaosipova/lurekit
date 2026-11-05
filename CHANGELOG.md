@@ -18,6 +18,13 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+### Fixed (ENGINE-01)
+
+- Windows: an npm-installed agent CLI is now launchable. The resolver tries the PATHEXT forms
+  (`claude.cmd`) instead of the extension-less POSIX shim Windows cannot spawn, and resolves an
+  npm `.cmd` shim to the Node entry it calls, which the adapters run through Node directly (no
+  `cmd.exe`, no shell). Applies to all four adapters.
+
 ### Fixed (ENGINE-07)
 
 - Adapter stream parsing no longer rescans the whole buffer for every chunk (64 MiB without a

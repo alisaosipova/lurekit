@@ -861,3 +861,24 @@ describe('B14 ENGINE-03: a UTF-8 character split across stdout chunks', () => {
     expect(raw).toContain(text);
   });
 });
+
+describe('ENGINE-01: Windows binary resolution (fake npm shim layout)', () => {
+  it('prefers the .cmd shim over the POSIX shim and resolves it to the Node entry; a .cmd without one is skipped', async () => {
+    const { resolveAgentBinary, cmdShimEntry } = await import('../src/adapters/claudeCode.js');
+    const { mkdir, writeFile } = await import('node:fs/promises');
+    const base = await mkScratch('aab-winshim-');
+    tmpDirs.push(base);
+    const bin = path.join(base, 'npm');
+    const entry = path.join(bin, 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js');
+    await mkdir(path.dirname(entry), { recursive: true });
+    await writeFile(entry, '// entry');
+    await writeFile(path.join(bin, 'claude'), '#!/bin/sh\nexec node "$basedir/node_modules/@anthropic-ai/claude-code/cli.js" "$@"\n');
+    await writeFile(path.join(bin, 'claude.cmd'), '@ECHO off\r\nGOTO start\r\n:start\r\nSETLOCAL\r\n"%_prog%"  "%dp0%\\node_modules\\@anthropic-ai\\claude-code\\cli.js" %*\r\n');
+    expect(cmdShimEntry(path.join(bin, 'claude.cmd'))).toBe(entry);
+    // lower-case PATHEXT: this test runs on case-sensitive filesystems (Windows is not).
+    expect(resolveAgentBinary('claude', bin, 'win32', '.exe;.cmd')).toBe(entry);
+    await writeFile(path.join(bin, 'other.cmd'), '@echo off\r\nsomething.exe %*\r\n');
+    await writeFile(path.join(bin, 'other'), '#!/bin/sh\n');
+    expect(resolveAgentBinary('other', bin, 'win32', '.exe;.cmd')).toBeUndefined();
+  });
+});

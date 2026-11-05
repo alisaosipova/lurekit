@@ -13,6 +13,7 @@
 // Determinism (§4.5): the parse step is the exported pure `observeCursorRun`; tests drive an
 // offline stub binary (test/fixtures/agents/stub-cursor.mjs). No live agent, network or spend.
 
+import { resolveAgentBinary } from './claudeCode.js';
 import { mkdir, readFile } from 'node:fs/promises';
 import { safeWriteFile } from '../runner/safeWrite.js';
 import { performance } from 'node:perf_hooks';
@@ -148,7 +149,9 @@ export class CursorCliAdapter implements Adapter {
 
   /** Resolve the binary: constructor arg > env override > 'agent' on PATH. */
   private bin(): string {
-    return this.binOverride ?? process.env[CURSOR_BIN_ENV] ?? 'agent';
+    const spec = this.binOverride ?? process.env[CURSOR_BIN_ENV] ?? 'agent';
+    // ENGINE-01: on Windows resolve PATHEXT and npm .cmd shims to a spawnable entry.
+    return process.platform === 'win32' ? (resolveAgentBinary(spec) ?? spec) : spec;
   }
 
   async run(

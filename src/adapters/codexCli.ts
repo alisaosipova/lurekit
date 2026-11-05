@@ -15,6 +15,7 @@
 // Determinism (§4.5): the parse step is the exported pure `observeCodexRun`; tests drive an
 // offline stub binary (test/fixtures/agents/stub-codex.mjs). No live agent, network or spend.
 
+import { resolveAgentBinary } from './claudeCode.js';
 import { mkdir, stat } from 'node:fs/promises';
 import { safeWriteFile } from '../runner/safeWrite.js';
 import { performance } from 'node:perf_hooks';
@@ -169,7 +170,9 @@ export class CodexCliAdapter implements Adapter {
 
   /** Resolve the binary: constructor arg > env override > 'codex' on PATH. */
   private bin(): string {
-    return this.binOverride ?? process.env[CODEX_BIN_ENV] ?? 'codex';
+    const spec = this.binOverride ?? process.env[CODEX_BIN_ENV] ?? 'codex';
+    // ENGINE-01: on Windows resolve PATHEXT and npm .cmd shims to a spawnable entry.
+    return process.platform === 'win32' ? (resolveAgentBinary(spec) ?? spec) : spec;
   }
 
   async run(profile: SetupProfile, task: string, signal: AbortSignal, options: RunOptions = {}): Promise<RunObservation> {

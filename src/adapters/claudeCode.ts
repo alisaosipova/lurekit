@@ -19,7 +19,7 @@
 // the same RunObservation. Tests drive a stub agent binary; no live agent, network or spend.
 
 import type { ChildProcess } from 'node:child_process';
-import { accessSync, constants as fsConstants, existsSync, realpathSync, statSync } from 'node:fs';
+import { accessSync, readFileSync, constants as fsConstants, existsSync, realpathSync, statSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
 import path from 'node:path';
@@ -886,9 +886,9 @@ function commandFor(bin: string, args: string[]): { cmd: string; args: string[] 
 
 /** Whether `file` is a regular file the adapter can launch now (readable for a node script,
  *  executable otherwise). */
-function launchable(file: string): boolean {
+function launchable(file: string, platform: NodeJS.Platform = process.platform): boolean {
   try {
-    const mode = isNodeScript(file) || process.platform === 'win32' ? fsConstants.R_OK : fsConstants.X_OK;
+    const mode = isNodeScript(file) || platform === 'win32' ? fsConstants.R_OK : fsConstants.X_OK;
     accessSync(file, mode);
     return statSync(file).isFile();
   } catch {
@@ -899,28 +899,64 @@ function launchable(file: string): boolean {
 /** Resolve a binary spec to an absolute real path (§4.3): a spec with a path separator is
  *  taken as a path (relative to cwd); a bare name is looked up on PATH. The result is
  *  `realpathSync` of the first launchable candidate, or undefined when none is found. */
-export function resolveAgentBinary(spec: string, envPath: string | undefined = process.env.PATH): string | undefined {
+export function resolveAgentBinary(
+  spec: string,
+  envPath: string | undefined = process.env.PATH,
+  platform: NodeJS.Platform = process.platform,
+  pathext: string | undefined = process.env.PATHEXT,
+): string | undefined {
   const candidates: string[] = [];
   if (spec.includes('/') || spec.includes(path.sep) || path.isAbsolute(spec)) {
     candidates.push(path.resolve(spec));
   } else {
+    // ENGINE-01: on Windows the PATHEXT forms first; the extension-less file npm also installs
+    // is a POSIX shell shim Windows cannot spawn.
+    // An extension-less file is never spawnable on Windows, so it is not a candidate there unless
+    // the spec already names an extension.
     const exts =
-      process.platform === 'win32' ? ['', ...(process.env.PATHEXT ?? '.EXE;.CMD;.BAT').split(';')] : [''];
+      platform === 'win32' && path.extname(spec) === '' ? (pathext ?? '.EXE;.CMD;.BAT').split(';').filter(Boolean) : [''];
     for (const dir of (envPath ?? '').split(path.delimiter)) {
       if (!dir) continue;
       for (const ext of exts) candidates.push(path.resolve(dir, spec + ext));
     }
   }
   for (const c of candidates) {
-    if (!launchable(c)) continue;
+    if (!launchable(c, platform)) continue;
     try {
       const real = realpathSync(c);
-      if (launchable(real)) return real;
+      if (!launchable(real, platform)) continue;
+      if (/\.(cmd|bat)$/i.test(real)) {
+        // ENGINE-01: an npm cmd-shim runs `node <pkg entry>`; launch that entry through
+        // process.execPath instead (no cmd.exe, no shell). A .cmd without one is skipped.
+        const entry = cmdShimEntry(real);
+        if (entry) return entry;
+        continue;
+      }
+      return real;
     } catch {
       /* vanished between the checks: try the next candidate */
     }
   }
   return undefined;
+}
+
+/** The Node entry an npm `.cmd` shim calls (`"%dp0%\\node_modules\\<pkg>\\<entry>.js"`, also the
+ *  older `%~dp0` form), resolved against the shim's directory; undefined when there is none. */
+export function cmdShimEntry(shim: string): string | undefined {
+  let text: string;
+  try {
+    text = readFileSync(shim, 'utf8');
+  } catch {
+    return undefined;
+  }
+  const m = /%~?dp0%?\\?((?:[^"%\r\n]+?)\.(?:js|cjs|mjs))"/i.exec(text);
+  if (!m) return undefined;
+  const entry = path.join(path.dirname(shim), ...m[1].split(/[\\/]/));
+  try {
+    return statSync(entry).isFile() ? entry : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Run `<bin> --version` synchronously under the ADR-0024 D5 cap (a probe that blocks, e.g.

@@ -481,3 +481,9 @@ runs only the missing ones into the same run directory under the same benchmark 
 writes the final manifest without `partial`. A complete run is not resumable. Execution stays
 sequential (ENGINE-09 note).
 
+### Note (2026-11-05): D6 closed by ENGINE-01
+
+The Windows `.cmd` shim launch deferred in D6 is decided in the ADR-0008 amendment ENGINE-01
+(architecture.md): PATHEXT first, npm `.cmd` shims resolved to their Node entry and launched via
+`process.execPath`.
+
