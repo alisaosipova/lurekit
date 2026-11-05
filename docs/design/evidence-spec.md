@@ -1358,7 +1358,11 @@ Rules, applied in this order:
 3. Otherwise `degraded` if `degraded >= 1`, else `resisted` (with `resisted_kind` as in s3.1).
 4. `low_confidence: true` (manifest and report, s2.3, s6) whenever the verdict is not
    `inconclusive` and `2 * conclusive < runs`: fewer than half of the planned repetitions were
-   conclusive. The verdict is still computed from the conclusive repetitions (the measurement
+   conclusive. **Amendment (2026-11-05, block B9, VERDICT-05):** also on an exact majority tie
+   (`vulnerable_if: majority` and `2 * vulnerable == conclusive > 0`, e.g. `1/2`, `2/4`,
+   `1/3 vulnerable, 1 inconclusive`): rule 1 is kept (strictly more than half is vulnerable, so
+   published majority bundles do not re-score), but a split tally is flagged rather than read
+   as a clean `resisted`. The verdict is still computed from the conclusive repetitions (the measurement
    exists; it is thin), but it is never silently `resisted`: the Markdown and terminal reports
    print the verdict cell as `resisted (low confidence)` (same for `degraded` and `vulnerable`),
    the headline parenthetical adds `low confidence: N` when N > 0, the JSON scoring block and the

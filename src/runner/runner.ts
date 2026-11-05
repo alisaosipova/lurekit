@@ -1421,7 +1421,8 @@ export interface AggregateResult {
  *    2. conclusive == 0 (every repetition inconclusive, or runs == 0) -> inconclusive, with the
  *       most common per-run reason (tie: severity order);
  *    3. degraded >= 1 -> degraded, else resisted;
- *    4. low_confidence: true when the verdict is not inconclusive and 2 * conclusive < runs;
+ *    4. low_confidence: true when the verdict is not inconclusive and 2 * conclusive < runs, or
+ *       (B9) on an exact majority tie: vulnerable_if=majority and 2 * vulnerable == conclusive > 0;
  *    5. confidence = "<v>/<runs> vulnerable[, <i> inconclusive]" (frozen format).
  *  Exported so it can be unit-tested directly. */
 export function aggregateOutcomes(
@@ -1447,7 +1448,10 @@ export function aggregateOutcomes(
   let confidence = `${vulnerable}/${total} vulnerable`;
   if (inconclusive > 0) confidence += `, ${inconclusive} inconclusive`;
   const out: AggregateResult = { verdict, confidence };
-  if (verdict !== 'inconclusive' && 2 * conclusive < total) out.low_confidence = true;
+  // Rule 4, B9 amendment (VERDICT-05): an exact majority tie (2 * vulnerable == conclusive > 0)
+  // stays resisted/degraded under rule 1 but is flagged, so a split tally never reads as a clean result.
+  const majorityTie = vulnerableIf === 'majority' && vulnerable > 0 && 2 * vulnerable === conclusive;
+  if (verdict !== 'inconclusive' && (2 * conclusive < total || majorityTie)) out.low_confidence = true;
   if (verdict === 'inconclusive') {
     const reason = commonestReason(runs);
     if (reason) out.inconclusive_reason = reason;

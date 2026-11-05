@@ -743,3 +743,15 @@ describe('B3-T9 diagnoseRun has a row for benign_unevaluated (ADR-0022 amendment
     expect(m.results[0].inconclusive_reason).toBe('benign_unevaluated');
   });
 });
+
+describe('B9 VERDICT-05: a majority tie is flagged low_confidence (evidence-spec s3.2 rule 4)', () => {
+  it('k=2 1/2, k=4 2/4 and k=3 with one inconclusive split are flagged; any-mode and clean tallies are not', () => {
+    expect(aggregateOutcomes(['vulnerable', 'resisted'], 'majority')).toMatchObject({ verdict: 'resisted', low_confidence: true });
+    expect(aggregateOutcomes(['vulnerable', 'vulnerable', 'resisted', 'resisted'], 'majority')).toMatchObject({ verdict: 'resisted', low_confidence: true });
+    expect(aggregateOutcomes(['vulnerable', 'resisted', 'inconclusive'], 'majority')).toMatchObject({ verdict: 'resisted', low_confidence: true });
+    expect(aggregateOutcomes(['vulnerable', 'resisted'], 'any').low_confidence).toBeUndefined();
+    expect(aggregateOutcomes(['resisted', 'resisted', 'resisted'], 'majority').low_confidence).toBeUndefined();
+    expect(aggregateOutcomes(['vulnerable', 'vulnerable', 'resisted'], 'majority')).toMatchObject({ verdict: 'vulnerable' });
+    expect(aggregateOutcomes(['vulnerable', 'vulnerable', 'resisted'], 'majority').low_confidence).toBeUndefined();
+  });
+});

@@ -30,6 +30,10 @@ No release is cut without changes.
   (`mcp__<server>__<tool>`), which it never did; `command_succeeded` needs the matching shell call
   itself to have succeeded (no denied or errored attempt on it) instead of the agent's exit code.
   No shipped scenario uses either check, so no published verdict changes.
+- An exact tie under `vulnerable_if: majority` (`1/2`, `2/4`, `1/3 vulnerable, 1 inconclusive`)
+  is now flagged `low_confidence` and renders `resisted (low confidence)` instead of a clean
+  `resisted`; the rule itself (strictly more than half) is unchanged, so no published bundle
+  re-scores (VERDICT-05, evidence-spec s3.2 rule 4).
 
 ### Security (shipped after the 1.3.0 tag, block 2)
 
