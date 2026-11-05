@@ -642,7 +642,7 @@ in the B10/B13 status.
 
 ## Finding status (maintained per merge)
 
-Closed (implemented): VERDICT-01..11, 14 and 15; SECURITY-01..09, 11;
+Closed (implemented): VERDICT-01..12, 14 and 15; SECURITY-01..09, 11;
 ENGINE-02, 03, 04, 05, 08, 09 (sequential-by-design note), 10, 11, 12, 13, 14, 15, 16; UX-01..18; DOCS-01..14; FEATURE-05, FEATURE-06, FEATURE-07, FEATURE-12, FEATURE-13, FEATURE-15.
 Closed (rejected by this plan as guardrails): SECURITY-10, FEATURE-16, FEATURE-17.
 Closed (deferred by this plan, outside what can be done offline): FEATURE-01 (multi-agent
@@ -651,6 +651,5 @@ command needs its own redaction ADR first), FEATURE-09 and FEATURE-14 (the resid
 need a public disclosure each before any scenario is written; BRIEF non-goal: no speculative
 classes), FEATURE-04 action.yml (its own ADR and the maintainer's decision on running a paid
 agent in CI; the SARIF location half is done).
-Partly done: VERDICT-12 (group reap; feed path token open).
-Open: VERDICT-12, ENGINE-01, ENGINE-07,
+Open: ENGINE-01, ENGINE-07,
 

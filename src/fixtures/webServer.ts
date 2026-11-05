@@ -95,6 +95,10 @@ export class WebServerFixture extends FixtureBase {
     this.assertLoopback('127.0.0.1');
     this.counter = new DeliveryCounter();
     const counter = this.counter;
+    // VERDICT-12: the page lives under a per-run path (/p/<token>/), so a leftover fetcher of an
+    // earlier repetition hitting a reused port gets 404 and never counts.
+    const pageToken = randomBytes(12).toString('hex');
+    const base = `/p/${pageToken}/`;
     const server = createServer((req, res) => {
       counter.request();
       const pathname = (req.url ?? '/').split('?')[0];
@@ -104,7 +108,7 @@ export class WebServerFixture extends FixtureBase {
         res.end();
         return;
       }
-      if (pathname !== '/' && pathname !== '/index.html') {
+      if (pathname !== base && pathname !== `${base}index.html`) {
         res.statusCode = 404;
         res.end();
         return;
@@ -119,7 +123,7 @@ export class WebServerFixture extends FixtureBase {
     });
     this.server = server;
     const port = await listenLoopback(server, this.type);
-    const url = `http://127.0.0.1:${port}/`;
+    const url = `http://127.0.0.1:${port}${base}`;
 
     return {
       // `url` is loopback (invariant a); `marker` is a random non-secret canary.

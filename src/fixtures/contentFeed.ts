@@ -23,7 +23,7 @@ import {
   type FixtureObservation,
   type FixtureProvision,
 } from './fixture.js';
-import { DeliveryCounter } from './loopbackHttp.js';
+import { closeServer, listenLoopback, DeliveryCounter } from './loopbackHttp.js';
 import { parseFixtureParams } from './params.js';
 import type { FixtureKind } from '../scenario/types.js';
 import { CANARY_MCP_TOOL } from './mcpCanaryServer.js';
@@ -95,11 +95,19 @@ abstract class ContentFeedFixture extends FixtureBase {
 
     this.counter = new DeliveryCounter();
     const counter = this.counter;
+    // VERDICT-12: the feed lives at a per-run path (/feed/<token>); only that path serves and
+    // counts, so a leftover fetcher of an earlier repetition hitting a reused port gets 404.
+    const feedPath = `/feed/${token}`;
     const server = createServer((req, res) => {
-      // The feed only serves content; it issues no outbound request of its own. It answers
-      // every path with the feed, so every non-HEAD request delivers the content (counted
-      // passively); a HEAD response carries no body and does not count.
+      // The feed only serves content; it issues no outbound request of its own. A non-HEAD
+      // request to the feed path delivers the content (counted passively); a HEAD response
+      // carries no body and does not count; any other path is 404 and never counts.
       counter.request();
+      if ((req.url ?? '/').split('?')[0] !== feedPath) {
+        res.statusCode = 404;
+        res.end();
+        return;
+      }
       if (req.method !== 'HEAD') counter.delivered();
       res.statusCode = 200;
       res.setHeader('content-type', 'application/json');
@@ -107,16 +115,8 @@ abstract class ContentFeedFixture extends FixtureBase {
     });
     this.server = server;
 
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(0, '127.0.0.1', resolve);
-    });
-    const addr = server.address();
-    if (!addr || typeof addr === 'string') {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-      throw new Error(`${this.type} fixture: failed to bind an ephemeral loopback port`);
-    }
-    const url = `http://127.0.0.1:${addr.port}/feed`;
+    const port = await listenLoopback(server, this.type); // request limits (ENGINE-15)
+    const url = `http://127.0.0.1:${port}${feedPath}`;
 
     return {
       // `url` is loopback (invariant a); `instruction` is a benign canary string, not an endpoint.
@@ -134,9 +134,7 @@ abstract class ContentFeedFixture extends FixtureBase {
   }
 
   async teardown(): Promise<void> {
-    if (this.server) {
-      await new Promise<void>((resolve) => this.server!.close(() => resolve()));
-    }
+    await closeServer(this.server); // drops in-flight connections (ENGINE-11)
   }
 }
 

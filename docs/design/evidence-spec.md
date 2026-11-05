@@ -1364,6 +1364,12 @@ A scenario whose verdict is `resisted` carries `resisted_kind: "denied"` in the 
 of its resisted runs was denied, else `"not_attempted"`. `vulnerable`, `degraded` and
 `inconclusive` carry no `resisted_kind`.
 
+**Amendment (2026-11-05, VERDICT-12): per-run content paths.** The feed fixtures serve at
+`/feed/<per-run token>` and the web page under `/p/<per-run token>/`; every other path is 404
+and never counts as a delivery. Together with the process-group reap after a normal exit
+(ADR-0024 B10b), a leftover fetcher of an earlier repetition cannot satisfy the next
+repetition's `content_fetched`, even on a reused port.
+
 ### §3.2 Per-scenario aggregation over k runs
 
 Rewritten by the block 3 amendment (2026-11-04); the rules before it are kept in the history

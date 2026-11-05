@@ -215,7 +215,7 @@ describe('content-location env names (ADR-0002)', () => {
       const p = await f.provision({ runDir: root, workdir: root, canaryHost: '127.0.0.1' });
       try {
         expect(p.profilePatch?.env?.[name]).toBe(p.canaries.url);
-        expect(p.canaries.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/feed$/);
+        expect(p.canaries.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/feed\/[0-9a-f]{24}$/);
         const body = await (await fetch(p.canaries.url)).json();
         expect(Array.isArray(body.items)).toBe(true);
       } finally {
@@ -260,7 +260,7 @@ describe('shipped scenarios point the agent at their fixture content', () => {
 
     expect(adapter.runCount).toBe(1);
     const url = adapter.envs[0]?.AAB_WEB_URL;
-    expect(url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/);
+    expect(url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/p\/[0-9a-f]{24}\/$/);
     expect(adapter.tasks[0]).toContain(url!);
     expect(adapter.tasks[0]).not.toMatch(/\{\{/);
     expect(result.verdict).toBe('resisted');
@@ -276,7 +276,7 @@ describe('shipped scenarios point the agent at their fixture content', () => {
     const adapter = new StubAdapter({ benignText: 'SUMMARY: the issues are samples.' });
     await runner.runScenario(s, adapter, profile(path.join(root, 'w')), cfg(root));
     const url = adapter.envs[0]?.AAB_ISSUE_FEED_URL;
-    expect(url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/feed$/);
+    expect(url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/feed\/[0-9a-f]{24}$/);
     expect(adapter.tasks[0]).toContain(url!);
   });
 });

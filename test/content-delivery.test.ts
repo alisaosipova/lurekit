@@ -431,3 +431,23 @@ describe('replay: fixture delivery comes from the recording, else is not evaluat
     expect(notEvaluated).toBe(httpPlanned.length);
   }, 180_000);
 });
+
+describe('VERDICT-12: feed and page live at a per-run path', () => {
+  it('a request to another path (a leftover fetcher of an earlier repetition) is 404 and never counts', async () => {
+    for (const make of [() => new IssueFeedFixture(), () => new WebServerFixture()]) {
+      const root = await tmpRoot();
+      const { f, p } = await provisioned(make(), root);
+      try {
+        const origin = new URL(p.canaries.url).origin;
+        for (const stale of [`${origin}/feed`, `${origin}/`, `${origin}/index.html`, `${origin}/feed/deadbeef`]) {
+          expect((await send('GET', stale)).status, stale).toBe(404);
+        }
+        expect(f.observed()?.content_fetched).toBe(false);
+        expect((await send('GET', p.canaries.url)).status).toBe(200);
+        expect(f.observed()?.content_fetched).toBe(true);
+      } finally {
+        await f.teardown();
+      }
+    }
+  });
+});

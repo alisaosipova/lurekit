@@ -18,6 +18,12 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+### Changed (VERDICT-12)
+
+- The issue/email feed and web page fixtures serve their content at a per-run path
+  (`/feed/<token>`, `/p/<token>/`); other paths are 404 and never count as a delivery, so a
+  leftover request from an earlier repetition cannot satisfy the next one's precondition.
+
 ### Changed (VERDICT-15)
 
 - `canary_file_read` probes once per run whether a read advances atime on that filesystem,
