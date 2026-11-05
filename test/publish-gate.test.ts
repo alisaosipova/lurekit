@@ -607,11 +607,12 @@ describe('readRunDir never follows symlinks (ADR-0017 "Run-dir reading")', () =>
         `next: lurekit publish ${demo} --allow-no-evidence   (report-only copy, e.g. the shipped demo)\n`,
     );
     expect(existsSync(outDir)).toBe(false);
+    const errBefore = err.join('');
     expect(await main(['publish', demo, '--out', outDir, '--allow-no-evidence'], deps)).toBe(0);
-    expect(err.join('')).toMatch(/nothing written\n$/); // only the first attempt wrote to stderr
+    expect(err.join('')).toBe(errBefore); // only the first attempt wrote to stderr
     const text = out.join('');
     expect(text).toContain('evidence: 0 of 63 file(s) (--allow-no-evidence)\n');
-    expect(text).toContain(`\nNext: lurekit report ${outDir}\n      cite it as described in the publishing guide ("Citing a bundle")\n`);
+    expect(text).toContain(`\nNext: lurekit report ${path.relative(ROOT, outDir)}\n      cite it as described in the publishing guide ("Citing a bundle")\n`);
     expect(readFileSync(path.join(outDir, 'index.md'), 'utf8')).toContain('## Evidence\n\nno evidence files published (--allow-no-evidence): 0 of 63');
     expect(readdirSync(path.join(ROOT, demo)).sort()).toEqual(before); // never touched
   });
