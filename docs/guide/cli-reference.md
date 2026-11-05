@@ -490,3 +490,10 @@ its verdict in each run and the transition (`same`, `regressed`, `improved`, `ch
 Differences in `k`, the vulnerable_if rule, the mode, the corpus digest or the scenario filter
 are printed as notes. `--format json` prints the rows and counts; `--fail-on-regression` exits 3
 when any scenario regressed, for a CI check that a setup change made nothing worse.
+
+## `lurekit clean [resultsRoot]`
+
+Lists the adapter caches under the results root (default `.aab-runs`) that are not evidence:
+`<run>/<scenario>/<rep>/codex-home/.tmp`, about 100 MB per Codex repetition. With `--yes` it
+removes exactly those directories. Evidence, manifests, streams and `work/` are never touched,
+so a cleaned run still reports, publishes and diffs.

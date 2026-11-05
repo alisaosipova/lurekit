@@ -18,6 +18,13 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+### Added (ENGINE-14)
+
+- `lurekit clean [resultsRoot]` lists the adapter caches that are not evidence (the run-scoped
+  Codex home's `.tmp`, about 100 MB per repetition) and removes them with `--yes`; evidence,
+  manifests, streams and `work/` are never touched. doctor shows the results-root size and the
+  reclaimable cache (ADR-0027).
+
 ### Fixed (ENGINE-12)
 
 - `fs_diff` hashes watched files streaming instead of reading them whole (a 1.5 GiB file took

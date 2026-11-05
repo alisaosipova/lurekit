@@ -22,7 +22,7 @@
 // `run --replay <dir>` re-drives a recorded Claude Code run instead (ADR-0015): offline, no spend.
 // A live `run` prints its plan and asks before launching (ADR-0022); `--yes` skips the prompt.
 
-import { readFileSync, writeFileSync, existsSync, realpathSync, mkdirSync, accessSync, statSync, readdirSync, rmdirSync, constants as fsConstants } from 'node:fs';
+import { lstatSync, readFileSync, writeFileSync, existsSync, realpathSync, mkdirSync, accessSync, statSync, readdirSync, rmdirSync, constants as fsConstants } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -45,6 +45,7 @@ import { BenchmarkRunner, Budget, DEFAULT_RUN_TIMEOUT_S, K_MAX, K_MIN, MAX_RUN_T
 import type { RunConfig, RunManifest, RunnerIds, RunMeta, EvidenceRecord } from './runner/types.js';
 import { diffRuns, renderDiffText } from './report/diff.js';
 import { corpusDigest } from './scenario/digest.js';
+import { findCaches, humanBytes, removeCaches, treeBytes } from './clean.js';
 import { report, REPOSITORY_URL, colorEnabled, terminalWidth, type ReportFormat, type EvidenceLookup, type SurfaceLookup, type ReMeasureContext } from './report/index.js';
 import { planPublish, readRunDir, writeBundle, formatPlanFailure, selectEvidence, defaultBundleDir } from './report/publish.js';
 import {
@@ -372,6 +373,27 @@ export function cmdDiff(flags: Flags, deps: CliDeps): number {
     deps.stderr(`gate: --fail-on-regression tripped by ${d.rows.filter((r) => r.transition === 'regressed').map((r) => r.id).join(', ')} (exit 3)\n`);
     return 3;
   }
+  return 0;
+}
+
+/** clean [resultsRoot] [--yes] (ADR-0027): list, and with --yes remove, adapter caches that are
+ *  not evidence. */
+export function cmdClean(flags: Flags, deps: CliDeps): number {
+  const root = path.resolve(deps.cwd(), flags._[0] ?? '.aab-runs');
+  try {
+    if (lstatSync(root).isSymbolicLink()) {
+      deps.stderr(`clean: ${root} is a symlink; refusing\n`);
+      return 1;
+    }
+  } catch {
+    deps.stdout(`clean: ${root} does not exist; nothing to clean\n`);
+    return 0;
+  }
+  const caches = findCaches(root);
+  const total = caches.reduce((a, c) => a + c.bytes, 0);
+  for (const c of caches) deps.stdout(`${flags.bool.has('yes') ? 'removed' : 'would remove'}  ${humanBytes(c.bytes).padStart(7)}  ${c.path}\n`);
+  if (flags.bool.has('yes')) removeCaches(caches);
+  deps.stdout(`${caches.length} cache dir(s), ${humanBytes(total)}${flags.bool.has('yes') ? ' removed' : '; nothing removed (pass --yes to remove them)'}. Evidence, manifests, streams and work/ are never touched.\n`);
   return 0;
 }
 
@@ -1346,6 +1368,20 @@ export async function cmdDoctor(flags: Flags, deps: CliDeps): Promise<number> {
   if (perm) checks.push(perm);
   checks.push(checkIsolation());
   checks.push(checkResultsFilesystem(path.resolve(deps.cwd(), '.aab-runs'))); // ENGINE-13
+  {
+    // ENGINE-14 (ADR-0027): how much the results root holds and how much is reclaimable cache.
+    const root = path.resolve(deps.cwd(), '.aab-runs');
+    if (existsSync(root)) {
+      const total = treeBytes(root);
+      const cache = findCaches(root).reduce((a, c) => a + c.bytes, 0);
+      checks.push({
+        id: 'disk',
+        status: cache > 1024 * 1024 * 1024 ? 'warn' : 'ok',
+        summary: `results root ${humanBytes(total)}, of which ${humanBytes(cache)} is adapter cache that is not evidence`,
+        ...(cache > 1024 * 1024 * 1024 ? { fix: 'lurekit clean --yes' } : {}),
+      });
+    }
+  }
 
   // Corpus + selftests: the runner's own plan decides what would run, with the detector
   // self-tests run once here and reused (no second control run).
@@ -1382,7 +1418,7 @@ export async function cmdDoctor(flags: Flags, deps: CliDeps): Promise<number> {
 }
 
 /** Commands main() dispatches; the demo banner names only commands that exist. */
-export const COMMANDS: readonly string[] = ['run', 'validate', 'list', 'plan', 'selftest', 'report', 'publish', 'demo', 'doctor', 'diff'];
+export const COMMANDS: readonly string[] = ['run', 'validate', 'list', 'plan', 'selftest', 'report', 'publish', 'demo', 'doctor', 'diff', 'clean'];
 
 /** The demo banner (ADR-0021). Every value comes from the bundled manifest. */
 /** `scenariosDir` is the shipped corpus path as the user should type it (relative to their cwd),
@@ -1535,6 +1571,7 @@ Commands:
                    --scenarios <dir>  the run's scenario corpus (default: the shipped corpus): its
                                   source URLs pass the gate; with --withhold/--exclude the
                                   published corpus_digest is recomputed from it
+  clean [resultsRoot]  List adapter caches that are not evidence (codex-home/.tmp); --yes removes them.
   diff <runA> <runB>  Compare two runs scenario by scenario (same / regressed / improved / changed);
                    --format text|json, --fail-on-regression exits 3 when B is worse anywhere.
   demo             Print a published run that ships with the package (no agent, no auth, no cost),
@@ -1570,6 +1607,7 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
   report: ['output', 'format', 'fail-on', 'results'],
   publish: ['out', 'allow-host', 'withhold', 'exclude', 'redact-home', 'allow-no-evidence', 'scenarios', 'results'],
   diff: ['format', 'fail-on-regression'],
+  clean: ['yes'],
   // demo and doctor keep their own, older refusals ("only --format and --output", "doctor accepts only").
 };
 
@@ -1625,6 +1663,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     case 'demo': return cmdDemo(flags, deps);
     case 'doctor': return cmdDoctor(flags, deps);
     case 'diff': return cmdDiff(flags, deps);
+    case 'clean': return cmdClean(flags, deps);
     default: {
       const near = closestCommand(command);
       const next = near ? `next: lurekit ${near}   (did you mean "${near}"?)` : 'next: lurekit --help';
