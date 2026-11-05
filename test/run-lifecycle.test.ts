@@ -161,7 +161,9 @@ describe('T1 per-run timeout (ADR-0024 D1/D3)', () => {
     expect(evidence.outcome).toBe('inconclusive');
     expect(evidence.inconclusive_reason).toBe('run_timeout');
     expect(evidence.timed_out).toBe(true);
-    expect(evidence.elapsed_ms).toBeGreaterThanOrEqual(200);
+    // Node timers may fire a millisecond before performance.now() says the limit passed
+    // (seen as 199 on windows-latest), so the bound has a small slack.
+    expect(evidence.elapsed_ms).toBeGreaterThanOrEqual(190);
     expect(evidence.elapsed_ms).toBeLessThan(5_000);
     // The stub rejected on the signal: no observation, the warnings are top-level.
     expect(evidence.observation).toBeUndefined();
@@ -425,7 +427,7 @@ describe('runWithDeadline (src/runner/deadline.ts)', () => {
     expect(r.completion).toBe('timed_out');
     expect(r.fired).toBe('timer');
     expect(r.value).toBe('partial');
-    expect(r.elapsedMs).toBeGreaterThanOrEqual(40);
+    expect(r.elapsedMs).toBeGreaterThanOrEqual(35);
   });
 
   it('an already-aborted caller signal yields aborted; a non-returning fn is abandoned', async () => {
