@@ -196,3 +196,14 @@ s3.3; test plan evidence-spec s3.3 B3-T4, B3-T5.
    evaluated" with the next step "inspect the stream file; if the agent did reply, the adapter's
    reply-text shape needs a NOTES entry". A run whose scenarios are all `inconclusive` for that
    reason is "nothing measured" (exit 1) exactly like the other reasons.
+
+## Amendment (2026-11-05, block B17, UX-03): `--fail-on` for CI gates
+
+`lurekit run` and `lurekit report` accept `--fail-on <verdicts>`, a comma list of `vulnerable`,
+`degraded`, `inconclusive`. After every output is written (report, SARIF, manifest), the command
+exits **3** when any scenario's verdict is in the list, or when the run is partial (a measurement
+that did not finish cannot pass a gate). Exit 3 is distinct from 1 (lurekit could not do its
+job) and 2 (no command), so a CI step can tell "the setup failed the gate" from "the tool
+failed". Without the flag the exit codes are unchanged. A bad value is refused before anything
+is spent. stderr names the scenarios that tripped the gate.
+
