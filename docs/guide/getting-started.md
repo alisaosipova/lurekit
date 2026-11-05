@@ -361,8 +361,8 @@ the agent:
 lurekit report .aab-runs/<benchmark_run_id> --format sarif --output report.sarif
 ```
 
-`report` defaults to `--format json`; `run` defaults to `--format markdown`. Allowed formats
-are `json`, `markdown` and `sarif`. The SARIF output is a standard <!-- n:versions.sarif -->2.1.0<!-- /n --> document (the driver
+`report`, `run` and `demo` print the terminal view (`--format text`) by default and write
+Markdown when given `--output`. Allowed formats are `text`, `markdown`, `json` and `sarif`. The SARIF output is a standard <!-- n:versions.sarif -->2.1.0<!-- /n --> document (the driver
 version is the LureKit version that made the run):
 
 <!-- n-line:sarif_schema,sarif_version,sarif_tool_version -->

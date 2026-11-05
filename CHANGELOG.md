@@ -18,6 +18,17 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+### Documentation (block B18)
+
+- Missing from the 1.4.0 notes: evidence integrity on Windows (`aa6b64d`). When the adapter
+  returns nothing, the runner reads the captured output from the declared output artefacts;
+  a `noread` decoy compares mtime; the sink `ctime != mtime` rule is POSIX only, so on Windows a
+  `utimes` touch of an intact sink is not a finding (DOCS-02).
+- `run` prints the terminal view by default, like `demo` and `report`, and writes Markdown with
+  `--output` (UX-07). README, the getting-started guide, the CLI reference, the scenarios guide,
+  the docs index (every ADR, with a test), BOOTSTRAP, the roadmap status, the s6.2 example and
+  the launch drafts were brought in line with the code (DOCS-06..13, UX-08).
+
 ### Changed (block B16a)
 
 - `run` prints a line after every scenario with its verdict, confidence, elapsed time and the

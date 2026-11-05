@@ -80,7 +80,7 @@ estimate. A finished run whose manifest carries `spend_basis` prints `spend: <us
 found is refused before the prompt with the install or `AAB_*_BIN` fix.
 
 Pre-spend validation (ADR-0022 amendment): before the plan, the prompt and any agent spawn,
-`run` checks `--format` (json, markdown or sarif), that the directory of `--output` exists and is
+`run` checks `--format` (text, markdown, json or sarif), that the directory of `--output` exists and is
 writable (and that `--output` is not a directory), that `--results` can be created and written,
 and that `--budget`, when given, is a number greater than 0. A failure exits 1 with
 `refusing to run: ...` and a `next:` command; nothing is launched or spent. `--replay` runs are

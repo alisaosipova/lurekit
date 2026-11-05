@@ -86,10 +86,10 @@ PR title: `Add LureKit (coding-agent setup benchmark)`
 PR body:
 
 > Adds LureKit under <benchmarks/evaluation section>. MIT, Node CLI, offline demo
-> (`npx lurekit demo`, once released; see note). Scenarios cite public disclosures; fixtures bind to
+> (`npx lurekit demo`). Scenarios cite public disclosures; fixtures bind to
 > loopback only and carry only canary values. I am the author.
 
-Note: `lurekit demo` ships in LureKit 1.2.0; verify it is on npm before mentioning it.
+Note: `lurekit demo` is on npm since 1.2.0 (current release 1.4.0, 2026-11-05). Nothing here is posted without the maintainer's approval.
 
 ## Rules for all of these
 

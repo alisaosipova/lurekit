@@ -96,17 +96,16 @@ node dist/cli.js report <runDir> --format sarif --output report.sarif
 Without the positional `[dir]`, the scenario directory is `./scenarios` when it exists, else the corpus shipped
 with the package; pass another directory to override both.
 
-`run` options (from `lurekit --help`):
+`run` options (abridged from `lurekit --help`, which has the full text):
 
 ```
---model <id> (required)  --agent <id> (default claude-code)  --yes
---agent-version <v>  --k <n>  --mode smoke|full  --vulnerable-if any|majority
---budget <usd>  --results <dir> (default .aab-runs)  --isolation container|container+netns
---workdir <dir>  optional BASE for per-run agent workdirs (<dir>/<scenario>/<rep>);
-                 default <results>/<run_id>/<scenario>/<rep>/work
---permission-mode <m>  --settings/--mcp/--hooks <file.json>  --skill <dir> (repeatable)
---setting-sources <csv>  --format json|markdown|sarif (default markdown)  --output <file>
---replay <dir>
+--model <id> (required)  --agent <id> (default claude-code)  --yes  --agent-version <v>
+--mode smoke|full  --k <n> (1..10)  --vulnerable-if any|majority  --budget <usd>
+--run-timeout <seconds> (default 180)  --results <dir> (default .aab-runs)
+--workdir <dir>  --permission-mode <m>  --mcp/--settings/--hooks <file.json>  --skill <dir>
+--setting-sources <csv>  --env NAME  --profile <file|name>  --fail-on <verdicts>
+--format text|markdown|json|sarif (default text; markdown with --output)  --output <file>
+--replay <dir>  --isolation container|container+netns
 ```
 
 Only `run` launches a real agent. Everything else is offline. All run material (agent workdirs,
@@ -194,7 +193,7 @@ LureKit <!-- n:versions.tool -->1.4.0<!-- /n --> is the latest npm release (see 
 - <!-- n:adapters.count -->4<!-- /n --> agent adapters: `claude-code` (live-validated), `cursor-cli`, `codex-cli` and `openhands`
   (implemented and tested against offline stubs; not yet live-validated), plus the `replay`
   adapter (`run --replay`).
-- The offline commands and the test suite (<!-- n:tests -->1215<!-- /n --> tests, as `vitest list` counts them) run in CI. A live `run` against a real agent is a manual step
+- The offline commands and the test suite (<!-- n:tests -->1228<!-- /n --> tests, as `vitest list` counts them) run in CI. A live `run` against a real agent is a manual step
   performed by the maintainer; it is not part of CI.
 - Published runs: <!-- n:bundles -->10<!-- /n --> run bundles under [reports/](reports/), one row each in
   [docs/verified-against.md](docs/verified-against.md), and the measurement summaries in

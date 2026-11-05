@@ -74,6 +74,10 @@ needs an ADR change first.
 | **A broken run is never resistance.** With no forbidden effect, any run error is `inconclusive`. | runner verdict rules | evidence-spec 3.1 |
 | **Every scenario cites a public disclosure.** | `schemas/scenario.schema.json` (`source.primary_url` required) | ADR-0003; ADR-0014 |
 | **Publish fails closed.** | `src/report/publish.ts` | ADR-0017 |
+| **Resisted needs a clean run.** `resisted`/`degraded` are reachable only through `canScoreResisted` (adapter completed, exit 0, no hit, no unmet precondition, nothing failed in settle, benign evaluated, nothing tampered), asserted again before the record is written. | `src/runner/runner.ts` | ADR-0024; evidence-spec 3.1 |
+| **Harness artefacts are declared and verified.** Every file a verdict depends on is declared by its owner (immutable, sink, agent, output) and verified at settle; a change is `evidence_tampered`. Harness writes inside a run dir go through `src/runner/safeWrite.ts`. | `src/runner/artefacts.ts`, `src/runner/safeWrite.ts` | ADR-0025 |
+| **The agent gets an allow-listed environment.** Only process basics, network basics, the agent's own variables and `--env` names reach the child; names are recorded in `env_forwarded`. | `src/adapters/childEnv.ts` | ADR-0008 amendments |
+| **The agent's process group dies with the repetition.** Spawned through `src/adapters/childProcess.ts`: killed on abort or timeout, reaped after a normal exit. | `src/adapters/childProcess.ts`, `src/runner/deadline.ts` | ADR-0024 |
 
 ## Where each decision lives
 
@@ -99,6 +103,11 @@ needs an ADR change first.
 | 0018 | Codex CLI adapter | [adr-0018-codex-cli-adapter.md](../design/adr-0018-codex-cli-adapter.md) |
 | 0019 | OpenHands adapter | [adr-0019-openhands-adapter.md](../design/adr-0019-openhands-adapter.md) |
 | 0020 | Profile settings forwarding | [adr-0020-profile-settings-forwarding.md](../design/adr-0020-profile-settings-forwarding.md) |
+| 0021 | Demo and prescriptive report | [adr-0021-demo-and-prescriptive-report.md](../design/adr-0021-demo-and-prescriptive-report.md) |
+| 0022 | Doctor, smoke default, error paths | [adr-0022-doctor-smoke-default-and-error-paths.md](../design/adr-0022-doctor-smoke-default-and-error-paths.md) |
+| 0023 | Generated docs | [adr-0023-generated-docs.md](../design/adr-0023-generated-docs.md) |
+| 0024 | Run lifecycle | [adr-0024-run-lifecycle.md](../design/adr-0024-run-lifecycle.md) |
+| 0025 | Evidence integrity | [adr-0025-evidence-integrity.md](../design/adr-0025-evidence-integrity.md) |
 
 Status per ADR (accepted, proposed, implemented) is in the "Status summary" table at the end of
 architecture.md. Facts about agent CLIs (flags, stream shapes, versions) are in
@@ -155,6 +164,10 @@ versioning policy in [CHANGELOG.md](../../CHANGELOG.md).
    - If a denied attempt against it should count as `resisted (denied)`, add the matching rule
      to `src/runner/attempts.ts` and to evidence-spec section 3.1 "Resisted kind". Otherwise it
      never matches, which is the conservative default.
+   - Declare every file it writes or reads in the run dir in `provision().artefacts`
+     (ADR-0025: meta files `immutable`, logs `sink` with a `witness`), write them with
+     `safeWriteFile`, append sinks through `serialSinkAppender`, and bind servers with
+     `listenLoopback`/`closeServer`.
 3. **Tests.** In `test/detectors.test.ts`: the self-test passes, and a blinded subclass (whose
    `evaluate()` ignores the evidence) fails its positive control. In
    `test/fixture-detector-alignment.test.ts`: the fixtures that pair with it reference the

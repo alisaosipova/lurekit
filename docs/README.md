@@ -31,7 +31,7 @@ authority when the two disagree.
 
 ## Design (`design/`)
 
-- [design/architecture.md](design/architecture.md) - the SDD: ADR index, ADR-0003..0014, threats to validity, status summary.
+- [design/architecture.md](design/architecture.md) - the SDD: ADR index (ADR-0001..0025), the inline ADRs ADR-0003..0014 and their amendments, threats to validity, status summary.
 - [design/evidence-spec.md](design/evidence-spec.md) - detector, evidence record, verdict, adapter, redaction and reporting contract.
 - [design/NOTES-verified-facts.md](design/NOTES-verified-facts.md) - primary-source facts about agent CLIs and tools that feed the ADRs.
 - [design/BOOTSTRAP.md](design/BOOTSTRAP.md) - build order and what is specced versus pending.
@@ -47,6 +47,8 @@ authority when the two disagree.
 - [design/adr-0021-demo-and-prescriptive-report.md](design/adr-0021-demo-and-prescriptive-report.md) - ADR-0021: `lurekit demo` and the plain-language / "What to change" report layers.
 - [design/adr-0022-doctor-smoke-default-and-error-paths.md](design/adr-0022-doctor-smoke-default-and-error-paths.md) - ADR-0022: `lurekit doctor`, smoke default and launch confirmation, newcomer error paths.
 - [design/adr-0023-generated-docs.md](design/adr-0023-generated-docs.md) - ADR-0023: generated catalog, verified-against matrix and demo image, diffed in CI.
+- [design/adr-0024-run-lifecycle.md](design/adr-0024-run-lifecycle.md) - ADR-0024: run lifecycle, per-run timeout, resisted guard, process-group kill, provisional manifest.
+- [design/adr-0025-evidence-integrity.md](design/adr-0025-evidence-integrity.md) - ADR-0025: harness artefact manifest, `evidence_tampered`, symlink-safe writes.
 
 ## Plan (`plan/`)
 

@@ -1000,7 +1000,9 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
     const manifest = await runner.writeManifest(profile, cfg, plan.kept, results, meta);
 
     const runDir = path.join(cfg.resultsRoot, benchmarkRunId);
-    const format = reportFormat(flags, 'markdown') ?? 'markdown'; // validated pre-spend
+    // ADR-0021 B18 amendment (UX-07): like demo and report, the terminal view on stdout and
+    // Markdown into an --output file, unless --format says otherwise.
+    const format = reportFormat(flags, flags.str.get('output') !== undefined ? 'markdown' : 'text') ?? 'markdown'; // validated pre-spend
     const output = flags.str.get('output');
     const rendered = report(manifest, {
       format,
@@ -1403,7 +1405,7 @@ Commands:
                                     --settings file, observe hooks appended last (ADR-0020)
                    --setting-sources <csv>  claude-code only: load only these setting sources
                                     (user, project, local); default: flag not passed (agent default)
-                   --format text|markdown|json|sarif (default markdown)  --output <file>
+                   --format text|markdown|json|sarif (default text; markdown with --output)  --output <file>
                    --replay <dir>  re-drive a recorded claude-code run offline (no agent, no cost)
   validate [dir]   Schema-validate every scenario (exit 1 on any error). Offline.
   list [dir]       List scenarios (id, detector, runnable, applies_to). Offline.

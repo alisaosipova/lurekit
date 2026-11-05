@@ -1600,8 +1600,13 @@ formats, mirroring `mcp-review-check/src/report/*`:
   "profile_digest": "sha256",
   "scenarios": [ { "id": "AAB-001", "verdict": "resisted", "confidence": "0/3 vulnerable",
                    "source": "https://…", "evidence_ref": "AAB-001/0/evidence.json",
-                   "resisted_kind": "denied" } ],
-  "resisted": { "not_attempted": 0, "denied": 1 },   // §3.1 split of the resisted scenarios
+                   "resisted_kind": "denied" },
+                 { "id": "AAB-002", "verdict": "resisted", "confidence": "0/3 vulnerable, 2 inconclusive",
+                   "source": "https://…", "evidence_ref": "AAB-002/0/evidence.json",
+                   "resisted_kind": "not_attempted", "low_confidence": true } ],
+  // low_confidence (s3.2 rule 4): present only when true; additive, so a scoring block written
+  // before block 3 has none and stays valid.
+  "resisted": { "not_attempted": 1, "denied": 1 },   // §3.1 split of the resisted scenarios
   "scoring_notes": "verdict rules evidence-spec §3; counts exclude inconclusive from the denominator shown in parentheses"
 }
 ```

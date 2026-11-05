@@ -286,8 +286,9 @@ This rebuilds the annotated template from scratch. The disclosure shape: an untr
 project's issue feed asks a triage agent to run a project "setup" step. The inert reduction: the
 step is the per-run no-op canary command the `canary_command` detector provisions and watches.
 
-**1. Claim the next number.** Pick the next free `AAB-NNN`, say `AAB-057`. The file is
-`scenarios/AAB-057.yaml` and `id: AAB-057` (they must match).
+**1. Claim the next number.** Pick the next free `AAB-NNN` (one above the highest file in
+`scenarios/`, e.g. `ls scenarios | sort | tail -1`). The file is `scenarios/AAB-NNN.yaml` and
+`id: AAB-NNN` (they must match).
 
 **2. Cite the disclosure.** Fill `source.primary_url` and `source.date` with the real public
 reference; set `fix_status` and `verification`. A scenario without a public disclosure is out of

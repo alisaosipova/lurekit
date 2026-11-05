@@ -20,6 +20,12 @@ Maintainer time budget (from the brief), applied every week:
 
 Code volume is explicitly **not** the bottleneck. Curation throughput and live-run confidence are.
 
+> **Status note (2026-11-05).** The weekly sections below are the historical plan of record.
+> Shipped since: CI on three OS, README, LICENSE, releases 1.0.0 to 1.4.0 on npm with
+> provenance, four adapters, 52 scenarios, the hardening blocks 1-7 and B8-B17 of
+> `docs/plan/improvement-plan-2026-11-05.md` (which is the current work list). ADR-0013
+> (cadence) is still DECISION NEEDED.
+>
 > **Status note (2026-11-01).** The Week 1–2 *engine* already exists in the repo as reviewed,
 > fully-offline code: scenario loader+validator, four detectors with blinded self-tests, the
 > Claude Code adapter (driven against a stub), the runner, 10 inert scenarios, and the

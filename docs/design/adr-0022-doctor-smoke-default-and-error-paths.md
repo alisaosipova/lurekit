@@ -143,10 +143,10 @@ validated only after a paid run; and a dozen refusals did not say what to type n
    `manifest.json` list the run directories under `--results` (newest manifest first, up to 10)
    and name the command for the newest. A missing demo asset is an exit-1 refusal with the
    reinstall command, not a stack trace. A finished `run` that measured something prints
-   `Next: lurekit report <runDir> --format markdown|json|sarif` and `lurekit publish <runDir>
+   `Next: lurekit report <runDir> --format text|markdown|json|sarif` (amended 2026-11-05, B18) and `lurekit publish <runDir>
    --redact-home`. Covered by the table-driven test in `test/newcomer-errors.test.ts`.
 3. **Pre-spend validation.** Before the plan text, the `Launch? [y/N]` prompt and any adapter
-   spawn, `run` checks `--format` (json|markdown|sarif), that `--output` is not a directory and
+   spawn, `run` checks `--format` (text|markdown|json|sarif; amended 2026-11-05, B18), that `--output` is not a directory and
    its parent directory exists and is writable, that `--results` can be created and written
    (unchanged), and that `--budget`, when given, is a finite number > 0. A failure is
    `refusing to run: ...` plus a `next:` line, exit 1, nothing launched. `--replay` runs are

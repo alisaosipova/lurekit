@@ -199,7 +199,24 @@ probing — those are the non-goal (static scanning).
 - No component sits between the agent and its tools in production, inspects artifacts
   without running the agent, or needs a server/account.
 
-## Full SDD status (updated 2026-11-01)
+22. **Publish gate and child environment (block 4).** IMPLEMENTED 2026-11-03. Spec:
+    ADR-0017 amendment, ADR-0008 allow-list amendment, evidence-spec s2.3, s5. Code:
+    `src/report/publish.ts`, `src/adapters/childEnv.ts`.
+23. **Newcomer path (block 5).** IMPLEMENTED 2026-11-03. Spec: ADR-0022 amendment. Code:
+    `src/cli.ts` (corpus resolution, pre-spend validation, Next lines).
+24. **Reports and generated numbers (block 6).** IMPLEMENTED 2026-11-03. Spec: ADR-0021 and
+    ADR-0023 amendments. Code: `src/report/*`, `scripts/numbers.mjs`.
+25. **Test and CI hygiene (block 7).** IMPLEMENTED 2026-11-03. Spec: ADR-0011 and ADR-0012
+    amendments. Code: `vitest.config.ts`, `.github/workflows/ci.yml`.
+26. **Improvement plan 2026-11-05 (B8-B18).** IMPLEMENTED block by block; status per finding in
+    `docs/plan/improvement-plan-2026-11-05.md`.
+
+## Full SDD status (updated 2026-11-05)
+Since 2026-11-01: ADR-0015..0025 are written as standalone files, the hardening blocks 1-7 and
+the improvement-plan blocks landed (steps 19-26), the suite counts its tests in README
+(`npm run docs:check`). ADR-0013 (weekly update cadence) is still DECISION NEEDED.
+
+### Status as of 2026-11-01
 `architecture.md` is now written (ADR index + ADR-0003..0014), assembled incrementally in
 small neutral sections so the safety classifier did not trip; `evidence-spec.md` holds the
 detector/evidence/verdict/adapter/reporting contract (§1-§6). Phase C `docs/plan/roadmap.md`
