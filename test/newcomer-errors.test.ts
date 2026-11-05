@@ -709,3 +709,45 @@ describe('ADR-0022 amendment B19: --only and --skip', () => {
     await expect(main(['run', corpus('AAB-003'), '--model', 'm', '--yes', '--skip', 'AAB-999'], deps({ interactive: true }))).rejects.toThrow(/no scenario AAB-999/);
   });
 });
+
+describe('ADR-0024 B19 amendment: run --resume', () => {
+  it('continues a partial run in the same dir, runs only the missing scenario, and finishes the manifest', async () => {
+    const dir = path.join(work, 'two');
+    mkdirSync(dir, { recursive: true });
+    for (const id of ['AAB-003', 'AAB-012']) copyFileSync(path.join(realScenarios, `${id}.yaml`), path.join(dir, `${id}.yaml`));
+    const fs = await import('node:fs');
+    const args = ['run', dir, '--model', 'm', '--mode', 'full', '--k', '1', '--yes', '--results', 'r'];
+    expect(await main(args, deps({ interactive: true }))).toBe(0);
+    const run = path.join(work, 'r', 'aab-test-newcomer');
+    const mf = path.join(run, 'manifest.json');
+    // Simulate a run killed after the first scenario: keep only that result, mark it partial.
+    const m = JSON.parse(fs.readFileSync(mf, 'utf8'));
+    m.results = m.results.slice(0, 1);
+    m.partial = { completed_scenarios: 1, planned_scenarios: 2 };
+    fs.writeFileSync(mf, JSON.stringify(m));
+    const ran: string[] = [];
+    const stub = new StubAdapter({});
+    const orig = stub.run.bind(stub);
+    stub.run = async (p, t, s, o) => {
+      ran.push(String(o?.runDir));
+      return orig(p, t, s, o);
+    };
+    expect(await main([...args, '--resume', run], deps({ adapter: () => stub, interactive: true }))).toBe(0);
+    expect(ran).toHaveLength(1);
+    expect(err.join('')).toMatch(/resuming aab-test-newcomer: 1 of 2 scenarios already done/);
+    const done = JSON.parse(fs.readFileSync(mf, 'utf8'));
+    expect(done.partial).toBeUndefined();
+    expect(done.results.map((r: { scenario_id: string }) => r.scenario_id).sort()).toEqual(['AAB-003', 'AAB-012']);
+  });
+  it('refuses a complete run and different conditions', async () => {
+    expect(await main(['run', corpus('AAB-003'), '--model', 'm', '--mode', 'full', '--k', '1', '--yes', '--results', 'r'], deps({ interactive: true }))).toBe(0);
+    const run = path.join(work, 'r', 'aab-test-newcomer');
+    await expect(main(['run', corpus('AAB-003'), '--model', 'm', '--mode', 'full', '--k', '1', '--yes', '--resume', run], deps({ interactive: true }))).rejects.toThrow(/the run is complete/);
+    const fs = await import('node:fs');
+    const mf = path.join(run, 'manifest.json');
+    const m = JSON.parse(fs.readFileSync(mf, 'utf8'));
+    m.partial = { completed_scenarios: 0, planned_scenarios: 1 };
+    fs.writeFileSync(mf, JSON.stringify(m));
+    await expect(main(['run', corpus('AAB-003'), '--model', 'other', '--mode', 'full', '--k', '1', '--yes', '--resume', run], deps({ interactive: true }))).rejects.toThrow(/used model m; pass the same flags/);
+  });
+});

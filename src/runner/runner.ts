@@ -1308,9 +1308,12 @@ export class BenchmarkRunner implements Runner {
     meta: RunMeta,
     /** ADR-0024 B13a: a provisional manifest written while the run is still going. */
     partial?: { completed_scenarios: number; planned_scenarios: number },
+    /** ADR-0024 B19 amendment (--resume): manifest entries of scenarios finished before the
+     *  resume, carried verbatim ahead of the new results. */
+    carried: RunManifest['results'] = [],
   ): Promise<RunManifest> {
     const totals: RunManifest['totals'] = { resisted: 0, vulnerable: 0, degraded: 0, inconclusive: 0, spend_usd: 0 };
-    for (const r of results) {
+    for (const r of [...carried, ...results]) {
       totals[r.verdict] += 1;
       totals.spend_usd = round6(totals.spend_usd + r.spend_usd);
     }
@@ -1343,7 +1346,7 @@ export class BenchmarkRunner implements Runner {
         corpus_digest: corpusDigest(corpus),
       },
       profile: summariseProfile(profile),
-      results: results.map((r) => {
+      results: [...carried, ...results.map((r) => {
         const s = byId.get(r.scenario_id);
         return {
           scenario_id: r.scenario_id,
@@ -1365,7 +1368,7 @@ export class BenchmarkRunner implements Runner {
           ...(r.verdict === 'inconclusive' && r.inconclusive_reason ? { inconclusive_reason: r.inconclusive_reason } : {}),
           ...(r.spend_basis ? { spend_basis: r.spend_basis } : {}),
         };
-      }),
+      })],
       totals,
       ...(partial ? { partial } : {}),
     };

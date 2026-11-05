@@ -44,6 +44,7 @@ import { fixturesForScenario } from './fixtures/index.js';
 import { BenchmarkRunner, Budget, DEFAULT_RUN_TIMEOUT_S, K_MAX, K_MIN, MAX_RUN_TIMEOUT_S, estimatedRunUsd, validK } from './runner/runner.js';
 import type { RunConfig, RunManifest, RunnerIds, RunMeta, EvidenceRecord } from './runner/types.js';
 import { diffRuns, renderDiffText } from './report/diff.js';
+import { corpusDigest } from './scenario/digest.js';
 import { report, REPOSITORY_URL, colorEnabled, terminalWidth, type ReportFormat, type EvidenceLookup, type SurfaceLookup, type ReMeasureContext } from './report/index.js';
 import { planPublish, readRunDir, writeBundle, formatPlanFailure, selectEvidence, defaultBundleDir } from './report/publish.js';
 import {
@@ -209,7 +210,7 @@ interface Flags {
 const STRING_FLAGS = new Set([
   'model', 'agent', 'agent-version', 'mode', 'vulnerable-if', 'isolation',
   'results', 'workdir', 'format', 'output', 'permission-mode', 'settings', 'mcp', 'hooks',
-  'replay', 'out', 'setting-sources', 'scenarios', 'profile', 'fail-on',
+  'replay', 'out', 'setting-sources', 'scenarios', 'profile', 'fail-on', 'resume',
 ]);
 const NUMBER_FLAGS = new Set(['k', 'budget', 'run-timeout']);
 const NUMBER_FLAG_EXAMPLE: Record<string, string> = { k: '3', budget: '5', 'run-timeout': String(DEFAULT_RUN_TIMEOUT_S) };
@@ -981,7 +982,34 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
     ? deps.adapterFor(profile.agent)
     : new ReplayAdapter({ recordingDir: path.resolve(deps.cwd(), replayDir) });
 
-  const benchmarkRunId = deps.newRunId();
+  // ADR-0024 B19 amendment (UX-16, FEATURE-12): --resume <runDir> continues a partial run under
+  // the same conditions; the finished scenarios are carried, the rest run into the same dir.
+  let carried: RunManifest['results'] = [];
+  let resumedId: string | undefined;
+  let resumeDigest: string | undefined;
+  const resumeArg = flags.str.get('resume');
+  if (resumeArg !== undefined) {
+    const resumeDir = path.resolve(deps.cwd(), resumeArg);
+    let prior: RunManifest;
+    try {
+      prior = JSON.parse(readFileSync(path.join(resumeDir, 'manifest.json'), 'utf8')) as RunManifest;
+    } catch (e) {
+      throw new Error(`--resume ${resumeArg}: no readable manifest.json (${(e as NodeJS.ErrnoException).code ?? (e as Error).message})\nnext: pass the directory of the stopped run`);
+    }
+    if (!prior.partial) throw new Error(`--resume ${resumeArg}: the run is complete; nothing to resume\nnext: lurekit report ${resumeArg}`);
+    const mismatch: string[] = [];
+    if (prior.profile.agent !== profile.agent) mismatch.push(`agent ${prior.profile.agent}`);
+    if (prior.profile.model !== profile.model) mismatch.push(`model ${prior.profile.model}`);
+    if (prior.config.k !== cfg.k) mismatch.push(`k ${prior.config.k}`);
+    if (prior.mode !== cfg.mode) mismatch.push(`mode ${prior.mode}`);
+    if (prior.config.vulnerable_if !== cfg.vulnerable_if) mismatch.push(`vulnerable_if ${prior.config.vulnerable_if}`);
+    if (mismatch.length) throw new Error(`--resume ${resumeArg}: the stopped run used ${mismatch.join(', ')}; pass the same flags\nnext: lurekit report ${resumeArg}   (or start a new run)`);
+    carried = prior.results;
+    resumedId = prior.benchmark_run_id;
+    cfg.resultsRoot = path.dirname(resumeDir);
+    resumeDigest = prior.corpus.corpus_digest;
+  }
+  const benchmarkRunId = resumedId ?? deps.newRunId();
   const ids = makeIds(benchmarkRunId);
   const runner = new BenchmarkRunner({ ids, fixtures: fixturesForScenario });
   // ADR-0024 D1: the operator abort. SIGINT/SIGTERM abort every repetition still to run (the
@@ -1043,7 +1071,16 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
     // per-repetition basis of this agent when one exists, else the per-agent estimate.
     const budget = new Budget(cfg.budget_usd, planCostBasis(profile.agent)?.perRepUsd ?? estimatedRunUsd(profile.agent));
     const results: ScenarioResult[] = [];
+    if (resumeDigest !== undefined) {
+      if (resumeDigest !== corpusDigest(plan.kept)) {
+        deps.stderr(`--resume ${resumeArg}: the stopped run planned a different corpus or filter; pass the same scenario directory and --only/--skip\n`);
+        return 1;
+      }
+      deps.stderr(`resuming ${benchmarkRunId}: ${carried.length} of ${plan.kept.length} scenarios already done\n`);
+    }
+    const done0 = new Set(carried.map((r) => r.scenario_id));
     for (const [i, scenario] of plan.kept.entries()) {
+      if (done0.has(scenario.id)) continue; // --resume: finished before the stop
       deps.stderr(`[${i + 1}/${plan.kept.length}] ${scenario.id}  ${scenario.name}\n`);
       const t0 = Date.now();
       const done = await runner.runScenario(scenario, adapter, profile, cfg, { budget, signal: meta.signal });
@@ -1053,11 +1090,11 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
       deps.stderr(`[${i + 1}/${plan.kept.length}] ${scenario.id}  ${done.verdict} (${done.confidence})  ${Math.round((Date.now() - t0) / 100) / 10}s, spend ${spent} USD so far\n`);
       // ADR-0024 B13a: a provisional manifest after every scenario but the last, so a killed
       // run leaves a readable record of what finished.
-      if (i < plan.kept.length - 1) {
-        await runner.writeManifest(profile, cfg, plan.kept, results, meta, { completed_scenarios: i + 1, planned_scenarios: plan.kept.length });
+      if (carried.length + results.length < plan.kept.length) {
+        await runner.writeManifest(profile, cfg, plan.kept, results, meta, { completed_scenarios: carried.length + results.length, planned_scenarios: plan.kept.length }, carried);
       }
     }
-    const manifest = await runner.writeManifest(profile, cfg, plan.kept, results, meta);
+    const manifest = await runner.writeManifest(profile, cfg, plan.kept, results, meta, undefined, carried);
 
     const runDir = path.join(cfg.resultsRoot, benchmarkRunId);
     // ADR-0021 B18 amendment (UX-07): like demo and report, the terminal view on stdout and
@@ -1467,6 +1504,7 @@ Commands:
                    --profile <file|name> (a setup profile, e.g. claude-code-hardened; flags override it)
                    --fail-on <verdicts> (run and report: exit 3 when a scenario is vulnerable,degraded,inconclusive)
                    --only <id> / --skip <id> (repeatable; run or plan a subset, recorded in the manifest)
+                   --resume <runDir> (continue a stopped run with the same flags; finished scenarios are kept)
                    --settings/--hooks <file.json>  claude-code only: forwarded in the single
                                     --settings file, observe hooks appended last (ADR-0020)
                    --setting-sources <csv>  claude-code only: load only these setting sources
@@ -1525,7 +1563,7 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
   list: ['format'],
   plan: [...PROFILE_FLAGS, ...CONFIG_FLAGS, 'format'],
   selftest: [],
-  run: [...PROFILE_FLAGS, ...CONFIG_FLAGS, 'output', 'replay', 'format', 'fail-on', 'yes'],
+  run: [...PROFILE_FLAGS, ...CONFIG_FLAGS, 'output', 'replay', 'format', 'fail-on', 'yes', 'resume'],
   report: ['output', 'format', 'fail-on', 'results'],
   publish: ['out', 'allow-host', 'withhold', 'exclude', 'redact-home', 'allow-no-evidence', 'scenarios', 'results'],
   diff: ['format', 'fail-on-regression'],

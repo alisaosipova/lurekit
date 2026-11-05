@@ -27,6 +27,9 @@ No release is cut without changes.
 
 ### Added (block B19)
 
+- `run --resume <runDir>` continues a stopped run with the same flags: the finished scenarios
+  are kept, only the missing ones run, in the same directory; different conditions are refused
+  (UX-16, FEATURE-12, ADR-0024 amendment).
 - `run` and `plan --only <id>` / `--skip <id>` (repeatable): measure a subset, for example to
   re-measure the one surface a report flagged. The plan, cost estimate, budget and manifest
   describe exactly the subset; the manifest records `config.scenario_filter` and `report` notes a

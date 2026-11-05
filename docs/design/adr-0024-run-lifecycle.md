@@ -471,3 +471,13 @@ The backoff wait between launch retries (`retryLaunch`) ends as soon as the per-
 aborts, instead of finishing its 0.5-4 s sleep first. The synchronous version probe stays inside
 the deadline (moving it out needs an async probe; recorded as a limit).
 
+### Amendment (2026-11-05, block B19: UX-16, FEATURE-12): `run --resume <runDir>`
+
+A run stopped before its last scenario (a provisional manifest with `partial`, B13a) continues
+with `lurekit run <same flags> --resume <runDir>`: lurekit checks that agent, model, k, mode,
+vulnerable_if and the planned corpus (digest, so the same directory and `--only/--skip`) match
+the stopped run, refuses otherwise, keeps the finished scenarios' manifest entries verbatim,
+runs only the missing ones into the same run directory under the same benchmark run id, and
+writes the final manifest without `partial`. A complete run is not resumable. Execution stays
+sequential (ENGINE-09 note).
+
