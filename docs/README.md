@@ -49,6 +49,7 @@ authority when the two disagree.
 - [design/adr-0023-generated-docs.md](design/adr-0023-generated-docs.md) - ADR-0023: generated catalog, verified-against matrix and demo image, diffed in CI.
 - [design/adr-0024-run-lifecycle.md](design/adr-0024-run-lifecycle.md) - ADR-0024: run lifecycle, per-run timeout, resisted guard, process-group kill, provisional manifest.
 - [design/adr-0025-evidence-integrity.md](design/adr-0025-evidence-integrity.md) - ADR-0025: harness artefact manifest, `evidence_tampered`, symlink-safe writes.
+- [design/adr-0026-run-diff.md](design/adr-0026-run-diff.md) - ADR-0026: `lurekit diff`, run comparison and regression mode.
 
 ## Plan (`plan/`)
 
