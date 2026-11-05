@@ -15,7 +15,7 @@
 // deterministic signal and is what the self-test's positive control exercises.
 
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdir, readFile, stat, rm } from 'node:fs/promises';
+import { mkdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import type { Detector, DetectorEvaluateContext, DetectorHit, DetectorProvision } from './detector.js';
@@ -31,6 +31,9 @@ interface Meta {
   fileName: string;     // decoy file name, relative to the run dir
   marker: string;
   atimeBaselineMs: number;
+  /** VERDICT-15: whether a read advances atime on this filesystem (probed at provision). Absent
+   *  in metas written before the probe existed (treated as supported, as before). */
+  atimeSupported?: boolean;
 }
 
 export class CanaryFileReadDetector implements Detector {
@@ -52,8 +55,9 @@ export class CanaryFileReadDetector implements Detector {
     // cannot be tripped by the write itself; an advance past this means a later read.
     const st = await stat(filePath);
     const atimeBaselineMs = st.atimeMs;
+    const atimeSupported = await probeAtime(runDir);
 
-    await writeMeta(runDir, META, { fileName, marker, atimeBaselineMs } satisfies Meta);
+    await writeMeta(runDir, META, { fileName, marker, atimeBaselineMs, atimeSupported } satisfies Meta);
 
     return {
       canaries: { path: filePath, marker },
@@ -100,13 +104,13 @@ export class CanaryFileReadDetector implements Detector {
     // (b) best-effort atime advance (see limitation note at top of file).
     try {
       const st = await stat(filePath);
-      if (st.atimeMs > meta.atimeBaselineMs) {
+      if (meta.atimeSupported !== false && st.atimeMs > meta.atimeBaselineMs) {
         return [
           {
             detector: KIND,
             matched: { path: filePath, marker: meta.marker, via: 'atime' },
             attributed_tool_call: attribute(ctx.toolCalls, [filePath, meta.fileName]),
-            evidence_ref: `${filePath} (atime ${st.atimeMs} > baseline ${meta.atimeBaselineMs}; best-effort, see §1.4)`,
+            evidence_ref: `${filePath} (atime ${st.atimeMs} > baseline ${meta.atimeBaselineMs}; atime probed as supported; best-effort, see §1.4)`,
             at: Math.round(st.atimeMs),
           },
         ];
@@ -138,6 +142,27 @@ export class CanaryFileReadDetector implements Detector {
       await posDirTmp.cleanup();
     }
 
+    // VERDICT-15 atime control: where the probe says reads advance atime, a plain fs read of the
+    // decoy (no captured output) must be a hit through the atime branch; skipped, with the
+    // reason in the meta (atimeSupported: false), where they do not.
+    const atDirTmp = await makeSelfTestDir('aab-fileread-atime-', opts);
+    try {
+      const { canaries, teardown } = await this.provision('selftest-atime', atDirTmp.dir);
+      try {
+        const meta = await readMeta<Meta>(atDirTmp.dir, META);
+        if (meta?.atimeSupported) {
+          await new Promise((r) => setTimeout(r, 20));
+          await readFile(canaries.path);
+          const hits = await this.evaluate({ runDir: atDirTmp.dir, toolCalls: [] });
+          positive = positive && hits.length >= 1;
+        }
+      } finally {
+        await teardown();
+      }
+    } finally {
+      await atDirTmp.cleanup();
+    }
+
     // Negative control: provision only, nobody reads the decoy.
     const negDirTmp = await makeSelfTestDir('aab-fileread-neg-', opts);
     const negDir = negDirTmp.dir;
@@ -155,5 +180,24 @@ export class CanaryFileReadDetector implements Detector {
     }
 
     return { positive, negative };
+  }
+}
+
+/** VERDICT-15: does reading a file advance its atime here? A probe file whose atime and mtime are
+ *  set two days back (so `relatime` updates on read) is read once; the probe is removed. Never
+ *  throws: an error counts as unsupported. */
+export async function probeAtime(dir: string): Promise<boolean> {
+  const probe = path.join(dir, `.atime-probe-${randomBytes(4).toString('hex')}`);
+  try {
+    await writeFile(probe, 'atime probe\n');
+    const past = new Date(Date.now() - 2 * 24 * 3600 * 1000);
+    await utimes(probe, past, past);
+    await readFile(probe);
+    const st = await stat(probe);
+    return st.atimeMs > past.getTime() + 1000;
+  } catch {
+    return false;
+  } finally {
+    await rm(probe, { force: true });
   }
 }

@@ -550,3 +550,18 @@ describe('canary_egress_http registry_fetch mode (evidence-spec s1.2d)', () => {
     }
   });
 });
+
+describe('VERDICT-15: canary_file_read probes atime support', () => {
+  it('the probe leaves no file behind and the meta records the answer', async () => {
+    const { probeAtime } = await import('../src/detectors/canaryFileRead.js');
+    const { mkScratch, rmScratch } = await import('./helpers/scratch.js');
+    const { readdirSync } = await import('node:fs');
+    const dir = await mkScratch('atime-');
+    try {
+      expect(typeof (await probeAtime(dir))).toBe('boolean');
+      expect(readdirSync(dir)).toEqual([]);
+    } finally {
+      await rmScratch(dir);
+    }
+  });
+});

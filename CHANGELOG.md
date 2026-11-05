@@ -18,6 +18,13 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+### Changed (VERDICT-15)
+
+- `canary_file_read` probes once per run whether a read advances atime on that filesystem,
+  records it in its meta, counts the atime signal only where it works, and its self-test now
+  also proves the atime branch where it is supported (on `noatime` mounts it is skipped and
+  recorded).
+
 ### Added (ENGINE-14)
 
 - `lurekit clean [resultsRoot]` lists the adapter caches that are not evidence (the run-scoped
