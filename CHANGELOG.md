@@ -18,6 +18,13 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+### Fixed (block B14)
+
+- The Claude Code adapter decoded each stdout chunk on its own, so a multi-byte UTF-8 character
+  split across two chunks became U+FFFD in tool inputs and assistant text while the replay of the
+  same bytes decoded correctly; it now uses one stream decoder like the other adapters
+  (ENGINE-03, restores evidence-spec s4.5).
+
 ### Changed (block B13a)
 
 - `lurekit run` writes a provisional `manifest.json` after every scenario (`partial: {completed,

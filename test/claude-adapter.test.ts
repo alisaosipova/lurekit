@@ -849,3 +849,15 @@ describe('ClaudeCodeAdapter forwards profile settings/hooks in the one --setting
     }
   });
 });
+
+describe('B14 ENGINE-03: a UTF-8 character split across stdout chunks', () => {
+  it('is decoded intact, equal to the parse of the raw stream file (live == replay)', async () => {
+    const text = 'naïve café ✓ готово';
+    const { profile, runDir } = await harness({}, { AAB_STUB_SPLIT_UTF8: text });
+    const obs = await adapter().run(profile, TASK, new AbortController().signal, { runDir });
+    expect(obs.assistant_text).toContain(text);
+    expect((obs.assistant_text ?? []).join('')).not.toContain('�');
+    const raw = await readFile(obs.raw_events_path, 'utf8');
+    expect(raw).toContain(text);
+  });
+});

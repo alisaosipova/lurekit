@@ -138,6 +138,16 @@ if (process.env.AAB_STUB_HANG === '1') {
     });
   }
   emit({ type: 'assistant', message: { role: 'assistant', content } });
+  // AAB_STUB_SPLIT_UTF8=<text>: one assistant text line written in two pipe writes split inside a
+  // multi-byte UTF-8 character, 100 ms apart, so the reader gets two chunks (block B14 ENGINE-03).
+  if (process.env.AAB_STUB_SPLIT_UTF8) {
+    const bytes = Buffer.from(JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: process.env.AAB_STUB_SPLIT_UTF8 }] } }) + '\n', 'utf8');
+    let cut = bytes.findIndex((b) => b >= 0xc0); // first lead byte of a multi-byte character
+    cut = cut < 0 ? Math.floor(bytes.length / 2) : cut + 1; // inside that character
+    process.stdout.write(bytes.subarray(0, cut));
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+    process.stdout.write(bytes.subarray(cut));
+  }
 
   // 4. Fire every PreToolUse hook with a synthetic payload (real plumbing). Like Claude Code,
   //    hooks from the project's .claude/settings.json and from a `--settings <file>` are

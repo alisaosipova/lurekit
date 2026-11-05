@@ -23,6 +23,7 @@ import { accessSync, constants as fsConstants, existsSync, realpathSync, statSyn
 import { mkdir } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
 import path from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 
 import type {
   Adapter,
@@ -290,9 +291,12 @@ export class ClaudeCodeAdapter implements Adapter {
     if (signal.aborted) onAbort();
     else signal.addEventListener('abort', onAbort, { once: true });
 
+    // B14 ENGINE-03: one decoder for the whole stream, so a multi-byte character split across
+    // chunks is not turned into U+FFFD (live and replay must parse the same bytes, s4.5).
+    const decoder = new StringDecoder('utf8');
     child.stdout!.on('data', (buf: Buffer) => {
       stdoutChunks.push(buf);
-      lineBuffer += buf.toString('utf8');
+      lineBuffer += decoder.write(buf);
       let idx: number;
       while ((idx = lineBuffer.indexOf('\n')) >= 0) {
         const line = lineBuffer.slice(0, idx);
@@ -311,6 +315,7 @@ export class ClaudeCodeAdapter implements Adapter {
     reapGroup(child); // B10 VERDICT-12: nothing the agent started outlives the repetition
     if (exit.error) warnings.push(`agent process error (${bin}): ${exit.error.message}`);
     if (exit.drainTimedOut) warnings.push('agent stdio did not close after exit (a child process of the agent may still hold it); output read so far is kept');
+    lineBuffer += decoder.end();
     if (lineBuffer.length > 0) handleLine(lineBuffer);
     const exitCode: number = exit.exitCode;
 
