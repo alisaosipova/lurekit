@@ -652,3 +652,16 @@ describe('ADR-0022 amendment B16b: printed commands omit the shipped corpus', ()
     expect(text).toMatch(/(Next|Then): lurekit run --agent claude-code --model/);
   });
 });
+
+describe('ADR-0022 amendment B16c: no command, version aliases', () => {
+  it('no command exits 2 with usage on stderr; -V and version print the version', async () => {
+    expect(await main([], deps())).toBe(2);
+    expect(err.join('')).toMatch(/lurekit/);
+    expect(out.join('')).toBe('');
+    for (const a of ['-V', 'version', '--version']) {
+      expect(await main([a], deps())).toBe(0);
+      expect(out.join('')).toMatch(/^\d+\.\d+\.\d+\n$/);
+    }
+    expect(await main(['--help'], deps())).toBe(0);
+  });
+});

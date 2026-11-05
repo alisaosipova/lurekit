@@ -1419,11 +1419,16 @@ self-test scratch) lives under --results; nothing is written to the system temp 
 `;
 
 export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promise<number> {
-  if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h' || argv[0] === 'help') {
+  if (argv.length === 0) {
+    // ADR-0022 B16c (UX-05): no command is a usage error (exit 2), usage on stderr.
+    deps.stderr(USAGE);
+    return 2;
+  }
+  if (argv[0] === '--help' || argv[0] === '-h' || argv[0] === 'help') {
     deps.stdout(USAGE);
     return 0;
   }
-  if (argv[0] === '--version' || argv[0] === '-v') {
+  if (argv[0] === '--version' || argv[0] === '-v' || argv[0] === '-V' || argv[0] === 'version') {
     deps.stdout(`${toolVersion()}\n`);
     return 0;
   }

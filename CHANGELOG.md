@@ -28,6 +28,8 @@ No release is cut without changes.
 - Commands printed for you to copy (doctor's next step, the demo banner, re-measure commands)
   no longer embed a path into `node_modules` such as `../../../scenarios` when the corpus is the
   one shipped with lurekit; lurekit finds it again without the argument (UX-02).
+- `lurekit` with no command exits 2 with the usage on stderr (it exited 0, so a script missing
+  its command passed); `-V` and `version` print the version too (UX-05).
 - doctor without `--model` shows the model row as not checked instead of ok, and no longer
   points at a file that does not ship with the package (UX-12).
 

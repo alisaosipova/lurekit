@@ -229,3 +229,9 @@ directory: the same resolution order finds it again. Before, the commands embedd
 cwd-relative path into `node_modules` (`../../../scenarios`) that broke as soon as the user
 changed directory. Informational lines (`52 scenarios valid in <path>`) still name the path.
 
+## Amendment (2026-11-05, block B16c, UX-05)
+
+`lurekit` with no command prints the usage on stderr and exits 2 (a usage error), so a script
+that forgot the command fails instead of passing; `--help`, `-h` and `help` still print it on
+stdout with exit 0. `-V` and `version` are accepted besides `--version` and `-v`.
+
