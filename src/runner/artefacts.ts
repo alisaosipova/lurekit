@@ -140,6 +140,23 @@ export class ArtefactManifest implements ArtefactRegistry {
     this.runDir = path.resolve(runDir);
   }
 
+  /** The declared `output` artefacts that exist as regular files right now (absolute paths):
+   *  the streams an adapter recorded before it failed, which the runner reads as captured
+   *  output when no observation came back (ADR-0025 D3). */
+  async outputFiles(): Promise<string[]> {
+    const out: string[] = [];
+    for (const d of this.declared.values()) {
+      if (d.kind !== 'output') continue;
+      try {
+        const st = await lstat(d.abs);
+        if (st.isFile()) out.push(d.abs);
+      } catch {
+        /* not written: nothing to read */
+      }
+    }
+    return out.sort();
+  }
+
   /** Declare one artefact. Throws (a provisioning error) on a path outside the run dir, a kind
    *  conflict, a missing immutable, or a sink that already exists as something other than a
    *  regular file. Re-declaring the same path with the same kind is a no-op. */
@@ -347,6 +364,11 @@ export class ArtefactManifest implements ArtefactRegistry {
       if (!d.noread) {
         const hash = sha256(await readFile(d.abs));
         if (hash !== d.sha256) return 'modified';
+      } else if (st.mtimeMs !== d.mtime_ms) {
+        // A noread artefact is never hashed again (its atime is the signal), so a same-size
+        // rewrite shows only in mtime; this rule holds on every platform (ctime below is
+        // POSIX-reliable only).
+        return 'modified';
       }
     }
     if (st.ctimeMs !== d.ctime_ms) return 'metadata';

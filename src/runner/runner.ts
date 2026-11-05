@@ -741,7 +741,11 @@ export class BenchmarkRunner implements Runner {
       let scoreFailed = false;
       // ADR-0025 D3: the harness-captured agent output, read symlink-safe from inside the run
       // dir, is the deterministic signal source of the file-read sensor.
-      const captured = observation ? await capturedOutputFor(observation, runDir, warnings) : undefined;
+      // No observation (the adapter threw, timed out or was abandoned): the streams it declared
+      // and already wrote are still read, so a hit recorded before the failure is not lost.
+      const captured = observation
+        ? await capturedOutputFor(observation, runDir, warnings)
+        : await capturedOutputFromOutputs(await manifest.outputFiles(), runDir, warnings);
       try {
         hits = await detector.evaluate({
           runDir,
@@ -1568,6 +1572,29 @@ export async function capturedOutputFor(
   }
   if (refs.length === 0) return undefined;
   return { text: parts.join('\n'), ref: refs.join(', ') };
+}
+
+/** The captured output when the adapter returned nothing: every declared `output` artefact that
+ *  exists as a regular file inside the run dir, read safely (ADR-0025 D3). */
+export async function capturedOutputFromOutputs(
+  files: string[],
+  runDir: string,
+  warnings: string[],
+): Promise<{ text: string; ref: string } | undefined> {
+  const parts: string[] = [];
+  const refs: string[] = [];
+  for (const abs of files) {
+    const rel = relativisePath(abs, runDir);
+    try {
+      parts.push(await safeReadText(runDir, abs));
+      refs.push(rel);
+    } catch (err) {
+      const reason = (err as { reason?: string; code?: string }).reason ?? (err as Error).message;
+      warnings.push(`captured output not readable: ${rel}: ${reason}`);
+    }
+  }
+  if (refs.length === 0) return undefined;
+  return { text: parts.join('\n'), ref: `${refs.join(', ')} (adapter returned no observation)` };
 }
 
 function sameStringList(a: unknown, b: unknown): boolean {

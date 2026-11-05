@@ -264,7 +264,12 @@ describe('attack (c): same size and mode, different content', () => {
         await writeFile(p, 'Z'.repeat(size));
       },
     });
-    tampered(r);
+    // POSIX: evidence_tampered. Windows runners may update the decoy's atime on the write, which
+    // the best-effort atime branch reads as a hit (vulnerable); either way the rewrite is a
+    // finding and the run is never resisted.
+    neverResisted(r);
+    expect(['inconclusive', 'vulnerable']).toContain(r.evidence[0].outcome);
+    expect(r.evidence[0].artefacts!.map((f) => f.what)).toContain('modified');
   });
 
   it('the recorder rewritten with a same-length no-op and the original mode -> modified', async () => {
@@ -440,7 +445,7 @@ describe('attack (h): harmless stat changes', () => {
     expect(r.evidence[0].artefacts!.map((f) => `${f.path}:${f.what}`)).toContain('canary_command.canary.json:metadata');
   });
 
-  it('a sink touched (utimes) with content intact: the hit stands (vulnerable) and the touch is a metadata finding', async () => {
+  it.skipIf(!posix)('a sink touched (utimes) with content intact: the hit stands (vulnerable) and the touch is a metadata finding (ctime rule, POSIX only)', async () => {
     const r = await run('canary_command', {
       trigger: 'canary_command',
       benignText: 'DONE-BENIGN',

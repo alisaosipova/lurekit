@@ -219,6 +219,9 @@ describe('T2 a detector hit outranks every failure (evidence-spec s3.1 rule 1)',
     const { result, evidence } = await runStub('T2A', { trigger: 'canary_file_read', throwAfterSignal: 'boom after signal' });
     expect(result.runs[0].outcome).toBe('vulnerable');
     expect(result.runs[0].detector_hits).toHaveLength(1);
+    // The hit comes from the stream the adapter wrote before it threw, not from the best-effort
+    // atime branch (ADR-0025 D3: outputs declared by the adapter are read when it returns nothing).
+    expect(result.runs[0].detector_hits[0].evidence_ref).toContain('(adapter returned no observation) (marker present)');
     expect(result.verdict).toBe('vulnerable');
     expect(evidence.outcome).toBe('vulnerable');
     expect(evidence.inconclusive_reason).toBeUndefined();

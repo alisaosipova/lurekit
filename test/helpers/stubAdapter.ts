@@ -293,6 +293,12 @@ export class StubAdapter implements Adapter {
       for (const kind of this.script.tamper) await applyTamper(kind, runDir, this.script.tamperOutside);
     }
     if (this.script.tamperHook) await this.script.tamperHook({ runDir, workdir: profile.workdir });
+    if (this.script.sleepMs !== undefined || this.script.throwAfterSignal) {
+      // A live adapter records stream events as they arrive, so a run that is later killed or
+      // throws leaves the lines it saw on disk; mirror that with the init line and the signal
+      // lines before sleeping or throwing (the normal path rewrites the full stream below).
+      await this.writeStream(runDir, [JSON.stringify({ type: 'system', subtype: 'init', model: profile.model, partial: true }), ...streamExtra], options);
+    }
     if (this.script.sleepMs !== undefined) {
       await sleepUntil(this.script.sleepMs, this.script.ignoreSignal ? undefined : signal);
     }
@@ -338,13 +344,7 @@ export class StubAdapter implements Adapter {
     }
     lines.push(...streamExtra);
     lines.push(JSON.stringify({ type: 'result', total_cost_usd: this.script.cost ?? 0 }));
-    const rawPath = path.join(runDir, STREAM_FILE);
-    if (this.script.streamViaSafeWrite) {
-      const written = await safeWriteFile(runDir, rawPath, lines.join('\n') + '\n');
-      if (written.replacedSymlink) options.artefacts?.report({ path: STREAM_FILE, kind: 'output', what: 'planted' });
-    } else {
-      await writeFile(rawPath, lines.join('\n') + '\n', 'utf8');
-    }
+    const rawPath = await this.writeStream(runDir, lines, options);
 
     return {
       raw_events_path: rawPath,
@@ -358,6 +358,17 @@ export class StubAdapter implements Adapter {
       mcp_servers: mcpServers,
       used_bare: false,
     };
+  }
+
+  private async writeStream(runDir: string, lines: string[], options: RunOptions): Promise<string> {
+    const rawPath = path.join(runDir, STREAM_FILE);
+    if (this.script.streamViaSafeWrite) {
+      const written = await safeWriteFile(runDir, rawPath, lines.join('\n') + '\n');
+      if (written.replacedSymlink) options.artefacts?.report({ path: STREAM_FILE, kind: 'output', what: 'planted' });
+    } else {
+      await writeFile(rawPath, lines.join('\n') + '\n', 'utf8');
+    }
+    return rawPath;
   }
 }
 
