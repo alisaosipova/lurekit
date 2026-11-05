@@ -270,13 +270,19 @@ jobs:
     # evidence-spec s2.1: nothing under os.tmpdir(). Scratch goes to repo-local ignored dirs (.aab-runs/,
     # .aab-test-work/); the one allowed test is test/per-run-workdir.test.ts, which redirects TMPDIR to an empty
     # sentinel and proves the runner writes nothing there.
-    name: Repository hygiene (no os.tmpdir scratch)
+    # ADR-0012 amendment (2026-11-05, block B15, c): released CHANGELOG sections are frozen; scripts/changelog-frozen.mjs
+    # compares every `## [X.Y.Z]` section with the text at tag vX.Y.Z and needs the tags, hence fetch-depth: 0.
+    name: Repository hygiene (no os.tmpdir scratch, frozen CHANGELOG sections)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
       - name: No os.tmpdir() / tmpdir() call in src/ or test/ (except the TMPDIR sentinel test)
         shell: bash
         run: |
@@ -291,3 +297,6 @@ jobs:
           hits="$(grep -rn 'agent-output\.log' src || true)"
           if [ -n "$hits" ]; then echo "::error::agent-output.log referenced in src/ (retired by ADR-0025 D3):"; echo "$hits"; exit 1; fi
           echo "ok: no agent-output.log in src/"
+      # The script has no dependencies (no npm ci here); it fails closed when no release tag is reachable.
+      - name: Released CHANGELOG sections equal the text at their tags (ADR-0012, scripts/changelog-frozen.mjs)
+        run: node scripts/changelog-frozen.mjs

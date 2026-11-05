@@ -23,7 +23,7 @@ import {
 import { ClaudeCodeAdapter } from '../src/adapters/claudeCode.js';
 import type { SetupProfile } from '../src/adapters/adapter.js';
 import { mkScratch, rmScratch } from './helpers/scratch.js';
-import { pollUntil, READY_DEADLINE_MS } from './helpers/deadline.js';
+import { LOAD_SLACK_MS, TIMER_EARLY_MS, pollUntil, READY_DEADLINE_MS } from './helpers/deadline.js';
 
 const POSIX_ONLY = 'process groups and kill(-pid) are POSIX; Windows uses taskkill /T, covered by T4w';
 const WIN_ONLY = 'taskkill /T is the Windows tree kill; POSIX is covered by T4';
@@ -68,7 +68,8 @@ async function readPids(readyFile: string): Promise<{ agent: number; grandchild:
   return { agent: a, grandchild: g };
 }
 
-describe('T4 process-group kill (POSIX)', () => {
+// ADR-0012 amendment (2026-11-05, block B15, rule a.4): real timers; one retry tolerates the host, never the code.
+describe('T4 process-group kill (POSIX)', { retry: 1 }, () => {
   it.skipIf(isWin)(`killTree kills the agent AND its grandchild, and waitExit returns although the grandchild held stdout (${POSIX_ONLY})`, async () => {
     const dir = await scratch();
     const ready = path.join(dir, 'ready');
@@ -89,7 +90,7 @@ describe('T4 process-group kill (POSIX)', () => {
     // grace can run out first and SIGKILL (128 + 9) follows. Either way it died by signal.
     expect(['SIGTERM', 'SIGKILL']).toContain(exit.signal);
     expect([143, 137]).toContain(exit.exitCode);
-    expect(Date.now() - t0).toBeLessThan(KILL_GRACE_MS + STDIO_DRAIN_MS + 2_000);
+    expect(Date.now() - t0).toBeLessThan(KILL_GRACE_MS + STDIO_DRAIN_MS + LOAD_SLACK_MS);
     expect(out).toContain('agent up');
     await pollUntil(async () => {
       if (alive(pids.grandchild)) throw new Error('grandchild still alive');
@@ -104,12 +105,14 @@ describe('T4 process-group kill (POSIX)', () => {
     const child = spawnAgent(process.execPath, ['-e', agentScript(ready, true)], { cwd: dir, env: { PATH: process.env.PATH ?? '' } });
     child.stdout!.on('data', () => {});
     child.stderr!.on('data', () => {});
+    const DRAIN_MS = 300;
     const t0 = Date.now();
-    const exit = await waitExit(child, { drainMs: 300 });
+    const exit = await waitExit(child, { drainMs: DRAIN_MS });
     const pids = await readPids(ready);
     expect(exit.exitCode).toBe(0);
     expect(exit.drainTimedOut).toBe(true);
-    expect(Date.now() - t0).toBeLessThan(10_000);
+    // Upper bound: the drain window plus the load slack (ADR-0012 amendment 2026-11-05, a.2).
+    expect(Date.now() - t0).toBeLessThan(DRAIN_MS + LOAD_SLACK_MS);
     // The grandchild is still there (its parent exited normally; nothing killed the group)...
     expect(alive(pids.grandchild)).toBe(true);
     // ...until the tree is killed explicitly (what an adapter's abort path does).
@@ -130,17 +133,20 @@ describe('T4 process-group kill (POSIX)', () => {
       if (!out.includes('up')) throw new Error('not up');
     }, 'stub never started');
     const exitP = waitExit(child);
+    const GRACE_MS = 200;
     const t0 = Date.now();
-    await killTree(child, { graceMs: 200 });
+    await killTree(child, { graceMs: GRACE_MS });
     const exit = await exitP;
     expect(exit.signal).toBe('SIGKILL');
     expect(exit.exitCode).toBe(137);
-    expect(Date.now() - t0).toBeGreaterThanOrEqual(150);
-    expect(Date.now() - t0).toBeLessThan(5_000);
+    // Not before the grace ran out (timer may fire early); not longer than grace + drain + slack.
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(GRACE_MS - TIMER_EARLY_MS);
+    expect(Date.now() - t0).toBeLessThan(GRACE_MS + STDIO_DRAIN_MS + LOAD_SLACK_MS);
   });
 });
 
-describe('T4w process-tree kill (Windows)', () => {
+// ADR-0012 amendment (2026-11-05, block B15, rule a.4): real timers; one retry tolerates the host, never the code.
+describe('T4w process-tree kill (Windows)', { retry: 1 }, () => {
   it.skipIf(!isWin)(`killTree invokes taskkill /PID <pid> /T /F and the grandchild is gone (${WIN_ONLY})`, async () => {
     const dir = await scratch();
     const ready = path.join(dir, 'ready');
@@ -166,7 +172,8 @@ describe('T4w process-tree kill (Windows)', () => {
   });
 });
 
-describe('spawn failure and probe cap', () => {
+// ADR-0012 amendment (2026-11-05, block B15, rule a.4): real timers; one retry tolerates the host, never the code.
+describe('spawn failure and probe cap', { retry: 1 }, () => {
   it('a binary that does not exist: waitExit resolves with -1 and the error, nothing stays tracked', async () => {
     const dir = await scratch();
     const child = spawnAgent(path.join(dir, 'no-such-agent'), [], { cwd: dir, env: {} });
@@ -178,15 +185,17 @@ describe('spawn failure and probe cap', () => {
 
   it('probeVersionCapped kills a probe that sleeps past the cap (default cap is 15 s)', () => {
     expect(VERSION_PROBE_TIMEOUT_MS).toBe(15_000);
+    const CAP_MS = 300;
     const t0 = Date.now();
-    const res = probeVersionCapped(process.execPath, ['-e', 'setInterval(() => {}, 1e9)'], { PATH: process.env.PATH ?? '' }, 300);
-    expect(Date.now() - t0).toBeLessThan(10_000);
+    const res = probeVersionCapped(process.execPath, ['-e', 'setInterval(() => {}, 1e9)'], { PATH: process.env.PATH ?? '' }, CAP_MS);
+    expect(Date.now() - t0).toBeLessThan(CAP_MS + LOAD_SLACK_MS);
     expect((res.error as NodeJS.ErrnoException | undefined)?.code).toBe('ETIMEDOUT');
     expect(res.status).toBeNull();
   });
 });
 
-describe('T7 Claude Code --version probe is capped', () => {
+// ADR-0012 amendment (2026-11-05, block B15, rule a.4): real timers; one retry tolerates the host, never the code.
+describe('T7 Claude Code --version probe is capped', { retry: 1 }, () => {
   it('a binary that blocks on --version yields "no version reported" within the cap instead of hanging', async () => {
     const dir = await scratch();
     const bin = path.join(dir, 'blocking-claude.mjs');
@@ -204,10 +213,12 @@ describe('T7 Claude Code --version probe is capped', () => {
     const workdir = path.join(dir, 'work');
     await mkdir(workdir, { recursive: true });
     const profile: SetupProfile = { agent: 'claude-code', agent_version: '@anthropic-ai/claude-code@2.1.309', model: 'm', workdir, permission_mode: 'plan' };
-    const adapter = new ClaudeCodeAdapter({ bin, versionProbeTimeoutMs: 300, retryDelaysMs: [], sleep: async () => {} });
+    const PROBE_CAP_MS = 300;
+    const adapter = new ClaudeCodeAdapter({ bin, versionProbeTimeoutMs: PROBE_CAP_MS, retryDelaysMs: [], sleep: async () => {} });
     const t0 = Date.now();
     const obs = await adapter.run(profile, 'hello', new AbortController().signal, { runDir });
-    expect(Date.now() - t0).toBeLessThan(15_000);
+    // The capped probe, then one real (short) run whose exit waits out the stdio drain at most.
+    expect(Date.now() - t0).toBeLessThan(PROBE_CAP_MS + STDIO_DRAIN_MS + LOAD_SLACK_MS);
     expect(obs.exit_code).toBe(0);
     expect(obs.agent_version_reported).toBeUndefined();
     expect(obs.warnings).toContain('could not read agent version from `--version`');

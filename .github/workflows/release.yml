@@ -57,8 +57,30 @@ jobs:
         with:
           node-version: '24'
           registry-url: https://registry.npmjs.org
-      # Trusted publishing needs npm 11.5.1 or newer; an exact version, so the release does not pick up whatever is newest.
-      - run: npm install -g npm@11.21.0
+      # ADR-0010 amendment (2026-11-05, block B15): no registry-fetched code runs in this job. Trusted publishing needs
+      # npm 11.5.1 or newer; the npm bundled with the pinned setup-node release is used as is and its version asserted
+      # numerically before any command that reaches the registry. On an older bundled npm the release fails here and
+      # installs nothing: raise the node-version pin above instead of fetching npm from the live registry.
+      - name: Bundled npm is at least 11.5.1 (trusted publishing minimum)
+        run: |
+          v="$(npm --version)"
+          node -e '
+          const min = [11, 5, 1];
+          const v = process.argv[1].trim();
+          const parts = v.split(".").map((x) => Number.parseInt(x, 10));
+          if (parts.length < 3 || parts.some((n) => !Number.isInteger(n) || n < 0)) {
+            console.error(`::error::cannot parse bundled npm version ${JSON.stringify(v)}`);
+            process.exit(1);
+          }
+          for (let i = 0; i < 3; i += 1) {
+            if (parts[i] > min[i]) break;
+            if (parts[i] < min[i]) {
+              console.error(`::error::bundled npm ${v} is older than 11.5.1: raise the node-version pin in release.yml`);
+              process.exit(1);
+            }
+          }
+          console.log(`ok: bundled npm ${v} >= 11.5.1`);
+          ' "$v"
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           name: package

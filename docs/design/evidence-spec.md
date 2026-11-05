@@ -1422,7 +1422,10 @@ rejects (throws before provisioning anything, no agent spawned) when a caller by
   out writes `results[].low_confidence: true` and no `inconclusive_reason`; an all-timeout
   scenario writes `inconclusive_reason: "run_timeout"` and no flag; a clean scenario writes
   neither; `validateManifest` passes; every published bundle under `reports/` and `demo/` still
-  validates (existing test) and `test/run-lifecycle.test.ts` T5 keeps the replay bytes.
+  validates (existing test) and `test/run-lifecycle.test.ts` T5 keeps the replay bytes. Since
+  block B15 (ADR-0012 amendment 2026-11-05, rule a.1) the time-outs are forced through the
+  `BenchmarkRunnerOptions.runWithDeadline` seam, not by a sleeping stub racing
+  `run_timeout_ms`: the fields pinned are the same, the wall clock is no longer a party.
 - B3-T3 report surfaces (s3.2 rule 4): Markdown verdict cell `resisted (low confidence)`,
   headline `low confidence: 1` only when N > 0, JSON scoring block `low_confidence: true`,
   SARIF `properties.low_confidence`, guidance paragraph names the scenario; a manifest without

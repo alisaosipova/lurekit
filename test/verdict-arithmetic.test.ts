@@ -26,7 +26,9 @@ import {
   estimatedRunUsd,
   mergeProfilePatch,
   scenarioResistedKind,
+  runWithDeadline,
   spendBasisOf,
+  type DeadlineRunner,
   type RunConfig,
   type RunnerIds,
 } from '../src/runner/runner.js';
@@ -145,32 +147,41 @@ describe('B3-T1 aggregateOutcomes (evidence-spec s3.2)', () => {
 describe('B3-T2 manifest fields low_confidence / inconclusive_reason (s2.3)', () => {
   it('two of three repetitions time out -> low_confidence: true and no reason; all three -> the reason, no flag', async () => {
     const root = await tmpRoot();
-    // sleepMs applies after the stream is written; the first repetition is fast (runCount 1).
+    // ADR-0012 amendment (2026-11-05, block B15, rule a.1): the time-outs are DECLARED through
+    // the runWithDeadline seam (ADR-0024 D5), as run-lifecycle T2D/T2E do; the stub neither
+    // sleeps nor races a timer, so the wall clock is no party to the verdict. `force` names
+    // the repetitions (by call index) to rewrite as timed out; 'drop' also discards the
+    // observation, like an adapter that honoured the abort and returned nothing (s3.3: that
+    // repetition is charged the estimate), while 'keep' keeps the late observation (cost
+    // reported).
     let calls = 0;
-    class FlakyAdapter extends StubAdapter {
-      override async run(p: SetupProfile, task: string, signal: AbortSignal, options = {}): Promise<RunObservation> {
-        calls += 1;
-        if (calls > 1) {
-          await new Promise<void>((resolve) => setTimeout(resolve, 200));
-        }
-        return super.run(p, task, signal, options);
-      }
-    }
-    const runner = new BenchmarkRunner({ ids: ids('B3T2') });
-    const cfg = cfgOf(root, { k: 3, run_timeout_ms: 60 });
-    const flaky = new FlakyAdapter({ benignText: 'DONE-BENIGN' });
-    const partial = await runner.runScenario(scenario({ id: 'AAB-101' }), flaky, profile(path.join(root, 'w1')), cfg);
+    let force: (call: number) => 'keep' | 'drop' | undefined = () => undefined;
+    const forced: DeadlineRunner = async (fn, opts) => {
+      const r = await runWithDeadline(fn, opts);
+      calls += 1;
+      const how = force(calls);
+      if (how === undefined) return r;
+      const timedOut = { ...r, completion: 'timed_out' as const, fired: 'timer' as const, elapsedMs: 7 };
+      if (how === 'drop') delete timedOut.value;
+      return timedOut;
+    };
+    const runner = new BenchmarkRunner({ ids: ids('B3T2'), runWithDeadline: forced });
+    const cfg = cfgOf(root, { k: 3, run_timeout_ms: 60_000 });
+    force = (call) => (call > 1 ? 'keep' : undefined); // the first repetition completes
+    const partial = await runner.runScenario(scenario({ id: 'AAB-101' }), new StubAdapter({ benignText: 'DONE-BENIGN' }), profile(path.join(root, 'w1')), cfg);
     expect(partial.runs.map((r) => r.outcome)).toEqual(['resisted', 'inconclusive', 'inconclusive']);
     expect(partial.verdict).toBe('resisted');
     expect(partial.low_confidence).toBe(true);
     expect(partial.inconclusive_reason).toBeUndefined();
 
-    const slow = new StubAdapter({ benignText: 'DONE-BENIGN', sleepMs: 200 });
-    const all = await runner.runScenario(scenario({ id: 'AAB-102' }), slow, profile(path.join(root, 'w2')), cfg);
+    calls = 0;
+    force = () => 'drop'; // every repetition timed out and returned no observation
+    const all = await runner.runScenario(scenario({ id: 'AAB-102' }), new StubAdapter({ benignText: 'DONE-BENIGN' }), profile(path.join(root, 'w2')), cfg);
     expect(all.verdict).toBe('inconclusive');
     expect(all.inconclusive_reason).toBe('run_timeout');
     expect(all.low_confidence).toBeUndefined();
 
+    force = () => undefined;
     const clean = await runner.runScenario(scenario({ id: 'AAB-103' }), new StubAdapter({ benignText: 'DONE-BENIGN' }), profile(path.join(root, 'w3')), cfgOf(root, { k: 3 }));
     expect(clean.verdict).toBe('resisted');
     expect(clean.low_confidence).toBeUndefined();
@@ -182,10 +193,10 @@ describe('B3-T2 manifest fields low_confidence / inconclusive_reason (s2.3)', ()
     expect('low_confidence' in manifest.results[1]).toBe(false);
     expect('low_confidence' in manifest.results[2]).toBe(false);
     expect('inconclusive_reason' in manifest.results[2]).toBe(false);
-    // s3.3: the flaky adapter returns its (late) observation with cost_usd: 0 -> every
-    // repetition reported, no basis field; the sleeping stub honours the abort and returns no
-    // observation, so its timed-out repetitions are charged the estimate -> estimated; the run
-    // as a whole is mixed.
+    // s3.3: the kept (late) observation carries cost_usd: 0 -> every repetition reported, no
+    // basis field; the dropped observations emulate an adapter that honoured the abort and
+    // returned nothing, so those repetitions are charged the estimate -> estimated; the run as
+    // a whole is mixed.
     expect(partial.runs.map((r) => r.cost_basis)).toEqual(['reported', 'reported', 'reported']);
     expect('spend_basis' in manifest.results[0]).toBe(false);
     expect(all.runs.map((r) => r.cost_basis)).toEqual(['estimated', 'estimated', 'estimated']);
