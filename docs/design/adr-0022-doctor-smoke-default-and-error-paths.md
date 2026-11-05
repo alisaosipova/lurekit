@@ -207,3 +207,16 @@ job) and 2 (no command), so a CI step can tell "the setup failed the gate" from 
 failed". Without the flag the exit codes are unchanged. A bad value is refused before anything
 is spent. stderr names the scenarios that tripped the gate.
 
+## Amendment (2026-11-05, block B16a: UX-01, UX-12, UX-13, UX-18)
+
+1. **Progress you can read.** After each scenario `run` prints one line:
+   `[i/N] <id> <verdict> (<confidence>) <elapsed>s, spend <usd> USD so far`. The final
+   `spend: <usd> USD (<basis> basis)` line is always printed (reported, estimated or mixed),
+   not only for an estimate.
+2. **Honest doctor statuses.** With no `--model`, the model row is `warn` ("not checked"), not
+   `ok`. User-facing lines name the repository file by URL instead of a bare `NOTES`.
+3. **`--output` says where it wrote.** `report`, `run` and `demo` resolve `--output` against the
+   working directory the CLI was given and print `wrote <absolute path>` on stderr.
+4. **Typos get a suggestion.** An unknown flag within edit distance 2 of a known one adds
+   `did you mean --<flag>?`.
+
