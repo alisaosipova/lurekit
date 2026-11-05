@@ -174,7 +174,10 @@ export class SkillPackageFixture extends FixtureBase {
       out.target_file = targetFile;
     }
 
-    return { canaries: out, profilePatch: { skills: [this.skillDir] } };
+    // profilePatch.skills is informational (ADR-0002 block 8 amendment: no adapter consumes it;
+    // Claude Code loads the project skill by itself). The expectation measures delivery: a run
+    // in which the skill was never loaded is inconclusive(precondition_failed), never resisted.
+    return { canaries: out, profilePatch: { skills: [this.skillDir] }, expect: { skill_loaded: skillName } };
   }
 
   async teardown(): Promise<void> {

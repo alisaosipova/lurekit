@@ -97,3 +97,29 @@ CLI ("Verified on the installed binary").
 - The evidence record now carries `observation.agent_version_reported` (all adapters; the
   runner previously dropped it; evidence-spec s4.4b).
 
+## Amendment 2026-11-05 (block 8): MCP config delivery
+
+Context. The adapter never delivers `profile.mcp`: it emits no MCP flag (none exists in the
+verified `agent --help`; `--approve-mcps` only pre-approves servers Cursor already knows) and
+writes nothing into the workdir (decision 7). So a scenario whose fixture hands its inert server
+through `profilePatch.mcp` (`mcp_stdio`, `mcp_http`) can never satisfy its `mcp_server`
+precondition on Cursor: AAB-006, the only cursor-only MCP scenario, was listed KEEP by `plan`
+and every paid repetition ended `inconclusive(precondition_failed)` by construction (plan
+VERDICT-14).
+
+10. `capabilities()` gains `delivers_mcp_config: false` (evidence-spec s4.4). `Runner.plan()`
+    therefore skips AAB-006 (and any future scenario with an `mcp_stdio`/`mcp_http` fixture) for
+    `cursor-cli` with reason `mcp_config_undeliverable` before any spend (ADR-0002 amendment).
+    Scenarios whose fixtures plant files only (`skill_package`, `poisoned_repo` incl. its
+    `cursor_mcp_config` variant, which plants `.cursor/mcp.json` as the surface under test)
+    stay runnable. AAB-006 keeps `applies_to: [cursor-cli]` and `runnable: true`: it is a
+    deliverability skip, not a corpus change.
+11. Open (DECISION NEEDED): how Cursor should receive a profile MCP config. Options: (a) keep the
+    skip until a maintainer recording of `agent -p` with a workspace `.cursor/mcp.json` shows the
+    server in `system/init.mcp_servers` (then delivery can be verified at all); (b) the adapter
+    writes `<workdir>/.cursor/mcp.json` from `profile.mcp` before the run, recorded in evidence
+    as `mcp_delivery: workdir_file`, excluded from the `fs_diff` baseline and reverted at
+    teardown; it contradicts decision 7 (observe, do not steer) and plants the very path AAB-006
+    and the default `fs_diff` watch list care about, so it needs its own amendment and a
+    recording first. Recommendation: (a).
+

@@ -644,7 +644,9 @@ export async function cmdPlan(flags: Flags, deps: CliDeps): Promise<number> {
   // and remove it; a results root that only existed for that scratch is removed too, so `plan`
   // leaves no empty .aab-runs/ behind (the CI package job checks the empty directory stays empty).
   const rootExisted = existsSync(cfg.resultsRoot);
-  const plan = await runner.plan(scenarios, profile, cfg);
+  // ADR-0002 block 8 amendment: the adapter's capabilities decide plan-time deliverability
+  // (mcp_config_undeliverable). Adapters construct lazily; no binary is probed here.
+  const plan = await runner.plan(scenarios, profile, cfg, deps.adapterFor(profile.agent).capabilities());
   if (!rootExisted) {
     try {
       rmdirSync(cfg.resultsRoot); // only when empty: never removes run material
@@ -831,7 +833,7 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
   }
 
   async function runWithSignal(): Promise<number> {
-    const plan = await runner.plan(scenarios, profile, cfg);
+    const plan = await runner.plan(scenarios, profile, cfg, adapter.capabilities());
     deps.stderr(corpusLine(corpus));
     if (!live) deps.stderr(`replaying recording ${replayDir} (offline, no live agent)\n`);
 

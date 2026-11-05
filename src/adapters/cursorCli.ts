@@ -21,6 +21,7 @@ import { StringDecoder } from 'node:string_decoder';
 
 import type {
   Adapter,
+  AdapterCapabilities,
   ObservationSource,
   RunObservation,
   RunOptions,
@@ -137,15 +138,12 @@ export class CursorCliAdapter implements Adapter {
     this.disableAutoUpdate = opts.disableAutoUpdate === true;
   }
 
-  capabilities(): {
-    headless: boolean;
-    observes: ObservationSource[];
-    can_pin_version: boolean;
-    can_pin_model: boolean;
-  } {
+  capabilities(): AdapterCapabilities {
     // ADR-0016 §Decision 2: no versioned install and auto-update on by default -> no version
     // pin; hooks under -p unverified -> stream only.
-    return { headless: true, observes: ['stream'], can_pin_version: false, can_pin_model: true };
+    // ADR-0016 amendment (block 8): no MCP flag, nothing written into the workdir (decision 7),
+    // so profile.mcp never reaches the agent -> delivers_mcp_config: false.
+    return { headless: true, observes: ['stream'], can_pin_version: false, can_pin_model: true, delivers_mcp_config: false };
   }
 
   /** Resolve the binary: constructor arg > env override > 'agent' on PATH. */

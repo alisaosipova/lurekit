@@ -42,6 +42,16 @@ function construct(ctor: abstract new (...args: never[]) => Fixture, params: unk
   return new (ctor as unknown as new (params?: unknown) => Fixture)(params);
 }
 
+/** Kinds that hand their server to the agent through `profilePatch.mcp` (ADR-0002 block 8
+ *  amendment): runnable only on an adapter whose `capabilities().delivers_mcp_config` is true.
+ *  `poisoned_repo` plants a project `.mcp.json` as the surface under test and is not marked. */
+const MCP_DELIVERY_KINDS: ReadonlySet<FixtureKind> = new Set<FixtureKind>(['mcp_stdio', 'mcp_http']);
+
+/** Whether a fixture kind needs the adapter to deliver an MCP config to the agent. */
+export function needsMcpDelivery(kind: FixtureKind): boolean {
+  return MCP_DELIVERY_KINDS.has(kind);
+}
+
 /** Kinds with a concrete inert fixture in this build. */
 export const IMPLEMENTED_FIXTURES = Object.keys(registry) as FixtureKind[];
 

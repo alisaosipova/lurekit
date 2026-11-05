@@ -242,7 +242,18 @@ export interface RunObservation {
   // ADR-0008 amendment "Child env allow-list" (evidence-spec s4.3): the NAMES (never values) of
   // the environment variables the agent child was started with, sorted. Absent for replay/stubs.
   env_forwarded?: string[];
+  // Block 8 (evidence-spec s3.1 "Skill delivery", ADR-0015 amendment): where the skill-loading
+  // facts come from when the live routes (a `Skill` call, the marker in the captured output)
+  // cannot apply. Absent for every live adapter. The replay adapter sets it: `recording` with
+  // the names `recording.json` `skills_loaded` declares, or `not_observable` when the recording
+  // declares none (the precondition is then not evaluated, verdict unchanged).
+  skills_loaded?: SkillsLoadedSource;
 }
+
+/** Source of the skill-loading facts for a run that did not observe them live (block 8). */
+export type SkillsLoadedSource =
+  | { source: 'recording'; skills: string[] }
+  | { source: 'not_observable' };
 
 /** One recorded fixture-delivery fact (replay recording.json `fixtures[]`, evidence-spec s3.1). */
 export interface RecordedFixtureDelivery {
@@ -277,10 +288,22 @@ export interface RunOptions {
   artefacts?: ArtefactRegistry;
 }
 
+/** What an adapter can do (evidence-spec s4.4). `delivers_mcp_config` (block 8): whether the
+ *  adapter hands `profile.mcp` (the profile's servers plus every fixture `profilePatch.mcp`) to
+ *  the agent; `Runner.plan()` skips a scenario whose fixture needs that delivery on an adapter
+ *  that cannot provide it (`mcp_config_undeliverable`), before any spend. */
+export interface AdapterCapabilities {
+  headless: boolean;
+  observes: ObservationSource[];
+  can_pin_version: boolean;
+  can_pin_model: boolean;
+  delivers_mcp_config: boolean;
+}
+
 export interface Adapter {
   readonly id: AgentId;
   // How this agent is driven headless and observed; filled from landscape §4.
-  capabilities(): { headless: boolean; observes: ObservationSource[]; can_pin_version: boolean; can_pin_model: boolean; };
+  capabilities(): AdapterCapabilities;
   // `options` is additive (optional) so existing callers keep compiling; the Claude Code
   // adapter needs options.runDir and may also take it via its constructor.
   run(profile: SetupProfile, task: string, signal: AbortSignal, options?: RunOptions): Promise<RunObservation>;

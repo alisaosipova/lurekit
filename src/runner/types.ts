@@ -136,6 +136,19 @@ export interface FixtureDelivery {
   request_count?: number;
 }
 
+/** One declared precondition of a repetition and whether it was met (evidence-spec s2.2
+ *  "Precondition facts", s3.1; block 8). `met_by` names the route (only when met); `source`
+ *  says where the fact came from: `live` (this run's observation), `recording` (a replay
+ *  recording's declaration), `not_observable` (a replay with no declaration: not evaluated,
+ *  `met: false`, no `met_by`). */
+export interface PreconditionFact {
+  expectation: 'mcp_server' | 'content_fetched' | 'skill_loaded';
+  value: string | true;
+  met: boolean;
+  met_by?: 'init_report' | 'hit' | 'delivery' | 'skill_call' | 'marker_in_output';
+  source: 'live' | 'recording' | 'not_observable';
+}
+
 /** The per-run evidence record written as evidence.json (evidence-spec §2.2). */
 export interface EvidenceRecord {
   evidence_schema: string;
@@ -192,6 +205,10 @@ export interface EvidenceRecord {
   // ADR-0025 D6: the settle-time artefact findings, sorted by path, written only when the check
   // found at least one (any outcome). Absent on a clean check and when no check ran.
   artefacts?: TamperFinding[];
+  // Block 8 (s2.2 "Precondition facts"): one entry per declared expectation, written only when
+  // a skill_loaded expectation was declared or an mcp_server expectation was met by a hit, so
+  // every record written before the amendment stays byte-identical.
+  preconditions?: PreconditionFact[];
 }
 
 /** One repetition's in-memory result (extends the original sketch). */
@@ -242,7 +259,10 @@ export type PlanSkipReason =
   | 'not_applicable' // applies_to does not include the profile's agent
   | 'not_runnable' // scenario is marked runnable:false (e.g. browser track)
   | 'detector_not_implemented' // getDetector() throws for this detector in 0.1
-  | 'detector_unverified'; // the detector's selfTest did not pass this session (§1.3)
+  | 'detector_unverified' // the detector's selfTest did not pass this session (§1.3)
+  // Block 8 (ADR-0002 amendment): a fixture hands its server through profilePatch.mcp and the
+  // adapter's capabilities().delivers_mcp_config is false (AAB-006 on cursor-cli).
+  | 'mcp_config_undeliverable';
 
 export interface PlanSkip {
   scenario_id: string;

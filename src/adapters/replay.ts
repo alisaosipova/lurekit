@@ -6,12 +6,16 @@
 //   claude-stream.jsonl  required  verbatim `--output-format stream-json --verbose` stdout
 //   claude-hooks.jsonl   optional  the observation hook's log from the same run
 //   recording.json       optional  { exit_code?, started_at?, ended_at?, agent_version_reported?,
-//                                    fixtures? }
+//                                    fixtures?, skills_loaded? }
 // `fixtures` (optional, evidence-spec s3.1 `content_fetched`) is the fixture content-delivery
 // facts of the recorded run: [{ type, content_fetched, content_requests?, request_count? }].
 // When present the runner evaluates a fixture's content_fetched precondition against it; when
 // absent the precondition is not evaluable on a replay (no agent fetched anything) and the run
 // carries a "precondition not evaluated" note next to REPLAY_WARNING instead of a verdict change.
+// `skills_loaded` (optional, block 8, evidence-spec s3.1 "Skill delivery"): the names of the skills
+// the recorded run loaded, declared by the maintainer who sanitised the recording (a replayed
+// fixture's per-run marker can never appear in an old stream). Present: the skill_loaded
+// precondition is evaluated against it; absent: not evaluated (`not_observable`, verdict unchanged).
 
 import { mkdir, readFile } from 'node:fs/promises';
 import { safeWriteFile } from '../runner/safeWrite.js';
@@ -19,12 +23,13 @@ import path from 'node:path';
 
 import type {
   Adapter,
+  AdapterCapabilities,
   FixtureDeliverySource,
   RecordedFixtureDelivery,
-  ObservationSource,
   RunObservation,
   RunOptions,
   SetupProfile,
+  SkillsLoadedSource,
 } from './adapter.js';
 import type { AgentId } from '../scenario/types.js';
 import { observeClaudeRun } from './claudeCode.js';
@@ -45,6 +50,7 @@ interface RecordingMeta {
   ended_at?: number;
   agent_version_reported?: string;
   fixtures?: unknown;
+  skills_loaded?: unknown;
 }
 
 export class ReplayAdapter implements Adapter {
@@ -55,14 +61,10 @@ export class ReplayAdapter implements Adapter {
     this.recordingDir = opts.recordingDir;
   }
 
-  capabilities(): {
-    headless: boolean;
-    observes: ObservationSource[];
-    can_pin_version: boolean;
-    can_pin_model: boolean;
-  } {
+  capabilities(): AdapterCapabilities {
     // Same observation layers as the live run it was recorded from (§4.4).
-    return { headless: true, observes: ['stream', 'hook'], can_pin_version: true, can_pin_model: true };
+    // delivers_mcp_config: the recording came from a run whose adapter delivered it (s4.4).
+    return { headless: true, observes: ['stream', 'hook'], can_pin_version: true, can_pin_model: true, delivers_mcp_config: true };
   }
 
   async run(
@@ -118,6 +120,7 @@ export class ReplayAdapter implements Adapter {
       warnings: [REPLAY_WARNING],
     });
     observation.fixture_delivery = fixtureDelivery(meta.fixtures);
+    observation.skills_loaded = skillsLoaded(meta.skills_loaded);
     return observation;
   }
 }
@@ -146,6 +149,16 @@ export function fixtureDelivery(raw: unknown): FixtureDeliverySource {
     return out;
   });
   return { source: 'recording', fixtures };
+}
+
+/** The recording's skill-loading facts (s3.1 block 8), validated; `not_observable` when absent.
+ *  A value that is not an array of strings is a broken recording and throws (adapter_error). */
+export function skillsLoaded(raw: unknown): SkillsLoadedSource {
+  if (raw === undefined) return { source: 'not_observable' };
+  if (!Array.isArray(raw) || raw.some((e) => typeof e !== 'string')) {
+    throw new Error(`ReplayAdapter: ${REPLAY_META_FILE} skills_loaded is not an array of strings`);
+  }
+  return { source: 'recording', skills: raw as string[] };
 }
 
 async function readMeta(file: string): Promise<RecordingMeta> {

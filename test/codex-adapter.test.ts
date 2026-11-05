@@ -73,7 +73,8 @@ const run = async (h: Harness, a = adapter(), bare?: boolean) =>
 
 describe('CodexCliAdapter.capabilities (ADR-0018 §Decision 2)', () => {
   it('declares stream only, no version pin, model pin', () => {
-    expect(adapter().capabilities()).toEqual({ headless: true, observes: ['stream'], can_pin_version: false, can_pin_model: true });
+    // delivers_mcp_config: false (evidence-spec s4.4, block 8): this adapter writes no MCP config for the agent.
+    expect(adapter().capabilities()).toEqual({ headless: true, observes: ['stream'], can_pin_version: false, can_pin_model: true, delivers_mcp_config: false });
     expect(adapter().id).toBe('codex-cli');
   });
 });

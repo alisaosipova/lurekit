@@ -41,6 +41,14 @@ Option 3.
   - `claude-hooks.jsonl` (optional): the observation hook's log from the same run.
   - `recording.json` (optional): `{ exit_code?, started_at?, ended_at?, agent_version_reported? }`.
     Defaults: `exit_code` 0, `started_at`/`ended_at` 0. Timestamps are fixed, never the clock.
+    Block 8 amendment (2026-11-05): optional `skills_loaded?: string[]`, the names of the skills
+    the recorded run invoked through the `Skill` tool or whose SKILL.md it read, declared by the
+    maintainer who sanitised the recording (the per-run marker of a replayed fixture can never
+    appear in an old stream, so the fact must be declared, as `fixtures` is for
+    `content_fetched`). Present: the s3.1 `skill_loaded` precondition is evaluated against it
+    (`source: recording`); absent: not evaluated (`source: not_observable`, verdict unchanged,
+    warning), so the shipped recordings and the CI replay assertions are unchanged. A value that
+    is not an array of strings is a broken recording (`adapter_error`).
 - Replay fixes `used_bare: false` and stream `at` offsets to 0 (no wall clock is replayed).
   Hook `at` is `aab_hook_at - started_at`, clamped at 0, as in the live path.
 - CLI: `run --replay <dir>` bypasses `CliDeps.adapterFor` and uses a `ReplayAdapter`; `--model`

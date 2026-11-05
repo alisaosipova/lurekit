@@ -20,10 +20,13 @@
 //                                and throws FixtureCanaryError without it.
 //   - other_server             : optional name mentions-another-server refers to.
 //   - result_variant           : plain (default; the decoy returns "ok") | names-canary-command -
-//                                the decoy tool's RESULT (and, for mcp_http, the server metadata
-//                                `instructions`) carries one visible, inert placeholder naming
-//                                ctx.canaries.commandPath (canary_command); throws
-//                                FixtureCanaryError without it.
+//                                the decoy tool's RESULT and the server metadata `instructions`
+//                                (both transports since block 8, evidence-spec s1.2b) carry one
+//                                visible, inert placeholder naming ctx.canaries.commandPath
+//                                (canary_command); throws FixtureCanaryError without it.
+//
+// Harness-owned copies (block 8): the stdio fixture child is launched with the argv flag
+// `--no-start-record`, so only the agent-spawned instance can write `server_started`.
 
 import { randomBytes } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -45,10 +48,12 @@ import {
   CANARY_MCP_TOOL,
   MCP_RECORDER_FILE,
   ENV_DESCRIPTION,
+  ENV_INSTRUCTIONS,
   ENV_RECORDER,
   ENV_RESULT,
   ENV_SERVER_NAME,
   ENV_TOKEN,
+  NO_START_RECORD_FLAG,
   RESULT_VARIANTS,
   TOOL_DESCRIPTION_VARIANTS,
   createCanaryMcpServer,
@@ -159,7 +164,7 @@ export class McpStdioFixture extends McpFixtureBase {
     const recorderPath = det?.recorderPath ?? path.join(ctx.runDir, MCP_RECORDER_FILE);
     const mainPath = serverMainPath();
     const { description, canaries: descCanaries } = this.resolveDescription(ctx);
-    const { result, canaries: resultCanaries } = this.resolveResult(ctx);
+    const { result, commandPath, canaries: resultCanaries } = this.resolveResult(ctx);
     const name = this.serverName;
     const env: Record<string, string> = {
       [ENV_RECORDER]: recorderPath,
@@ -167,15 +172,20 @@ export class McpStdioFixture extends McpFixtureBase {
       [ENV_SERVER_NAME]: name,
       [ENV_DESCRIPTION]: description,
     };
-    // Only a non-plain result is passed on, so the default env stays as before.
+    // Only a non-plain result is passed on, so the default env stays as before. With
+    // names-canary-command the same placeholder is also served as the server `instructions`
+    // (block 8: parity with mcp_http, evidence-spec s1.2b), in both launch envs below.
     if (this.resultVariant !== 'plain') env[ENV_RESULT] = result;
+    if (commandPath !== undefined) env[ENV_INSTRUCTIONS] = serverInstructions(commandPath);
 
     // Stand up a harness-owned stdio server when the compiled main is present (real runs). In a
     // run the agent spawns its own instance via the profilePatch below; both write the same
     // recorder, so the sensor reads whichever the agent actually invokes. Spawn is non-fatal.
     if (existsSync(mainPath)) {
       try {
-        this.child = spawn(process.execPath, [mainPath], {
+        // NO_START_RECORD_FLAG (block 8): this harness-owned copy records no start; before, it
+        // wrote a server_started record carrying the detector's token at provision time.
+        this.child = spawn(process.execPath, [mainPath, NO_START_RECORD_FLAG], {
           // ADR-0008 amendment: allow-listed harness env, never the operator's credentials.
           env: harnessChildEnv(env),
           stdio: ['pipe', 'pipe', 'pipe'],

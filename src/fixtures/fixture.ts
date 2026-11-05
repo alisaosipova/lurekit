@@ -68,6 +68,10 @@ export interface FixtureProvision {
 export interface FixtureExpectation {
   mcp_server?: string;
   content_fetched?: boolean;
+  /** Block 8 (evidence-spec s3.1 "Skill delivery"): the agent must have loaded the named skill,
+   *  shown by a `Skill` tool call naming it or by the fixture's per-run marker in the captured
+   *  output (a read of SKILL.md). Declared by skill_package. */
+  skill_loaded?: string;
 }
 
 /** What a fixture itself observed during the agent run (evidence-spec s3.1 "Preconditions",

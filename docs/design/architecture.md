@@ -383,6 +383,23 @@ the runner forces `inconclusive` (never `resisted`) when a detector's self-test 
 (empirically confirmed in `test/detectors.test.ts`). Detectors never generate attacks and never
 reach a real host — they observe canaries only.
 
+**Amendment (2026-11-05, block 8): match keys fail closed, provenance, pre-run baseline.**
+Specced before the code; normative text in evidence-spec s1.2b, s1.3, s1.5, s3.1.
+- Each sensor enforces its own `forbidden_effect.match` key set in `provision()` and throws on
+  an unknown key or value (`inconclusive(fixture_error)`); `canary_mcp_tool` accepts `tool`
+  (must equal the decoy name), `event` and the new `server`. A scenario can no longer declare a
+  tool the sensor does not watch and be scored on the decoy anyway.
+- The MCP recorder line carries the writing instance's advertised `server` name, so a hit is
+  attributable to one of several servers in a scenario (AAB-019 names `server: aab-canary`),
+  and a decoy-tool hit from the expected server satisfies that server's `mcp_server`
+  precondition (rule 0 no longer hides a true `vulnerable` behind a stale `pending`).
+- Every harness-owned copy of the inert stdio server is launched with `--no-start-record`; the
+  env form is ignored, so neither a fixture child nor an operator variable can produce or
+  suppress the `server_started` signal.
+- The runner evaluates the scenario's detector once before the agent runs (`phase:
+  "baseline"`); a hit there is `inconclusive(fixture_error)` ("sensor fired before the agent
+  ran"), the second gate next to the self-test.
+
 ### Consequences
 - The soundness property — "a detector cannot silently false-negative" — is a tested invariant,
   which is exactly the brief's Week-2 requirement.
@@ -572,21 +589,21 @@ plumbing, keep decisions in ADRs; codified in `CLAUDE.md`. This document was ass
 | ADR | Topic | Status |
 |-----|-------|--------|
 | 0001 | Language/runtime | accepted, implemented |
-| 0002 | Fixture contract + runner lifecycle | accepted, implemented |
+| 0002 | Fixture contract + runner lifecycle | accepted, implemented; block-8 amendment (`skill_loaded` expectation, control-child argv contract, recorder `server`, pre-run baseline, plan-time `mcp_config_undeliverable`) SPECCED 2026-11-05 |
 | 0003 | Scenario format | accepted, implemented |
 | 0004 | Nondeterminism + scoring | accepted, implemented; block-3 amendment (conclusive-run arithmetic, `low_confidence`) SPECCED and IMPLEMENTED 2026-11-04 |
 | 0005 | Reproducibility + manifest | accepted, implemented |
 | 0006 | Cost control | accepted, partially implemented; block-3 amendment (estimated spend, k bounds) SPECCED and IMPLEMENTED 2026-11-04 |
 | 0007 | Isolation + safety (inert by construction) | accepted, implemented |
 | 0008 | Agent adapter contract | accepted; 4 adapters (claude-code, cursor-cli, codex-cli, openhands) + replay; only claude-code live-validated; block-3 amendment (leading-dash guard, assistant text, cost reporting) SPECCED and IMPLEMENTED 2026-11-04 |
-| 0009 | Effect detectors + observation | accepted; 5 of 6 detectors done (`canary_egress_dns` deferred: needs ADR-0007 resolver control); all 8 fixture kinds done |
+| 0009 | Effect detectors + observation | accepted; 5 of 6 detectors done (`canary_egress_dns` deferred: needs ADR-0007 resolver control); all 8 fixture kinds done; block-8 amendment (match keys fail closed, recorder provenance, pre-run baseline) SPECCED 2026-11-05 |
 | 0010 | Dependency policy | accepted |
 | 0011 | Repository layout | accepted, implemented |
 | 0012 | Contribution model | accepted, to be published (Week 4); CI scope revised 2026-11-02 (replay + publish gate; live run = maintainer) |
 | 0013 | Weekly update cadence | **DECISION NEEDED** |
 | 0014 | Ethics + coordinated disclosure | accepted |
-| 0015 | Replay adapter (`adr-0015-replay-adapter.md`) | accepted, implemented |
-| 0016 | Cursor CLI adapter (`adr-0016-cursor-cli-adapter.md`) | proposed, implemented (stream layer); awaiting approval |
+| 0015 | Replay adapter (`adr-0015-replay-adapter.md`) | accepted, implemented; block-8 amendment (`recording.json` `skills_loaded`) SPECCED 2026-11-05 |
+| 0016 | Cursor CLI adapter (`adr-0016-cursor-cli-adapter.md`) | proposed, implemented (stream layer); awaiting approval; block-8 amendment (`delivers_mcp_config: false`, AAB-006 plan skip; MCP delivery DECISION NEEDED) SPECCED 2026-11-05 |
 | 0017 | Publish + redaction gate (`adr-0017-publish-run.md`) | proposed, implemented; awaiting approval |
 | 0018 | Codex CLI adapter (`adr-0018-codex-cli-adapter.md`) | proposed, implemented (stream layer); awaiting approval |
 | 0019 | OpenHands adapter (`adr-0019-openhands-adapter.md`) | proposed, implemented (stream layer, transcript cross-check); awaiting approval |
