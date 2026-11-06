@@ -205,3 +205,28 @@ cost), `doctor` (pre-flight), `run --model <id>` (a smoke run that asks before i
 `report <runDir> --format sarif` (evidence for security tooling). The command reference below it
 is unchanged. Test plan: `test/cli.test.ts` "--help returns 0" asserts the block precedes
 `Commands:` and names the four commands.
+
+## Amendment (2026-11-05, UB-6): `--format html`
+
+Business readers want one page they can forward. `html` joins the report formats of `run`,
+`report` and `demo` (`REPORT_FORMATS` in `src/cli.ts`); it is used only when named.
+
+- Content: the Markdown report (`renderMarkdown`, same data and order, including the plain
+  language summary and What to change), converted by `src/report/html.ts`, a narrow converter
+  for the constructs the Markdown renderer emits (headings, quote blocks, pipe tables, `-` lists,
+  paragraphs, `code`, **bold**, `[text](url)`, bare URLs). The OWASP Agentic table (UB-1) is
+  inserted before the first second-level section. `demo` puts its banner first, as in Markdown.
+- Self-contained: inline CSS (light and dark), no scripts, no external assets, and a
+  `Content-Security-Policy` of `default-src 'none'; style-src 'unsafe-inline'`.
+- Safety: the manifest and the corpus are input, not trusted markup. Every text byte is
+  HTML-escaped; a link is emitted only for an `http(s)` URL; any other link text stays text.
+- Verdict cells carry a class (`v-vulnerable`, `v-resisted`, `v-degraded`, `v-inconclusive`)
+  for colour; colour is never the only signal, the verdict word stays in the cell.
+- Markdown, JSON and SARIF output are unchanged (byte identity of published bundles holds);
+  `publish` does not add an HTML file to bundles.
+
+Test plan (`test/html-report.test.ts`): `demo --format html` is one document with the CSP, no
+script/link/img/iframe/src, only http(s) hrefs, the banner, the headline, the ASI table before
+What to change, verdict classes and every Markdown scenario row; hostile text in a heading,
+a table cell, a `javascript:` link and the title is escaped; a bare URL excludes trailing
+punctuation.

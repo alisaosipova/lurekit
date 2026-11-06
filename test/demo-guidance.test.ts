@@ -347,7 +347,7 @@ describe('lurekit demo (CLI)', () => {
     await expect(main(['demo', '--bogus'], capture().deps)).rejects.toThrow(/unknown flag/);
     await expect(main(['demo', '--k', '3'], capture().deps)).rejects.toThrow(/only --format and --output/);
     await expect(main(['demo', 'reports'], capture().deps)).rejects.toThrow(/no positional/);
-    await expect(main(['demo', '--format', 'html'], capture().deps)).rejects.toThrow(/--format must be/);
+    await expect(main(['demo', '--format', 'pdf'], capture().deps)).rejects.toThrow(/--format must be/);
   });
 
   it('is listed in --help', async () => {

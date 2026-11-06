@@ -80,7 +80,7 @@ import type { Detector } from './detectors/detector.js';
 import type { DetectorKind } from './scenario/types.js';
 import type { ScenarioResult } from './runner/types.js';
 
-const REPORT_FORMATS: ReportFormat[] = ['json', 'markdown', 'sarif', 'text'];
+const REPORT_FORMATS: ReportFormat[] = ['html', 'json', 'markdown', 'sarif', 'text'];
 const FORMAT_LIST = REPORT_FORMATS.join('|');
 
 /** ADR-0021 amendment (terminal view): `md` is accepted for `markdown`; the other names as given. */
@@ -1205,7 +1205,7 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
     }
     // ADR-0022 amendment: say what to do with the finished run.
     const shownRun = shownPath(runDir, deps);
-    deps.stderr(`\nNext: lurekit report ${shownRun} --format text|markdown|json|sarif\n      lurekit publish ${shownRun} --redact-home\n`);
+    deps.stderr(`\nNext: lurekit report ${shownRun} --format text|markdown|html|json|sarif\n      lurekit publish ${shownRun} --redact-home\n`);
     // ADR-0008 amendment B11b (SECURITY-08): Claude Code keeps its own session transcripts.
     if (live && profile.agent === 'claude-code') {
       deps.stderr('note: Claude Code also kept its own session transcripts of this run under ~/.claude/projects/ (one directory per workdir); lurekit does not delete them.\n');
@@ -1275,9 +1275,9 @@ export function cmdReport(flags: Flags, deps: CliDeps): number {
   const rendered = report(manifest, {
     format,
     evidenceLookup: makeEvidenceLookup(runDir, manifest),
-    ...(format === 'sarif' || format === 'text' ? { classOf: shippedClassLookup() } : {}), // UB-1
+    ...(format === 'sarif' || format === 'text' || format === 'html' ? { classOf: shippedClassLookup() } : {}), // UB-1, UB-6
     ...(format === 'sarif' ? { surfaceOf: shippedSurfaceLookup() } : {}), // FEATURE-13: SARIF remediation
-    ...(format === 'markdown' || format === 'text'
+    ...(format === 'markdown' || format === 'text' || format === 'html'
       ? { surfaceOf: shippedSurfaceLookup(), reMeasure: reMeasureContext(manifest, resolveScenarioDir(undefined, deps).typed) }
       : {}),
     terminal: { ...terminalOptions(deps, output !== undefined), evidenceBase: shownPath(runDir, deps) },
@@ -1505,7 +1505,7 @@ export function demoBanner(manifest: RunManifest, scenariosDir = 'scenarios'): s
   return demoBannerLines(manifest, scenariosDir).map((l) => (l ? `> ${l}` : '>')).join('\n') + '\n\n';
 }
 
-/** demo [--format text|markdown|json|sarif] [--output <file>] (ADR-0021): offline, zero cost, no
+/** demo [--format text|markdown|html|json|sarif] [--output <file>] (ADR-0021): offline, zero cost, no
  *  auth. Renders the bundled published run through the same reporter as `report`: the terminal
  *  view on stdout by default, the Markdown artifact with --format markdown or into --output. */
 export function cmdDemo(flags: Flags, deps: CliDeps): number {
@@ -1546,8 +1546,9 @@ export function cmdDemo(flags: Flags, deps: CliDeps): number {
   const bannerLines = demoBannerLines(manifest, shipped);
   const body = report(manifest, {
     format,
-    ...(format === 'markdown' || format === 'text' ? { surfaceOf: shippedSurfaceLookup(), reMeasure: reMeasureContext(manifest, shipped) } : {}),
-    ...(format === 'text' ? { classOf: shippedClassLookup() } : {}), // UB-1
+    ...(format === 'markdown' || format === 'text' || format === 'html' ? { surfaceOf: shippedSurfaceLookup(), reMeasure: reMeasureContext(manifest, shipped) } : {}),
+    ...(format === 'text' || format === 'html' ? { classOf: shippedClassLookup() } : {}), // UB-1, UB-6
+    ...(format === 'html' ? { htmlPreamble: demoBanner(manifest, shipped) } : {}), // UB-6
     terminal: { ...terminalOptions(deps, output !== undefined), banner: bannerLines, evidenceBase: `${REPOSITORY_URL}/tree/main/reports/${manifest.benchmark_run_id}` },
   });
   const banner = demoBanner(manifest, shipped);
@@ -1607,13 +1608,13 @@ Commands:
                                     --settings file, observe hooks appended last (ADR-0020)
                    --setting-sources <csv>  claude-code only: load only these setting sources
                                     (user, project, local); default: flag not passed (agent default)
-                   --format text|markdown|json|sarif (default text; markdown with --output)  --output <file>
+                   --format text|markdown|html|json|sarif (default text; markdown with --output)  --output <file>
                    --replay <dir>  re-drive a recorded claude-code run offline (no agent, no cost)
   validate [dir]   Schema-validate every scenario (exit 1 on any error). Offline.
   list [dir]       List scenarios (id, detector, runnable, applies_to). Offline.
   plan [dir]       Show which scenarios would run for a profile, WITHOUT a live agent. Offline.
   selftest         Run each detector's positive/negative self-test. Offline.
-  report <runDir>  Render a report from a completed run. --format text|markdown|json|sarif
+  report <runDir>  Render a report from a completed run. --format text|markdown|html|json|sarif
                    (default: text on stdout, markdown into --output)  --output <file>
   publish <runDir> Write a shareable bundle (manifest, evidence, report.md/json/sarif, index.md)
                    after the redaction gate (no raw transcripts). Offline.
@@ -1635,7 +1636,7 @@ Commands:
                    --format text|json, --fail-on-regression exits 3 when B is worse anywhere.
   demo             Print a published run that ships with the package (no agent, no auth, no cost),
                    rendered exactly like 'report', with a banner saying it is not your setup.
-                   --format text|markdown|json|sarif (default: text on stdout, markdown into
+                   --format text|markdown|html|json|sarif (default: text on stdout, markdown into
                    --output)  --output <file>
 
 'text' is the terminal view: plain sentences and an aligned table, coloured on a terminal unless

@@ -310,7 +310,7 @@ describe('corpus resolution: argument -> ./scenarios -> the shipped corpus', () 
 
 describe('run: pre-spend validation happens before the prompt and before any launch', () => {
   it.each([
-    [['--format', 'html'], /refusing to run: --format must be json\|markdown\|sarif\|text \(got "html"\)\.\nnext: lurekit run .* --model sonnet --format markdown/],
+    [['--format', 'pdf'], /refusing to run: --format must be html\|json\|markdown\|sarif\|text \(got "pdf"\)\.\nnext: lurekit run .* --model sonnet --format markdown/],
     [['--output', 'no-such-dir/report.md'], /refusing to run: cannot write --output no-such-dir\/report\.md: its directory .*no-such-dir is not writable \(ENOENT\)\.\nnext: /],
     [['--output', '.'], /refusing to run: --output \. is a directory; it must name a file\.\nnext: /],
     [['--budget', '0'], /refusing to run: --budget must be a number of USD greater than 0 \(got 0\)\.\nnext: .*--budget 5/],
@@ -340,7 +340,7 @@ describe('run: pre-spend validation happens before the prompt and before any lau
     expect(code, errText()).toBe(0);
     // The run directory is printed with the host separator (runs\\aab-test-newcomer on Windows).
     const run = path.join('runs', 'aab-test-newcomer');
-    expect(errText()).toContain(`Next: lurekit report ${run} --format text|markdown|json|sarif\n`);
+    expect(errText()).toContain(`Next: lurekit report ${run} --format text|markdown|html|json|sarif\n`);
     expect(errText()).toContain(`      lurekit publish ${run} --redact-home\n`);
   });
 });
@@ -389,7 +389,7 @@ describe('every refusal names the next command (ADR-0022 amendment)', () => {
     ['bad --vulnerable-if', () => ['plan', corpus('AAB-003'), '--model', 'm', '--vulnerable-if', 'all']],
     ['report without a run dir', () => ['report']],
     ['report without a manifest', () => ['report', 'nope']],
-    ['report with a bad --format', () => ['report', fakeManifestDir(), '--format', 'html']],
+    ['report with a bad --format', () => ['report', fakeManifestDir(), '--format', 'pdf']],
     ['publish without a run dir', () => ['publish']],
     ['publish without a manifest', () => ['publish', 'nope']],
     ['doctor with a run flag', () => ['doctor', '--k', '3'], { probe: probe() }],
@@ -398,7 +398,7 @@ describe('every refusal names the next command (ADR-0022 amendment)', () => {
     ['doctor with an unknown agent', () => ['doctor', '--agent', 'codex'], { probe: probe() }],
     ['demo with a positional', () => ['demo', 'reports']],
     ['demo with another command\'s flag', () => ['demo', '--k', '3']],
-    ['demo with a bad --format', () => ['demo', '--format', 'html']],
+    ['demo with a bad --format', () => ['demo', '--format', 'pdf']],
     ['unknown command', () => ['frobnicate']],
     ['mistyped command', () => ['plna']],
   ];

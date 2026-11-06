@@ -30,6 +30,9 @@ No release is cut without changes.
   transitions and exit 3 when a scenario got worse, so a CI gate is one command (UB-4).
 - `docs/guide/for-security-teams.md`: what a result proves and does not, the evidence to keep, the
   OWASP Agentic mapping, a one-command CI gate and the limits; linked from the README (UB-5).
+- `--format html` for `run`, `report` and `demo`: a self-contained single-file report (inline CSS, no
+  scripts or external assets, all manifest text escaped) with the Markdown content, verdict colours
+  and the OWASP Agentic table, for readers outside the terminal (UB-6).
 
 ### Changed (UX and business review)
 

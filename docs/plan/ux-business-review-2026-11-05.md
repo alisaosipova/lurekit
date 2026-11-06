@@ -29,4 +29,6 @@ LureKit already tags every scenario with its ASI and MCP classes, but no report 
 | UB-3 | doctor's isolation row is a long sentence marked ok, about a label that does nothing. | Shorten to one clause and point to the guide. | done |
 | UB-4 | Gating CI on "nothing got worse" needs two commands (`run`, then `diff --fail-on-regression`). | `run --baseline <runDir>`: after the run, diff against the baseline, print the transitions and exit 3 on a regression. | done |
 | UB-5 | There is no page for the security team that buys the tool: what a result proves, how to use it as evidence, how to wire it into CI. | `docs/guide/for-security-teams.md`: the question LureKit answers, evidence it produces (bundles, SARIF, diff), the ASI mapping, a CI recipe with `--fail-on`/`--baseline`, limits. | done |
-| UB-6 | Business readers want one page they can forward; the terminal view and Markdown assume a technical reader. | `--format html`: a self-contained single-file report (no external assets), same data as Markdown, verdict colours, the ASI table and the What to change section. | open |
+| UB-6 | Business readers want one page they can forward; the terminal view and Markdown assume a technical reader. | `--format html`: a self-contained single-file report (no external assets), same data as Markdown, verdict colours, the ASI table and the What to change section. | done |
+
+Status 2026-11-05: UB-1..UB-6 done on main (unreleased; a 1.6.0 release waits for the maintainer).

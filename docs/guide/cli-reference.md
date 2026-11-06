@@ -151,8 +151,10 @@ lurekit report <runDir> [--format <fmt>] [--output <file>]
 Render a report from a completed run directory. `<runDir>` is required and must contain a
 `manifest.json`. Without `--format`, stdout gets the terminal view (`text`) and `--output <file>`
 gets the Markdown artifact (`markdown`, the `report.md` a bundle carries); `--format
-text|markdown|json|sarif` (`md` is accepted for `markdown`) names the format explicitly (note:
-`run` defaults to `markdown`). The terminal view (ADR-0021 amendment) is the same data as the
+text|markdown|html|json|sarif` (`md` is accepted for `markdown`) names the format explicitly (note:
+`run` defaults to `markdown`). `html` is a self-contained single-file page (no scripts, no external
+assets) with the Markdown content, verdict colours and the OWASP Agentic table, for readers outside
+the terminal. The terminal view (ADR-0021 amendment) is the same data as the
 Markdown for a person reading a terminal: plain sentences wrapped at the terminal width (the
 terminal's columns on a TTY, else `COLUMNS`, else 100), the headline and the Resisted line, an
 aligned result table that never wraps (id, verdict in words, `conf` = vulnerable repetitions out of
