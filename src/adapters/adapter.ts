@@ -232,6 +232,7 @@ export interface RunObservation {
   attempts?: ToolAttempt[];
   // ADR-0020: what the Claude Code adapter forwarded from profile.settings / profile.hooks into
   // its single `--settings` file. Absent when the profile carried neither (observe-only file).
+  // codex-cli (ADR-0018 amendment LV-4): the dotted keys of its `-c` overrides, no hook events.
   forwarded_settings?: ForwardedSettings;
   // evidence-spec s3.1 `content_fetched`: where fixture content-delivery facts come from when
   // the live fixtures cannot observe them. Absent for every live adapter (the runner reads the
@@ -270,7 +271,8 @@ export type FixtureDeliverySource =
 
 /** ADR-0020 record of the profile portion of the harness settings file. */
 export interface ForwardedSettings {
-  keys: string[];                 // top-level settings keys that came from the profile (sorted)
+  keys: string[];                 // settings keys from the profile (sorted): top-level for claude-code,
+                                  // dotted -c override keys for codex-cli (ADR-0018 amendment LV-4)
   hook_events: string[];          // hook events the profile contributed groups to (sorted)
   harness_hook_events: string[];  // events the observe group was appended (last) to
 }

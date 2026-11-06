@@ -151,3 +151,59 @@ binary").
   ancestor path instead of claiming exec will exit 1.
 - The evidence record now carries `observation.agent_version_reported` (evidence-spec s4.4b).
 
+
+## Amendment (2026-11-06, LV-4): `--settings` for codex-cli as `-c` config overrides
+
+Context: the first live codex-cli run (0.166.0, 2026-11-06) went through an OpenAI-compatible
+endpoint that has no Responses WebSocket. `OPENAI_BASE_URL` alone failed ("failed to connect to
+Responses WebSocket", five reconnects); a custom provider (`model_provider`,
+`model_providers.<id>.{name,base_url,env_key,wire_api="responses"}`) worked over HTTP. The
+adapter offered no way to pass it, so the run had to share one operator `CODEX_HOME`
+(`profile.env.CODEX_HOME`), which loses the run-scoped home (Decision 4). See
+`docs/plan/live-validation-2026-11-06.md` LV-4.
+
+Decision:
+
+1. `--settings <file.json>` (and a profile's `settings`) is accepted for `codex-cli`. The body is
+   a JSON object of Codex config keys. Nested objects are flattened to dotted keys
+   (`{"model_providers":{"p":{"base_url":"…"}}}` -> `model_providers.p.base_url`). Each leaf
+   becomes one `-c <dotted.key>=<value>` pair placed after `-m <model>` and before the
+   permission flags; the value is rendered as TOML: a string as a JSON string (a valid TOML basic
+   string), a finite number or a boolean as is, an array of strings/numbers/booleans as a TOML
+   inline array. Keys are emitted in sorted order, so the argv is deterministic.
+2. Refused before spawning (throw), so a settings file can never loosen the run or smuggle a
+   secret: a key whose first segment is `approval_policy`, `sandbox_mode`,
+   `sandbox_workspace_write`, `shell_environment_policy`, `hooks`, `mcp_servers`, `profile`,
+   `profiles` or `notify` (permissions, sandbox, environment and code that runs go through
+   `permission_mode`, `--mcp` or nowhere); a null, nested array or object array value; a key
+   segment outside `[A-Za-z0-9_-]`; a string value that the publish gate's credential shapes
+   would flag (a key is passed by name, e.g. `env_key = "CODEX_API_KEY"`, with the value in the
+   environment via `--env`).
+3. The run keeps its run-scoped `CODEX_HOME`. Evidence records the settings digest as for
+   Claude Code (`profile.settings_digest`); `agent_flags` records `-c` without its value
+   (`codexFlagNames`), and `observation.forwarded_settings` lists the dotted keys (no values).
+4. `--hooks` stays claude-code only (ADR-0020); the CLI guard in `src/cli.ts` admits `settings`
+   for `claude-code` and `codex-cli` only.
+
+Consequences: a third-party or self-hosted OpenAI-compatible provider is a settings file plus
+`--env <KEY_NAME>`; the provider's base URL is a published value of the run (it is in the
+settings body and its digest), so `publish` applies its URL rule to it as for any evidence.
+
+Test plan: argv for a nested provider file (sorted, flattened, TOML-rendered, before
+`--sandbox`); each refused key class and value shape throws before spawn; `codexFlagNames`
+drops the values; the CLI accepts `--settings` with `--agent codex-cli` and still refuses it
+for cursor-cli and openhands; a stub run records `forwarded_settings` keys and keeps
+`CODEX_HOME` run-scoped (no `profile.env sets CODEX_HOME` warning).
+
+Review amendment (2026-11-06, same block): Decision 2's deny list was not enough. Codex 0.166.0
+also loosens a run through `default_permissions = ":danger-full-access"`, `permissions.<name>`
+and `approvals_reviewer` (verified live: the exec default `sandbox: read-only` became
+`danger-full-access`, `approval: never` became `on-request`). Decision 2 is replaced by an
+allow list of first segments: `model`, `model_provider`, `model_providers`,
+`model_reasoning_effort`, `model_reasoning_summary`, `model_verbosity`, `model_context_window`,
+`model_auto_compact_token_limit`, `request_max_retries`, `stream_max_retries`,
+`stream_idle_timeout_ms` (`CODEX_ALLOWED_SETTINGS_ROOTS` in `src/adapters/codexCli.ts`); any
+other first segment is refused. Also refused: `model_providers.<id>.http_headers`,
+`.query_params` and `.experimental_bearer_token` (literal credentials; use `env_key` or
+`env_http_headers`), a credential-shaped key segment, a string with DEL or a lone surrogate (no
+TOML form), and an integer beyond 2^53.

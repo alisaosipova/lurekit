@@ -509,13 +509,14 @@ function buildProfile(flags: Flags, deps: CliDeps, hint = 'lurekit run'): SetupP
   if (settingSources && agent !== 'claude-code') {
     throw new Error(`--setting-sources is a claude-code flag; agent "${agent}" has no equivalent`);
   }
-  // ADR-0020: only the claude-code adapter forwards profile settings/hooks to the agent. For any
-  // other agent the body would be digested into evidence yet never reach the agent, so reject.
-  if (agent !== 'claude-code') {
-    for (const flag of ['settings', 'hooks']) {
-      if (flags.str.has(flag) || fileProfile[flag] !== undefined) {
-        throw new Error(`--${flag} is only forwarded by the claude-code adapter (ADR-0020); agent "${agent}" would never receive it`);
-      }
+  // ADR-0020: only the claude-code adapter forwards profile hooks; settings are forwarded by the
+  // claude-code adapter and, as -c overrides, by the codex-cli adapter (ADR-0018 amendment LV-4).
+  // For any other agent the body would be digested into evidence yet never reach the agent.
+  const forwardedBy: Record<string, readonly string[]> = { settings: ['claude-code', 'codex-cli'], hooks: ['claude-code'] };
+  for (const flag of ['settings', 'hooks']) {
+    if (!forwardedBy[flag].includes(agent) && (flags.str.has(flag) || fileProfile[flag] !== undefined)) {
+      const by = flag === 'settings' ? 'the claude-code and codex-cli adapters (ADR-0020, ADR-0018 amendment LV-4)' : 'the claude-code adapter (ADR-0020)';
+      throw new Error(`--${flag} is only forwarded by ${by}; agent "${agent}" would never receive it`);
     }
   }
   // ADR-0008 amendment B11a: --env NAME copies a variable of lurekit's own environment into
@@ -1604,8 +1605,9 @@ Commands:
                    --resume <runDir> (continue a stopped run with the same flags; finished scenarios are kept)
                    --baseline <runDir> (run only: after the run, diff against that run and exit 3 when
                                     a scenario regressed; one command for a "nothing got worse" CI gate)
-                   --settings/--hooks <file.json>  claude-code only: forwarded in the single
-                                    --settings file, observe hooks appended last (ADR-0020)
+                   --settings/--hooks <file.json>  claude-code: forwarded in the single
+                                    --settings file, observe hooks appended last (ADR-0020);
+                                    codex-cli: --settings only, as sorted -c overrides (ADR-0018)
                    --setting-sources <csv>  claude-code only: load only these setting sources
                                     (user, project, local); default: flag not passed (agent default)
                    --format text|markdown|html|json|sarif (default text; markdown with --output)  --output <file>

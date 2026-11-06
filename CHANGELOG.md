@@ -18,6 +18,16 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+### Added (live validation, LV-4)
+
+- `--settings` (and a profile's `settings`) for `codex-cli`: a JSON object of Codex config keys,
+  flattened to sorted `-c key=value` overrides (TOML-rendered) after `-m`, so a custom
+  OpenAI-compatible provider runs with the run-scoped `CODEX_HOME`. Permission, sandbox,
+  environment, hooks, MCP, profile and notify keys, null/nested-array values and
+  credential-shaped values are refused before spawn; evidence records `-c` without its value and
+  the dotted keys in `forwarded_settings` (ADR-0018 amendment LV-4). `--hooks` stays claude-code
+  only.
+
 ### Fixed (live validation of codex-cli, LV-1/LV-2)
 
 - A false `resisted` with Codex: in the default read-only `codex exec` sandbox the agent ran the

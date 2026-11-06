@@ -480,7 +480,7 @@ then measure whether that hardening holds. Accepted `--setting-sources` values a
 before any agent is spawned. The flag is claude-code only.
 
 See [`profiles/README.md`](../../profiles/README.md) for the full description, including the
-`--settings` / `--hooks` forwarding path (claude-code only), and the measured bare-vs-hardened
+`--settings` / `--hooks` forwarding path for claude-code, and the measured bare-vs-hardened
 comparison. Under both profiles the headless agent cannot `curl` loopback, so feed and web
 scenarios end `inconclusive(precondition_failed)`; the `claude-code-netread.json` profile
 (add `--settings profiles/settings/allow-loopback-curl.json`) is the one profile that loosens a
@@ -536,8 +536,10 @@ lurekit run --agent openhands --model openai/<served-model> \
   --permission-mode always-approve
 ```
 
-`--setting-sources`, `--settings` and `--hooks` are claude-code only; the CLI rejects them for
-the other agents rather than digest a body the agent would never receive.
+`--setting-sources` and `--hooks` are claude-code only, and `--settings` is claude-code and
+codex-cli only (for codex-cli it becomes sorted `-c` config overrides, e.g. a custom provider;
+ADR-0018 amendment LV-4); the CLI rejects them for the other agents rather than digest a body the
+agent would never receive.
 
 ## Next steps
 

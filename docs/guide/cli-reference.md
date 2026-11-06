@@ -270,13 +270,16 @@ install, it exits 1 with a message naming the reinstall command. Exit 0. Offline
 | `--baseline <runDir>` | string | *(none)* | after the run, compare it with that finished run (as `lurekit diff <runDir> <thisRun>`), print the transitions on stderr and exit 3 when a scenario regressed; an unreadable baseline is refused before the run | `run` |
 | `--env NAME` | string (repeatable) | *(none)* | forwards that variable of your environment to the agent (the name only; the value is read from your shell, never stored) | `run` |
 | `--mcp <file.json>` | string | *(none)* | path to an MCP config JSON | all (parsed); written to `--mcp-config` by the claude-code adapter |
-| `--settings <file.json>` | string | *(none)* | path to a Claude Code settings JSON | **claude-code only** |
+| `--settings <file.json>` | string | *(none)* | path to a Claude Code settings JSON, or for codex-cli a JSON object of Codex config keys, flattened to sorted `-c key=value` overrides (permission, sandbox, environment, hooks, MCP and profile keys and credential-shaped values are refused) | **claude-code, codex-cli** |
 | `--hooks <file.json>` | string | *(none)* | path to a hooks JSON (event map or `{ "hooks": {...} }`) | **claude-code only** |
 | `--setting-sources <csv>` | string | *(flag not passed)* | comma-separated subset of `user`, `project`, `local` (no empties, no duplicates) | **claude-code only** |
 
-`--settings`, `--hooks` and `--setting-sources` are rejected for any agent other than
-`claude-code`, because only the claude-code adapter forwards them (ADR-0020); for another agent
-the body would be digested into evidence yet never reach the agent.
+`--hooks` and `--setting-sources` are rejected for any agent other than `claude-code`, and
+`--settings` for any agent other than `claude-code` and `codex-cli`, because only those adapters
+forward them (ADR-0020; ADR-0018 amendment LV-4); for another agent the body would be digested
+into evidence yet never reach the agent. A codex-cli settings file is how a custom provider is
+passed (for example `model_provider` and `model_providers.<id>.{name,base_url,env_key,wire_api}`),
+with the key itself forwarded by name via `--env`; the run keeps its run-scoped `CODEX_HOME`.
 
 ### Config flags (run, plan)
 
@@ -358,8 +361,9 @@ typo or a mis-quoted flag can never be silently ignored or run the agent looser 
 
 Other validations run just after parsing and also exit 1, for example a missing `--model`
 (`run: --model <id> is required ...`), an out-of-range `--mode`/`--vulnerable-if`/`--format`
-value, an invalid `--setting-sources` value, `--settings`/`--hooks`/`--setting-sources` for a
-non-claude agent, and `--replay` with a non-claude agent.
+value, an invalid `--setting-sources` value, `--hooks`/`--setting-sources` for a non-claude
+agent, `--settings` for an agent other than claude-code and codex-cli, and `--replay` with a
+non-claude agent.
 
 ## Exit codes
 

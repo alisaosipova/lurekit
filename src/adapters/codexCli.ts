@@ -27,6 +27,8 @@ import type { Adapter,
 import { requireWorkdir, stderrExcerpt } from './adapter.js';
 import { agentChildEnv, argvRecord, CappedStderr, envNames } from './childEnv.js';
 import { createLineSplitter, killTree, probeVersionCapped, reapGroup, spawnAgent, waitExit } from './childProcess.js';
+import { findSecretShape } from '../fixtures/fixture.js';
+import { CREDENTIAL_SHAPES, isPlaceholderValue } from '../report/publish.js';
 import type { AgentId } from '../scenario/types.js';
 
 export const CODEX_STREAM_FILE = 'codex-stream.jsonl';
@@ -106,9 +108,113 @@ export function parseCodexPermissionMode(mode: string | undefined): CodexPermiss
   return out;
 }
 
+/** The only first key segments a settings body may set (ADR-0018 amendment LV-4, Decision 2,
+ *  after review): model and provider selection and transport retries. Everything else is
+ *  refused, because Codex keeps adding keys that loosen a run (0.166.0: `default_permissions`,
+ *  `permissions.<name>`, `approvals_reviewer` turn the read-only exec default into
+ *  danger-full-access or on-request; verified live 2026-11-06). Permissions, sandbox,
+ *  environment and code that runs go through permission_mode, --mcp or nowhere. */
+export const CODEX_ALLOWED_SETTINGS_ROOTS: readonly string[] = [
+  'model', 'model_provider', 'model_providers', 'model_reasoning_effort', 'model_reasoning_summary',
+  'model_verbosity', 'model_context_window', 'model_auto_compact_token_limit',
+  'request_max_retries', 'stream_max_retries', 'stream_idle_timeout_ms',
+];
+/** Second-level keys under model_providers.<id> that carry literal credentials; refused (use
+ *  env_key / env_http_headers so the value stays in the environment). */
+const CODEX_REFUSED_PROVIDER_KEYS: readonly string[] = ['http_headers', 'query_params', 'experimental_bearer_token'];
+const SETTINGS_SEGMENT_RE = /^[A-Za-z0-9_-]+$/;
+
+/** One `-c <key>=<value>` override: the dotted key and its TOML-rendered value. */
+export interface CodexConfigOverride { key: string; value: string; }
+
+/** Whether a settings string value would be flagged by the publish gate's credential shapes: the
+ *  token families shared with the gate (findSecretShape) and the context shapes
+ *  (CREDENTIAL_SHAPES), the latter over the value alone and as a JSON member under its own key
+ *  segment. Placeholders are not findings, as in the gate. Never returns the value. */
+function settingsValueLooksLikeCredential(lastSegment: string, value: string): boolean {
+  if (findSecretShape(value) !== undefined) return true;
+  for (const text of [value, `"${lastSegment}": ${JSON.stringify(value)}`]) {
+    for (const shape of CREDENTIAL_SHAPES) {
+      for (const m of text.matchAll(shape.re)) {
+        if (!isPlaceholderValue(m[shape.value])) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function renderTomlScalar(key: string, v: unknown, lastSegment: string): string {
+  if (typeof v === 'string') {
+    // TOML basic strings cannot hold DEL or a lone surrogate (JSON.stringify keeps or escapes them).
+    if (/[\u007f]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/.test(v)) {
+      throw new Error(`codex-cli: settings key "${key}" has a character TOML cannot carry (DEL or a lone surrogate)`);
+    }
+    if (settingsValueLooksLikeCredential(lastSegment, v)) {
+      throw new Error(`codex-cli: settings key "${key}" has a credential-shaped value (value redacted); pass the variable name (e.g. env_key) and the value with --env`);
+    }
+    return JSON.stringify(v); // a JSON string is a valid TOML basic string
+  }
+  if (typeof v === 'number') {
+    if (!Number.isFinite(v)) throw new Error(`codex-cli: settings key "${key}" has a non-finite number`);
+    if (Number.isInteger(v) && !Number.isSafeInteger(v)) throw new Error(`codex-cli: settings key "${key}" has an integer beyond 2^53 (precision would be lost)`);
+    return String(v);
+  }
+  if (typeof v === 'boolean') return String(v);
+  if (v === null) throw new Error(`codex-cli: settings key "${key}" is null (no TOML equivalent)`);
+  throw new Error(`codex-cli: settings key "${key}" has an unsupported value (nested arrays and arrays of objects are refused)`);
+}
+
+/** Flatten a codex-cli settings body into sorted `-c` overrides (ADR-0018 amendment LV-4).
+ *  Nested objects become dotted keys; each leaf is rendered as TOML (string as a JSON string,
+ *  finite number, boolean, or an inline array of those). Refused before spawn: a non-object body,
+ *  a key segment outside [A-Za-z0-9_-], a refused first segment, null, a nested array or an
+ *  array of objects, and a credential-shaped string value. Pure; exported for tests. */
+export function codexSettingsOverrides(settings: unknown): CodexConfigOverride[] {
+  if (settings === undefined || settings === null) return [];
+  if (typeof settings !== 'object' || Array.isArray(settings)) {
+    throw new Error('codex-cli: settings must be a JSON object of Codex config keys');
+  }
+  const out: CodexConfigOverride[] = [];
+  const walk = (obj: Record<string, unknown>, prefix: string[]): void => {
+    for (const seg of Object.keys(obj)) {
+      if (!SETTINGS_SEGMENT_RE.test(seg)) {
+        throw new Error(`codex-cli: settings key segment ${JSON.stringify(seg)} is not [A-Za-z0-9_-]+`);
+      }
+      const segs = [...prefix, seg];
+      const key = segs.join('.');
+      if (!CODEX_ALLOWED_SETTINGS_ROOTS.includes(segs[0])) {
+        throw new Error(`codex-cli: settings key "${key}" is refused (only ${CODEX_ALLOWED_SETTINGS_ROOTS.join(', ')} may be set; permissions and sandbox go through permission_mode; ADR-0018 amendment LV-4)`);
+      }
+      if (segs[0] === 'model_providers' && segs.length >= 3 && CODEX_REFUSED_PROVIDER_KEYS.includes(segs[2])) {
+        throw new Error(`codex-cli: settings key "${key}" is refused (a literal credential; use env_key or env_http_headers and --env)`);
+      }
+      if (settingsValueLooksLikeCredential(seg, seg)) {
+        throw new Error('codex-cli: a settings key segment is credential-shaped (key redacted)');
+      }
+      const v = obj[seg];
+      if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+        walk(v as Record<string, unknown>, segs);
+      } else if (Array.isArray(v)) {
+        const items = v.map((item) => {
+          if (item !== null && typeof item === 'object') {
+            throw new Error(`codex-cli: settings key "${key}" has an unsupported value (nested arrays and arrays of objects are refused)`);
+          }
+          return renderTomlScalar(key, item, seg);
+        });
+        out.push({ key, value: `[${items.join(', ')}]` });
+      } else {
+        out.push({ key, value: renderTomlScalar(key, v, seg) });
+      }
+    }
+  };
+  walk(settings as Record<string, unknown>, []);
+  return out.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+}
+
 /** Build the headless argv (ADR-0018 §Decision 1). Pure; exported for tests. */
-export function buildCodexArgv(profile: Pick<SetupProfile, 'model' | 'workdir' | 'permission_mode'>, task: string): string[] {
+export function buildCodexArgv(profile: Pick<SetupProfile, 'model' | 'workdir' | 'permission_mode' | 'settings'>, task: string): string[] {
   const flags = parseCodexPermissionMode(profile.permission_mode);
+  const overrides = codexSettingsOverrides(profile.settings);
   // The prompt is positional; a task starting with '-' would be parsed as an option (e.g.
   // "--yolo") and could loosen the run, and a bare "-" reads the prompt from stdin (NOTES).
   // Refuse rather than rely on `--` handling, which no primary source documents for exec.
@@ -119,6 +225,8 @@ export function buildCodexArgv(profile: Pick<SetupProfile, 'model' | 'workdir' |
     throw new Error(`codex-cli: task text must not be an exec subcommand name (${EXEC_SUBCOMMANDS.join(', ')})`);
   }
   const argv = ['exec', '--json', '-C', requireWorkdir(profile, 'codex-cli'), '-m', profile.model];
+  // ADR-0018 amendment LV-4: settings overrides after -m, before the permission flags, sorted.
+  for (const o of overrides) argv.push('-c', `${o.key}=${o.value}`);
   if (flags.sandbox) argv.push('--sandbox', flags.sandbox);
   if (flags.approveForMe) argv.push('--approve-for-me');
   if (flags.bypassApprovalsAndSandbox) argv.push('--dangerously-bypass-approvals-and-sandbox');
@@ -147,7 +255,9 @@ export function codexFlagNames(argv: string[]): string[] {
   }
   return out;
 }
-const CODEX_VALUE_FLAGS = new Set(['-C', '-m', '--sandbox']);
+// `-c` is recorded without its value (ADR-0018 amendment LV-4): the dotted keys go to
+// forwarded_settings, the values only to the settings digest.
+const CODEX_VALUE_FLAGS = new Set(['-C', '-m', '-c', '--sandbox']);
 
 export class CodexCliAdapter implements Adapter {
   readonly id: AgentId = 'codex-cli';
@@ -307,6 +417,11 @@ export class CodexCliAdapter implements Adapter {
       warnings,
     });
     observation.env_forwarded = envNames(env);
+    // ADR-0018 amendment LV-4 D3: the dotted keys forwarded as -c overrides (never the values).
+    const forwardedKeys = codexSettingsOverrides(profile.settings).map((o) => o.key);
+    if (forwardedKeys.length > 0) {
+      observation.forwarded_settings = { keys: forwardedKeys, hook_events: [], harness_hook_events: [] };
+    }
     return observation;
   }
 }

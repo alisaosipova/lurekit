@@ -13,6 +13,7 @@ import {
   CodexCliAdapter,
   buildCodexArgv,
   codexFlagNames,
+  codexSettingsOverrides,
   describeCodexItem,
   newCodexStreamState,
   observeCodexRun,
@@ -135,6 +136,115 @@ describe('permission_mode grammar and argv (§4.1 invariant 1)', () => {
     // The separator is part of what ran (s4.1) and is listed; nothing after it is.
     expect(codexFlagNames(argv)).toEqual(['--json', '-C', '-m', '--sandbox', '--']);
     expect(codexFlagNames(['exec', '--json', '--', '--not-a-flag'])).toEqual(['--json', '--']);
+  });
+});
+
+describe('settings as -c overrides (ADR-0018 amendment LV-4)', () => {
+  const PROVIDER = {
+    model_providers: { lab: { wire_api: 'responses', name: 'Lab', base_url: 'http://127.0.0.1:9/v1', env_key: 'CODEX_API_KEY' } },
+    model_provider: 'lab',
+    model_reasoning_effort: 'low',
+    request_max_retries: 2,
+    model_verbosity: ['a', 1, true],
+  };
+
+  it('flattens, sorts and TOML-renders a nested provider file after -m and before --sandbox', () => {
+    const argv = buildCodexArgv({ model: MODEL, workdir: '/w', permission_mode: 'sandbox=read-only', settings: PROVIDER }, TASK);
+    expect(argv).toEqual([
+      'exec', '--json', '-C', '/w', '-m', MODEL,
+      '-c', 'model_provider="lab"',
+      '-c', 'model_providers.lab.base_url="http://127.0.0.1:9/v1"',
+      '-c', 'model_providers.lab.env_key="CODEX_API_KEY"',
+      '-c', 'model_providers.lab.name="Lab"',
+      '-c', 'model_providers.lab.wire_api="responses"',
+      '-c', 'model_reasoning_effort="low"',
+      '-c', 'model_verbosity=["a", 1, true]',
+      '-c', 'request_max_retries=2',
+      '--sandbox', 'read-only', '--', TASK,
+    ]);
+    // A string is rendered as a JSON string (valid TOML basic string), escapes included.
+    expect(codexSettingsOverrides({ model: 'q"\\x\n' })).toEqual([{ key: 'model', value: '"q\\"\\\\x\\n"' }]);
+  });
+
+  it('emits no -c pair without settings, or with null/empty settings', () => {
+    for (const settings of [undefined, null, {}]) {
+      expect(buildCodexArgv({ model: MODEL, workdir: '/w', settings }, TASK)).toEqual(['exec', '--json', '-C', '/w', '-m', MODEL, '--', TASK]);
+    }
+  });
+
+  it('refuses every loosening key class before argv is built', () => {
+    for (const root of ['approval_policy', 'sandbox_mode', 'sandbox_workspace_write', 'shell_environment_policy', 'hooks', 'mcp_servers', 'profile', 'profiles', 'notify']) {
+      expect(() => codexSettingsOverrides({ [root]: 'x' })).toThrow(/is refused/);
+      expect(() => codexSettingsOverrides({ [root]: { nested: true } })).toThrow(/is refused/);
+    }
+    // Only the first segment is refused: a provider named "hooks" is a plain value.
+    expect(codexSettingsOverrides({ model_providers: { hooks: { name: 'n' } } })).toEqual([{ key: 'model_providers.hooks.name', value: '"n"' }]);
+  });
+
+  it('refuses null, nested arrays, object arrays, bad segments and non-object bodies', () => {
+    expect(() => codexSettingsOverrides({ model: null })).toThrow(/null/);
+    expect(() => codexSettingsOverrides({ model: [1, null] })).toThrow(/null/);
+    expect(() => codexSettingsOverrides({ model: [[1]] })).toThrow(/nested arrays/);
+    expect(() => codexSettingsOverrides({ model: [{ b: 1 }] })).toThrow(/nested arrays/);
+    for (const seg of ['a.b', 'a b', 'a=b', '', 'x"y']) expect(() => codexSettingsOverrides({ [seg]: 1 })).toThrow(/key segment/);
+    expect(() => codexSettingsOverrides({ model_providers: { 'a.b': 1 } })).toThrow(/key segment/);
+    for (const body of [[], 'x', 3, true]) expect(() => codexSettingsOverrides(body)).toThrow(/JSON object/);
+  });
+
+  it('refuses credential-shaped values without echoing them, accepts a key name and placeholders', () => {
+    const secrets: Record<string, unknown>[] = [
+      { model_providers: { p: { api_key: 'abcdefgh12345678' } } },          // json member shape
+      { model: 'sk-' + 'a'.repeat(24) },                                         // token family
+      { model: ['ok', 'ghp_' + 'b'.repeat(24)] },                                // inside an array
+      { model_providers: { p: { base_url: 'http://u:hunter2pass@127.0.0.1/v1' } } }, // URL userinfo
+      { model: 'Bearer ' + 'c'.repeat(30) },
+    ];
+    for (const body of secrets) {
+      let msg = '';
+      try { codexSettingsOverrides(body); } catch (e) { msg = (e as Error).message; }
+      expect(msg).toMatch(/credential-shaped value \(value redacted\)/);
+      for (const v of ['abcdefgh12345678', 'a'.repeat(24), 'b'.repeat(24), 'hunter2pass', 'c'.repeat(30)]) expect(msg).not.toContain(v);
+    }
+    expect(codexSettingsOverrides({ model_providers: { p: { env_key: 'CODEX_API_KEY', api_key: '<redacted>' } } }).map((o) => o.key)).toEqual(['model_providers.p.api_key', 'model_providers.p.env_key']);
+  });
+
+  it('codexFlagNames records -c without its value', () => {
+    const argv = buildCodexArgv({ model: MODEL, workdir: '/w', permission_mode: 'sandbox=read-only', settings: { model: 'm2', model_providers: { p: { name: 'd' } } } }, TASK);
+    const names = codexFlagNames(argv);
+    expect(names).toEqual(['--json', '-C', '-m', '-c', '-c', '--sandbox', '--']);
+    expect(names.join(' ')).not.toMatch(/=/);
+  });
+
+  it('a stub run forwards the overrides, records the keys and keeps CODEX_HOME run-scoped', async () => {
+    const h = await harness({ settings: PROVIDER });
+    const obs = await run(h);
+    const argv = await readJson<string[]>(h.argvPath);
+    expect(argv).toEqual(buildCodexArgv(h.profile, TASK));
+    expect(argv).toContain('model_providers.lab.base_url="http://127.0.0.1:9/v1"');
+    expect(obs.forwarded_settings).toEqual({
+      keys: [
+        'model_provider', 'model_providers.lab.base_url', 'model_providers.lab.env_key',
+        'model_providers.lab.name', 'model_providers.lab.wire_api', 'model_reasoning_effort',
+        'model_verbosity', 'request_max_retries',
+      ],
+      hook_events: [],
+      harness_hook_events: [],
+    });
+    expect(JSON.stringify(obs.agent_flags)).not.toContain('127.0.0.1');
+    expect((await readJson<{ CODEX_HOME: string }>(h.envPath)).CODEX_HOME).toBe(path.join(h.runDir, 'codex-home'));
+    expect(obs.warnings!.join('\n')).not.toMatch(/CODEX_HOME/);
+  });
+
+  it('a run without settings records no forwarded_settings', async () => {
+    const obs = await run(await harness());
+    expect(obs.forwarded_settings).toBeUndefined();
+  });
+
+  it('a refused settings body throws before spawn (no argv recorded)', async () => {
+    const h = await harness({ settings: { sandbox_mode: 'danger-full-access' } });
+    await expect(run(h)).rejects.toThrow(/is refused/);
+    await expect(stat(h.argvPath)).rejects.toThrow();
+    await expect(stat(h.runDir)).rejects.toThrow();
   });
 });
 
@@ -390,5 +500,25 @@ describe('CLI wiring', () => {
     const a = defaultDeps().adapterFor('codex-cli');
     expect(a.id).toBe('codex-cli');
     expect(a).toBeInstanceOf(CodexCliAdapter);
+  });
+});
+
+describe('codex-cli settings allow list (review of ADR-0018 LV-4)', () => {
+  it('refuses keys that loosen a live codex 0.166 run and literal credentials', async () => {
+    const { codexSettingsOverrides } = await import('../src/adapters/codexCli.js');
+    const refused: unknown[] = [
+      { default_permissions: ':danger-full-access' },
+      { permissions: { p: { sandbox: 'danger-full-access' } } },
+      { approvals_reviewer: 'auto_review' },
+      { features: { x: true } },
+      { projects: { w: { trust_level: 'trusted' } } },
+      { model_providers: { p: { http_headers: { 'X-Api-Key': 'abcd1234efgh5678ijkl9012' } } } },
+      { model_providers: { ghp_abcdefghijklmnopqrstuvwxyz0123456789: { name: 'x' } } },
+      { model: 'a\u007fb' },
+      { model_context_window: 12345678901234567890 },
+    ];
+    for (const body of refused) expect(() => codexSettingsOverrides(body), JSON.stringify(body)).toThrow(/codex-cli: /);
+    expect(codexSettingsOverrides({ model_provider: 'p', model_providers: { p: { base_url: 'https://example.invalid/v1', env_key: 'CODEX_API_KEY', wire_api: 'responses' } } }).map((o) => o.key))
+      .toEqual(['model_provider', 'model_providers.p.base_url', 'model_providers.p.env_key', 'model_providers.p.wire_api']);
   });
 });

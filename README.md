@@ -193,7 +193,7 @@ LureKit <!-- n:versions.tool -->1.6.0<!-- /n --> is the latest npm release (see 
 - <!-- n:adapters.count -->4<!-- /n --> agent adapters: `claude-code` (live-validated), `cursor-cli`, `codex-cli` and `openhands`
   (implemented and tested against offline stubs; not yet live-validated), plus the `replay`
   adapter (`run --replay`).
-- The offline commands and the test suite (<!-- n:tests -->1265<!-- /n --> tests, as `vitest list` counts them) run in CI. A live `run` against a real agent is a manual step
+- The offline commands and the test suite (<!-- n:tests -->1275<!-- /n --> tests, as `vitest list` counts them) run in CI. A live `run` against a real agent is a manual step
   performed by the maintainer; it is not part of CI.
 - Published runs: <!-- n:bundles -->10<!-- /n --> run bundles under [reports/](reports/), one row each in
   [docs/verified-against.md](docs/verified-against.md), and the measurement summaries in

@@ -572,8 +572,11 @@ done; recorded limit).
   body that sets `disableAllHooks` or `allowManagedHooksOnly` (other than `false`), or
   `permissions.defaultMode`, throws before spawn: a body cannot switch off the observe hook, and
   the permission mode, `--strict-mcp-config`, `--setting-sources` and `--bare` stay argv-driven
-  (never loosened by a body). The CLI rejects `--settings` / `--hooks`
-  for every agent other than `claude-code` (no other adapter forwards them).
+  (never loosened by a body). The CLI rejects `--hooks` for every agent other than
+  `claude-code` and `--settings` for every agent other than `claude-code` and `codex-cli` (no
+  other adapter forwards them). codex-cli forwards `settings` as sorted `-c` overrides and
+  records `forwarded_settings: { keys: <dotted keys>, hook_events: [], harness_hook_events: [] }`
+  (ADR-0018 amendment LV-4).
 - **MCP server report.** The adapter records `system/init.mcp_servers` as
   `observation.mcp_servers: [{ name, status, source? }]` (normalised by `normalizeMcpServers()`;
   entries without a name are dropped; a later init without a list does not erase an earlier

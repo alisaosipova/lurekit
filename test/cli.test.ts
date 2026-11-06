@@ -183,7 +183,6 @@ describe('cli --setting-sources (§4.3 hardening knob)', () => {
 describe('cli --settings/--hooks forwarding guard (ADR-0020)', () => {
   it.each([
     ['cursor-cli', 'settings'],
-    ['codex-cli', 'settings'],
     ['openhands', 'settings'],
     ['cursor-cli', 'hooks'],
     ['codex-cli', 'hooks'],
@@ -194,8 +193,26 @@ describe('cli --settings/--hooks forwarding guard (ADR-0020)', () => {
     const stub = new StubAdapter({});
     await expect(
       main(['run', realScenarios, '--model', 'm', '--agent', agent, '--results', path.join(tmp, 'runs'), `--${flag}`, file], deps(() => stub)),
-    ).rejects.toThrow(new RegExp(`--${flag} is only forwarded by the claude-code adapter.*"${agent}"`));
+    ).rejects.toThrow(new RegExp(`--${flag} is only forwarded by the claude-code (adapter|and codex-cli adapters).*"${agent}"`));
     expect(stub.runCount).toBe(0);
+  });
+
+  it('accepts --settings for codex-cli (ADR-0018 amendment LV-4) and forwards the body to the adapter', async () => {
+    const file = path.join(tmp, 'codex-settings.json');
+    writeFileSync(file, JSON.stringify({ model_provider: 'p', model_providers: { p: { base_url: 'http://127.0.0.1:9/v1', wire_api: 'responses' } } }), 'utf8');
+    expect(await main(['plan', realScenarios, '--model', 'm', '--agent', 'codex-cli', '--settings', file], deps())).toBe(0);
+    const seen: unknown[] = [];
+    class Capture extends StubAdapter {
+      override async run(...args: Parameters<StubAdapter['run']>): ReturnType<StubAdapter['run']> {
+        seen.push(args[0].settings);
+        return super.run(...args);
+      }
+    }
+    await main(['run', realScenarios, '--only', 'AAB-058', '--model', 'm', '--agent', 'codex-cli', '--results', path.join(tmp, 'runs'), '--yes', '--settings', file], deps(() => new Capture({})));
+    expect(seen.length).toBeGreaterThan(0);
+    for (const s of seen) {
+      expect(s).toEqual({ model_provider: 'p', model_providers: { p: { base_url: 'http://127.0.0.1:9/v1', wire_api: 'responses' } } });
+    }
   });
 
   it('accepts --settings and --hooks for claude-code (plan exits 0)', async () => {
