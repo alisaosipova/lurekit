@@ -1527,6 +1527,12 @@ const USAGE = `LureKit — a disclosure-traced security benchmark for deployed c
 
 Usage: lurekit <command> [options]
 
+Start here:
+  lurekit demo                        see a real published result (no agent, no cost)
+  lurekit doctor                      check this machine before a live run
+  lurekit run --model <id>            smoke run against your agent (asks before it spends)
+  lurekit report <runDir> --format sarif   evidence for your security tooling
+
 Commands:
   doctor [dir]     Check Node, the agent binary (path, version, auto-update), auth (no-spend
                    probes only), corpus, detector self-tests, and estimate the cost. Exit 1 on

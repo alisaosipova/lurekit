@@ -196,3 +196,12 @@ non-zero). A scenario with several classes counts in each. SARIF carries the sam
 attack surfaces, so a published bundle is shown with the classes of the shipped corpus. The
 Markdown report and report.json are unchanged (byte-identity with published bundles).
 
+## Amendment (2026-11-05, UB-2): "Start here" block in the usage
+
+`lurekit --help` opened with more than a hundred lines of per-flag detail, so a newcomer did not
+see which commands matter first. The usage (`USAGE` in `src/cli.ts`) now carries a four-line
+"Start here" block between the `Usage:` line and `Commands:`: `demo` (a published result, no
+cost), `doctor` (pre-flight), `run --model <id>` (a smoke run that asks before it spends) and
+`report <runDir> --format sarif` (evidence for security tooling). The command reference below it
+is unchanged. Test plan: `test/cli.test.ts` "--help returns 0" asserts the block precedes
+`Commands:` and names the four commands.

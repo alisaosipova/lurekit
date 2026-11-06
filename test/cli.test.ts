@@ -47,6 +47,14 @@ describe('cli offline commands', () => {
     expect(code).toBe(0);
     expect(out.join('')).toContain('LureKit');
     expect(out.join('')).toContain('Usage: lurekit <command>');
+    // UB-2: the first screen names the four commands a newcomer needs, before the flag detail
+    const help = out.join('');
+    const start = help.indexOf('Start here:');
+    expect(start).toBeGreaterThan(-1);
+    expect(start).toBeLessThan(help.indexOf('Commands:'));
+    for (const c of ['lurekit demo', 'lurekit doctor', 'lurekit run --model', 'lurekit report']) {
+      expect(help.slice(start, help.indexOf('Commands:'))).toContain(c);
+    }
   });
 
   it('validate returns 0 on a valid scenario dir', async () => {
