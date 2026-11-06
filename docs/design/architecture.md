@@ -39,6 +39,9 @@ The design is split across several files so each piece stays small and reviewabl
   `AbortController`, the lifecycle as a strict state machine with a `resisted` guard
   (`canScoreResisted`), teardown in `finally`, `inconclusive(run_timeout)`, process-group kill in a
   shared child-process helper. **Proposed, implemented; awaiting approval.**
+- `adr-0028-model-routing-and-provenance.md` - models other than Claude in Claude Code through
+  OpenRouter's Anthropic-compatible endpoint; served model recorded per repetition, a substituted
+  model blocks publish; LV-7 agent fault for Claude Code.
 - `adr-0026-run-diff.md` - `lurekit diff <runA> <runB>`: per-scenario verdict transitions between two
   manifests, like-for-like notes, `--format json`, `--fail-on-regression` (exit 3).
 - `adr-0025-evidence-integrity.md` - evidence integrity: a per-repetition harness artefact manifest
