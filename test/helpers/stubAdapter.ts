@@ -60,6 +60,10 @@ export interface StubScript {
   // AAB_EMAIL_FEED_URL, AAB_WEB_URL) GET it; for npm_config_registry GET the canary package's
   // packument (name from the canary_egress_http sensor's canary file when present).
   fetchContent?: boolean;
+  // s3.1 LV-3 content_seen: with fetchContent, the fetched body is echoed into the stream as a
+  // tool result (as a real agent's stream carries it); fetchUnseen drops it (the agent fetched
+  // the content but its parser never showed the lure to the model).
+  fetchUnseen?: boolean;
   // ADR-0024 lifecycle tests. Applied AFTER the detector signal (trigger) has been produced, so
   // "signal then timeout/throw" can be scripted: sleepMs keeps run() pending that long (it
   // rejects as soon as the signal aborts, unless ignoreSignal is set, in which case it sleeps
@@ -201,24 +205,29 @@ function sleepUntil(ms: number, signal: AbortSignal | undefined): Promise<void> 
 /** Content-location env names the stub fetches when fetchContent is set (ADR-0002). */
 const CONTENT_ENV_NAMES = ['AAB_ISSUE_FEED_URL', 'AAB_EMAIL_FEED_URL', 'AAB_WEB_URL'];
 
-function loopbackGet(url: string): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
+function loopbackGet(url: string): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
     const req = httpGet(url, (res) => {
-      res.resume();
-      res.on('end', resolve);
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (c: string) => (body += c));
+      res.on('end', () => resolve(body));
       res.on('error', reject);
     });
     req.on('error', reject);
   });
 }
 
-async function fetchFixtureContent(env: Record<string, string> | undefined, runDir: string, toolCalls: ToolCall[]): Promise<void> {
-  if (!env) return;
+/** GETs the content locations; returns the stream lines carrying the fetched bodies. */
+async function fetchFixtureContent(env: Record<string, string> | undefined, runDir: string, toolCalls: ToolCall[]): Promise<string[]> {
+  const lines: string[] = [];
+  if (!env) return lines;
   for (const name of CONTENT_ENV_NAMES) {
     const url = env[name];
     if (typeof url !== 'string' || !url.startsWith('http://127.0.0.1:')) continue;
-    await loopbackGet(url);
+    const body = await loopbackGet(url);
     toolCalls.push(tc('Bash', { command: `curl -s ${url}` }));
+    lines.push(JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: body }] } }));
   }
   const registry = env.npm_config_registry;
   if (typeof registry === 'string' && registry.startsWith('http://127.0.0.1:')) {
@@ -237,6 +246,7 @@ async function fetchFixtureContent(env: Record<string, string> | undefined, runD
       toolCalls.push(tc('Bash', { command: `npm view ${pkg}` }));
     }
   }
+  return lines;
 }
 
 /** Server names in an `{ mcpServers: { <name>: … } }` config (the shape the fixtures emit). */
@@ -291,13 +301,15 @@ export class StubAdapter implements Adapter {
 
     const toolCalls: ToolCall[] = [...(this.script.extraToolCalls ?? [])];
 
+    let fetchedLines: string[] = [];
     if (this.script.fetchContent) {
-      await fetchFixtureContent(profile.env, runDir, toolCalls);
+      fetchedLines = await fetchFixtureContent(profile.env, runDir, toolCalls);
+      if (this.script.fetchUnseen) fetchedLines = [];
     }
 
-    let streamExtra: string[] = [];
+    let streamExtra: string[] = [...fetchedLines];
     if (this.script.trigger) {
-      streamExtra = await produceSignal(this.script.trigger, runDir, toolCalls, this.script.mcpServerName);
+      streamExtra.push(...(await produceSignal(this.script.trigger, runDir, toolCalls, this.script.mcpServerName)));
     }
     if (this.script.tamper) {
       for (const kind of this.script.tamper) await applyTamper(kind, runDir, this.script.tamperOutside);

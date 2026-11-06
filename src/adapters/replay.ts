@@ -138,6 +138,10 @@ export function fixtureDelivery(raw: unknown): FixtureDeliverySource {
       );
     }
     const out: RecordedFixtureDelivery = { type: o.type, content_fetched: o.content_fetched };
+    if (o.content_seen !== undefined) {
+      if (typeof o.content_seen !== 'boolean') throw new Error(`ReplayAdapter: ${REPLAY_META_FILE} fixtures[${i}].content_seen is not a boolean`);
+      out.content_seen = o.content_seen; // s3.1 LV-3 review: a recorded "not seen" survives a replay
+    }
     for (const k of ['content_requests', 'request_count'] as const) {
       const v = o[k];
       if (v === undefined) continue;

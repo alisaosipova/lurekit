@@ -98,7 +98,12 @@ class AlignmentStub extends StubAdapter {
       this.httpResult = await callDecoy(client);
       await client.close();
     }
-    return super.run(...args);
+    const obs = await super.run(...args);
+    // s3.1 LV-3 content_seen: the content this agent read is part of what it saw (a real agent's
+    // stream carries the tool result), so the delivered lure counts as seen.
+    const read = (this.feed ?? '') + (this.page ?? '');
+    if (read) obs.assistant_text = [...(obs.assistant_text ?? []), read];
+    return obs;
   }
 }
 

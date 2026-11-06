@@ -260,6 +260,7 @@ export type SkillsLoadedSource =
 export interface RecordedFixtureDelivery {
   type: string;
   content_fetched: boolean;
+  content_seen?: boolean; // s3.1 LV-3: the recorded live verdict on whether the lure was seen
   content_requests?: number;
   request_count?: number;
 }

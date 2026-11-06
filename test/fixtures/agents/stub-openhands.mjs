@@ -28,6 +28,12 @@
 //   AAB_STUB_TRANSCRIPT_EXTRA=1  persist one extra ActionEvent that is not streamed
 //   AAB_STUB_HANG=1 + AAB_STUB_READY  write the ready marker, then hang
 //   AAB_STUB_NO_CONV_ID=1  print no "Conversation ID:" line
+//   AAB_STUB_REPLAY=<file> print a recorded live openhands stream (LV-3, 2026-11-06): first GET the
+//                          current run's AAB_ISSUE_FEED_URL / AAB_WEB_URL (loopback only, so the
+//                          fixture counts the delivery), replace {{FEED_URL}} / {{WEB_URL}} with
+//                          those URLs and {{CANARY_PATH}} with the launcher path named in the
+//                          served content (JSON-escaped), persist the stream's JSON events as the
+//                          conversation transcript under the "Conversation ID:" line, then exit 0
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -79,6 +85,36 @@ if (argv.includes('--override-with-envs') && !hasSettings) {
     process.stderr.write(`Missing required environment variable(s): ${missing.join(', ')}\n`);
     process.exit(1);
   }
+}
+
+if (env.AAB_STUB_REPLAY) {
+  const loopback = (u) => typeof u === 'string' && u.startsWith('http://127.0.0.1:');
+  const feedUrl = loopback(env.AAB_ISSUE_FEED_URL) ? env.AAB_ISSUE_FEED_URL : '';
+  const webUrl = loopback(env.AAB_WEB_URL) ? env.AAB_WEB_URL : '';
+  let served = '';
+  for (const u of [feedUrl, webUrl]) {
+    if (!u) continue;
+    try { served += await (await fetch(u)).text(); } catch { /* not served: nothing counted */ }
+  }
+  const m = /[^\s`'"<>]*canary_bin[\\/]aab-canary-[0-9a-f]+(?:\.cmd)?/.exec(served.replace(/\\\\/g, '\\'));
+  const launcher = m ? m[0] : '';
+  const esc = (v) => JSON.stringify(v).slice(1, -1); // JSON-escaped (Windows backslashes)
+  const text = fs.readFileSync(env.AAB_STUB_REPLAY, 'utf8')
+    .split('{{CANARY_PATH}}').join(esc(launcher))
+    .split('{{FEED_URL}}').join(esc(feedUrl))
+    .split('{{WEB_URL}}').join(esc(webUrl));
+  const id = /^Conversation ID: ([0-9a-f]+)/m.exec(text)?.[1];
+  if (id) {
+    const dir = path.join(conversations, id);
+    fs.mkdirSync(path.join(dir, 'events'), { recursive: true });
+    text.split('\n').filter((l) => l.startsWith('{')).forEach((l, i) => {
+      const e = JSON.parse(l);
+      fs.writeFileSync(path.join(dir, 'events', `event-${String(i).padStart(5, '0')}-${e.id}.json`), JSON.stringify(e, null, 2), 'utf8');
+    });
+    fs.writeFileSync(path.join(dir, 'base_state.json'), JSON.stringify({ id, agent: { kind: 'Agent', llm: { model: env.LLM_MODEL, api_key: '**********' } }, execution_status: 'finished' }, null, 2), 'utf8');
+  }
+  process.stdout.write(text.endsWith('\n') ? text : text + '\n');
+  process.exit(0);
 }
 
 const say = (s) => process.stdout.write(s + '\n');

@@ -138,6 +138,10 @@ export interface FixtureDelivery {
   type: string;
   source: 'live' | 'recording' | 'not_observable';
   content_fetched?: boolean;
+  // s3.1 LV-3: a per-run canary value of the lure appears in the agent's stream or assistant
+  // text (or the detector hit). Live deliveries with content_fetched true only; absent when not
+  // evaluated.
+  content_seen?: boolean;
   content_requests?: number;
   request_count?: number;
 }

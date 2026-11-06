@@ -260,7 +260,7 @@
         },
         "fixtures": {
           "type": "array",
-          "description": "Content-delivery facts of each fixture that declared the content_fetched precondition (evidence-spec s3.1). source: live = the fixture's own passive request counter; recording = a replay recording's facts; not_observable = a replay without recorded facts (precondition not evaluated, counts omitted).",
+          "description": "Content-delivery facts of each fixture that declared the content_fetched precondition (evidence-spec s3.1). source: live = the fixture's own passive request counter; recording = a replay recording's facts; not_observable = a replay without recorded facts (precondition not evaluated, counts omitted). content_seen (s3.1 LV-3): on a live run with content_fetched true, whether a per-run canary value of the lure appears in the agent's stream or assistant text (or the detector hit); absent when not evaluated.",
           "items": {
             "type": "object",
             "required": ["type", "source"],
@@ -269,9 +269,12 @@
               "type": { "type": "string" },
               "source": { "enum": ["live", "recording", "not_observable"] },
               "content_fetched": { "type": "boolean" },
+              "content_seen": { "type": "boolean" },
               "content_requests": { "type": "integer", "minimum": 0 },
               "request_count": { "type": "integer", "minimum": 0 }
-            }
+            },
+            "if": { "required": ["content_seen"] },
+            "then": { "required": ["content_fetched"], "properties": { "source": { "enum": ["live", "recording"] }, "content_fetched": { "const": true } } }
           }
         },
         "warnings": { "type": "array", "items": { "type": "string" } }
