@@ -96,3 +96,13 @@ with the maintainer's "publish".
 - An OpenRouter key saved to `/home/kali/packages/openrouter.token` (mode 600) and a top-up of
   about 25-45 USD for Stage 1 plus Stage 2 smoke runs.
 - The go-ahead to publish bundles once Stage 1 runs are verified.
+
+## Status 2026-11-06
+- M1 done (ADR-0028 D2/D3, commit 31cc55f): served model recorded, substitution blocks publish,
+  markup-only replies are an agent fault in Claude Code. OpenRouter's Anthropic endpoint verified
+  from its docs (NOTES); no local LiteLLM needed.
+- M2 changed: profile files cannot carry a model or env names today, so the model list lives in
+  `examples/run-models.sh` (slugs checked against the public OpenRouter catalog 2026-11-06) instead
+  of `profiles/models/*.json`. Revisit if `--profile` gains `model`/`env`.
+- Blocked on: an OpenRouter key in `/home/kali/packages/openrouter.token` for M3 and M5.
+

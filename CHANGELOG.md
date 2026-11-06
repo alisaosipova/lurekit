@@ -25,6 +25,8 @@ No release is cut without changes.
   and `publish` refuses it, so a substituted model never becomes a published result.
 - A Claude Code repetition in which the model wrote tool-call markup instead of calling a tool is
   `inconclusive(adapter_error)`, as for Codex (LV-7).
+- `examples/run-models.sh`: the corpus in Claude Code against the top-10 model families through
+  OpenRouter's Anthropic-compatible endpoint, one budgeted run per model.
 
 ### Added (live validation, LV-4)
 

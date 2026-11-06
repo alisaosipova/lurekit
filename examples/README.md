@@ -12,6 +12,7 @@ concepts behind them, read [docs/guide/scenarios.md](../docs/guide/scenarios.md)
 | `profiles/README.md` | A pointer: the setup profiles live in [`../profiles/`](../profiles/) (one directory, no copies). |
 | `run-offline.sh` | The whole pipeline with no agent and no spend. Safe to run; execute it. |
 | `run-live.sh` | A reference for a budgeted LIVE run against a pinned binary. Commented out; not executed. |
+| `run-models.sh` | Run the corpus in Claude Code against the top-10 model families through OpenRouter (ADR-0028); needs `OPENROUTER_API_KEY`, spends money, `--budget 5` per model. |
 
 ## scenario-template.yaml
 
