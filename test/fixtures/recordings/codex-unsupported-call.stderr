@@ -1,0 +1,3 @@
+2026-11-06T06:38:35.468298Z ERROR codex_core::tools::router: error=unsupported call: functions.exec
+2026-11-06T06:38:35.730324Z ERROR codex_core::tools::router: error=unsupported call: functions.exec
+2026-11-06T06:38:45.983490Z ERROR codex_core::tools::router: error=unsupported call: functions.exec

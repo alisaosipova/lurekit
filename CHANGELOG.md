@@ -28,6 +28,16 @@ No release is cut without changes.
   the dotted keys in `forwarded_settings` (ADR-0018 amendment LV-4). `--hooks` stays claude-code
   only.
 
+### Fixed (live validation, LV-7)
+
+- A false `degraded` with Codex: when the CLI rejects the model's tool calls as unsupported
+  (`ERROR codex_core::tools::router: error=unsupported call` on stderr, seen with a proxy serving a
+  non-OpenAI model under an OpenAI name) the agent exits 0 with no tool call, and the repetition
+  scored `degraded`. It is now `inconclusive(adapter_error)` with the warning `agent rejected <n>
+  tool call(s) from the model as unsupported ...` and `observation.agent_fault: true` (new
+  optional evidence field); a detector hit still scores `vulnerable`. The run's diagnosis files it
+  under `model`: use a model the agent's CLI supports (ADR-0018 amendment LV-7).
+
 ### Fixed (live validation of codex-cli, LV-1/LV-2)
 
 - A false `resisted` with Codex: in the default read-only `codex exec` sandbox the agent ran the

@@ -41,8 +41,11 @@ const PATTERNS: Array<[Exclude<IssueCategory, 'sensor' | 'tampered' | 'budget' |
     'network',
     /failed to lookup address|waiting for network|\bENOTFOUND\b|\bEAI_AGAIN\b|\bECONNREFUSED\b|\bECONNRESET\b|\bETIMEDOUT\b|getaddrinfo|Connection failed|network is unreachable|fetch failed/i,
   ],
-  ['model', /Model metadata for .* not found|unknown model|invalid model|model_not_found|\bmodel\b.*\b(does not exist|not found)/i],
+  ['model', /Model metadata for .* not found|unknown model|invalid model|model_not_found|\bmodel\b.*\b(does not exist|not found)|tool call\(s\) from the model as unsupported/i],
 ];
+
+/** ADR-0018 amendment LV-7: the codex-cli warning for tool calls its router rejected. */
+const UNSUPPORTED_CALLS_RE = /tool call\(s\) from the model as unsupported/;
 
 export const CATEGORY_ORDER: readonly IssueCategory[] = ['tampered', 'sensor', 'budget', 'timeout', 'benign', 'binary', 'permission', 'auth', 'network', 'model', 'adapter'];
 
@@ -99,7 +102,7 @@ function cap(s: string, n = 240): string {
   return one.length > n ? `${one.slice(0, n)}...` : one;
 }
 
-function advice(cat: IssueCategory, ctx: DiagnoseContext): { what: string; next: string } {
+function advice(cat: IssueCategory, ctx: DiagnoseContext, example = ''): { what: string; next: string } {
   const info = agentInfo(ctx.agent);
   const doctor = `lurekit doctor --agent ${ctx.agent}`;
   switch (cat) {
@@ -155,6 +158,13 @@ function advice(cat: IssueCategory, ctx: DiagnoseContext): { what: string; next:
         next: `check the network or proxy the agent uses, then ${doctor} and re-run`,
       };
     case 'model':
+      // ADR-0018 amendment LV-7: the model id was accepted, but its tool calls do not fit the CLI.
+      if (UNSUPPORTED_CALLS_RE.test(example)) {
+        return {
+          what: `the model "${ctx.model}" emitted tool calls ${ctx.agent} rejects as unsupported; they are inconclusive(adapter_error), not passes`,
+          next: "use a model the agent's CLI supports (codex: an OpenAI Responses model)",
+        };
+      }
       return {
         what: `the model id "${ctx.model}" is not one ${ctx.agent} knows`,
         next: `re-run with a model id the agent accepts${ctx.agent === 'claude-code' ? ' (e.g. --model sonnet)' : ''}; ${doctor} --model <id> shows what is checked`,
@@ -182,7 +192,7 @@ export function diagnoseRun(reps: RepIssue[], ctx: DiagnoseContext): Diagnosis[]
   for (const cat of CATEGORY_ORDER) {
     const g = groups.get(cat);
     if (!g) continue;
-    out.push({ category: cat, count: g.count, example: g.example, ...advice(cat, ctx), ...(g.evidence_path ? { evidence_path: g.evidence_path } : {}) });
+    out.push({ category: cat, count: g.count, example: g.example, ...advice(cat, ctx, g.example), ...(g.evidence_path ? { evidence_path: g.evidence_path } : {}) });
   }
   return out;
 }

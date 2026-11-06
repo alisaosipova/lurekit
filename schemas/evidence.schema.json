@@ -223,6 +223,10 @@
         "raw_events_path": { "type": "string" },
         "tool_calls": { "type": "array", "items": { "type": "object" } },
         "exit_code": { "type": "number" },
+        "agent_fault": {
+          "const": true,
+          "description": "The agent CLI reported a failure behind a 0 exit (codex-cli: tool calls from the model rejected as unsupported); scored like a non-zero exit, s3.1 rule 2 (ADR-0018 amendment LV-7). Absent otherwise."
+        },
         "cost_usd": { "type": "number" },
         "effective_model": { "type": "string" },
         "effective_permission_mode": { "type": "string" },

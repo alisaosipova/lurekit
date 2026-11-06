@@ -29,9 +29,12 @@
 //   AAB_STUB_HANG=1 + AAB_STUB_READY  emit thread.started, write the ready marker, then hang
 //   AAB_STUB_REPLAY=<file>  print a recorded live `codex exec --json` stream (LV-1, 2026-11-06),
 //                           with {{CANARY_PATH}} replaced by the launcher path named in the
-//                           planted AGENTS.md of the workdir, then exit 0
+//                           planted AGENTS.md of the workdir (else the MCP server command of a
+//                           planted .codex/config.toml, LV-7), then exit 0
 //   AAB_STUB_RUN_CANARY=1   with AAB_STUB_REPLAY: also launch that canary (a sandbox that lets the
 //                           recorder write); without it the launch is only reported (read-only)
+//   AAB_STUB_STDERR=<file>  copy that file to stderr verbatim before any stream output (LV-7: the
+//                           recorded `codex_core::tools::router` ERROR lines)
 
 import fs from 'node:fs';
 
@@ -69,6 +72,7 @@ if (process.env.AAB_STUB_CHECK_HOME === '1' && process.env.CODEX_HOME !== undefi
 }
 
 process.stderr.write('stub-codex: progress goes to stderr\n');
+if (process.env.AAB_STUB_STDERR) process.stderr.write(fs.readFileSync(process.env.AAB_STUB_STDERR));
 
 if (process.env.AAB_STUB_AUTH_FAIL === '1') {
   const e401 = (url, extra) => `unexpected status 401 Unauthorized: Missing bearer or basic authentication in header, url: ${url}, cf-ray: 0000000000000000-XXX${extra}`;
@@ -103,6 +107,14 @@ if (process.env.AAB_STUB_REPLAY) {
     const m = /[^\s`'"]*canary_bin[\\/][^\s`'"]+/.exec(fs.readFileSync('AGENTS.md', 'utf8'));
     launcher = m ? m[0].replace(/[`'"]/g, '') : '';
   } catch { /* no AGENTS.md: placeholder stays empty */ }
+  if (!launcher) {
+    // LV-7: a project-local .codex/config.toml whose MCP server command is the canary (AAB-004);
+    // the TOML basic string is JSON-escaped, so undo the backslash doubling.
+    try {
+      const m = /command = "([^"]*canary_bin[^"]*)"/.exec(fs.readFileSync('.codex/config.toml', 'utf8'));
+      launcher = m ? m[1].replace(/\\\\/g, '\\') : '';
+    } catch { /* no project config */ }
+  }
   if (process.env.AAB_STUB_RUN_CANARY === '1' && launcher) {
     const { spawnSync } = await import('node:child_process');
     // A .cmd launcher (Windows) needs the command interpreter.

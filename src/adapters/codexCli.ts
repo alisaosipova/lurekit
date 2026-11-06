@@ -551,6 +551,22 @@ export const CODEX_RETRY_RE = /^Reconnecting\.\.\. \d+\/\d+ \(/;
 /** The model API rejected the request for missing/invalid credentials (observed 2026-11-03:
  *  "unexpected status 401 Unauthorized: Missing bearer or basic authentication in header"). */
 export const CODEX_AUTH_ERROR_RE = /\b401 Unauthorized\b/;
+/** ADR-0018 amendment LV-7: the CLI rejected a tool call the model emitted in a syntax it does
+ *  not support (observed 2026-11-06, 0.166.0: `ERROR codex_core::tools::router: error=unsupported
+ *  call: functions.exec` on stderr, once per rejected call; any suffix). */
+export const CODEX_UNSUPPORTED_CALL_RE = /codex_core::tools::router: error=unsupported call/;
+/** Tool-call markup a model wrote as text instead of calling a tool (LV-7 review; live forms:
+ *  `<tool_call>`, `<invoke name="functions.exec">`, MiniMax `]<]minimax[>[`). */
+export const TOOL_CALL_MARKUP_RE = /<\/?(?:tool_call|invoke|function_calls?)\b|\]<\]minimax\[>\[/i;
+
+/** ADR-0018 amendment LV-7: the number of stderr lines reporting a tool call the CLI rejected. */
+export function countUnsupportedToolCalls(stderr: string | undefined): number {
+  if (stderr === undefined) return 0;
+  let n = 0;
+  // Review of LV-7: strip ANSI colour codes first (a coloured stderr would hide the line).
+  for (const line of stderr.split('\n')) if (CODEX_UNSUPPORTED_CALL_RE.test(line.replace(/\x1b\[[0-9;]*m/g, ''))) n++;
+  return n;
+}
 
 export interface CodexObservationMeta {
   rawEventsPath: string;
@@ -584,6 +600,23 @@ export function assembleCodexObservation(state: CodexStreamState, meta: CodexObs
   if (meta.exitCode === 0 && !state.sawTurnCompleted && state.failures.length === 0) {
     warnings.push('stream ended without a turn.completed event');
   }
+  // ADR-0018 amendment LV-7: the model and the CLI do not fit; the runner scores the repetition
+  // inconclusive(adapter_error) unless a detector hit (evidence-spec s3.1 rule 2).
+  const unsupported = countUnsupportedToolCalls(meta.stderr);
+  if (unsupported > 0) {
+    warnings.push(
+      `agent rejected ${unsupported} tool call(s) from the model as unsupported (codex tools router); the model does not fit the CLI's tool protocol`,
+    );
+  }
+  // Review of LV-7: the other live form of the mismatch: the model writes its own tool-call
+  // markup into its reply and the CLI runs nothing (4 of 6 live repetitions, no stderr line).
+  const markup = state.calls.length === 0 && (state.assistantText ?? []).some((t) => TOOL_CALL_MARKUP_RE.test(t));
+  if (markup) {
+    warnings.push("the model wrote tool-call markup into its reply and no tool call ran; the model does not fit the CLI's tool protocol");
+  }
+  // Only a run in which no tool call ran is a fault: one stray rejected call next to real calls
+  // (e.g. a hallucinated tool a lure provoked) must not suppress the measurement.
+  const agentFault = state.calls.length === 0 && (unsupported > 0 || markup);
   return {
     raw_events_path: meta.rawEventsPath,
     tool_calls: state.calls,
@@ -600,6 +633,7 @@ export function assembleCodexObservation(state: CodexStreamState, meta: CodexObs
     // Codex stream (a failed command_execution is not a gate denial), so the harness reports
     // none rather than guess (ADR-0018 §Decision 7).
     attempts: [],
+    ...(agentFault ? { agent_fault: true } : {}),
   };
 }
 

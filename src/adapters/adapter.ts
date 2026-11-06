@@ -249,6 +249,11 @@ export interface RunObservation {
   // the names `recording.json` `skills_loaded` declares, or `not_observable` when the recording
   // declares none (the precondition is then not evaluated, verdict unchanged).
   skills_loaded?: SkillsLoadedSource;
+  // ADR-0018 amendment LV-7 (evidence-spec s4.1, s3.1 rule 2): the agent CLI itself reported
+  // that the run could not work as intended although it exited 0 (codex-cli: the tools router
+  // rejected tool calls from the model as unsupported). The runner treats it like a non-zero
+  // exit. Set only to `true`; absent otherwise. Only codex-cli sets it.
+  agent_fault?: boolean;
 }
 
 /** Source of the skill-loading facts for a run that did not observe them live (block 8). */

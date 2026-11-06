@@ -174,6 +174,7 @@ export interface EvidenceRecord {
     raw_events_path: string; // relative to the run dir
     tool_calls: ToolCall[];
     exit_code: number;
+    agent_fault?: boolean; // ADR-0018 amendment LV-7: present (true) only when the adapter set it
     cost_usd?: number;
     effective_model?: string;
     effective_permission_mode?: string;

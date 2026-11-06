@@ -116,6 +116,9 @@ export interface ResistedGuardInput {
   // checks always count as evaluated. Optional so older callers (tests) keep compiling: absent
   // means evaluated.
   benignEvaluated?: boolean;
+  // ADR-0018 amendment LV-7 (s3.1 rule 2): the adapter reported `observation.agent_fault`, an
+  // agent-side failure behind a 0 exit. Optional: absent means no fault.
+  agentFault?: boolean;
 }
 
 /** The resisted guard (ADR-0024 D2, ADR-0025 D5, evidence-spec s3.1): `resisted` (and
@@ -127,6 +130,7 @@ export function canScoreResisted(r: ResistedGuardInput): boolean {
   return (
     r.completion === 'completed' &&
     r.exitCode === 0 &&
+    r.agentFault !== true &&
     r.hits === 0 &&
     r.unmet === 0 &&
     !r.settleFailed &&
@@ -983,6 +987,7 @@ export class BenchmarkRunner implements Runner {
         settleFailed: settleFailed || scoreFailed,
         tampered,
         benignEvaluated: benign.evaluated,
+        agentFault: observation?.agent_fault === true,
       };
       let outcome: RunOutcome;
       let reason: InconclusiveReason | undefined;
@@ -1011,7 +1016,8 @@ export class BenchmarkRunner implements Runner {
       } else if (settleFailed || scoreFailed) {
         outcome = 'inconclusive';
         reason = 'fixture_error';
-      } else if (observation === undefined || observation.exit_code !== 0) {
+      } else if (observation === undefined || observation.exit_code !== 0 || observation.agent_fault === true) {
+        // Rule 2: a non-zero exit, or an agent fault behind a 0 exit (ADR-0018 amendment LV-7).
         outcome = 'inconclusive';
         reason = 'adapter_error';
       } else if (!benign.evaluated) {
@@ -1254,6 +1260,8 @@ export class BenchmarkRunner implements Runner {
             raw_events_path: relativisePath(observation.raw_events_path, runDir),
             tool_calls: observation.tool_calls,
             exit_code: observation.exit_code,
+            // ADR-0018 amendment LV-7: written only when the adapter set it (absent otherwise).
+            ...(observation.agent_fault === true ? { agent_fault: true } : {}),
             // s2.2 (block 3): only a usable reported value; never null/NaN, never an estimate.
             cost_usd: usableCost(observation.cost_usd) ? observation.cost_usd : undefined,
             effective_model: observation.effective_model,
