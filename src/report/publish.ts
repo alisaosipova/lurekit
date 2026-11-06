@@ -71,6 +71,7 @@
 // readRunDir() (lstat, never follows a symlink) and writeBundle() (atomic: <out>.partial, then
 // rename) are the only I/O; cmdPublish() in src/cli.ts glues them.
 
+import { SERVED_MODEL_WARNING_PREFIX } from '../adapters/adapter.js';
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -1663,7 +1664,14 @@ export function readRunDir(runDir: string, opts: { skipScenarios?: Iterable<stri
       const p = path.join(rdir, 'evidence.json');
       const ekind = entryKind(p);
       if (ekind === 'symlink') skip(`${id}/${rep}/evidence.json`);
-      else if (ekind === 'file') evidence.push({ rel: `${id}/${rep}/evidence.json`, text: readFileSync(p, 'utf8') });
+      else if (ekind === 'file') {
+        const text = readFileSync(p, 'utf8');
+        // ADR-0028 D2: a run answered by another model than the one named is not a result for it.
+        if (text.includes(`"${SERVED_MODEL_WARNING_PREFIX}`)) {
+          throw new Error(`publish: ${id}/${rep}/evidence.json records a served model that differs from the requested one (ADR-0028 D2); a substituted model is not publishable`);
+        }
+        evidence.push({ rel: `${id}/${rep}/evidence.json`, text });
+      }
       for (const d of readdirSync(rdir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
         if (!d.name.endsWith('.canary.json')) continue;
         if (d.isSymbolicLink()) skip(`${id}/${rep}/${d.name}`);

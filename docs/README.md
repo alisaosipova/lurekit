@@ -51,6 +51,7 @@ authority when the two disagree.
 - [design/adr-0025-evidence-integrity.md](design/adr-0025-evidence-integrity.md) - ADR-0025: harness artefact manifest, `evidence_tampered`, symlink-safe writes.
 - [design/adr-0026-run-diff.md](design/adr-0026-run-diff.md) - ADR-0026: `lurekit diff`, run comparison and regression mode.
 - [design/adr-0027-clean.md](design/adr-0027-clean.md) - ADR-0027: `lurekit clean`, removing adapter caches that are not evidence.
+- [design/adr-0028-model-routing-and-provenance.md](design/adr-0028-model-routing-and-provenance.md) - ADR-0028: other models in Claude Code through OpenRouter; the served model is recorded and a substitution blocks publish.
 
 ## Plan (`plan/`)
 

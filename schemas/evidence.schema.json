@@ -223,6 +223,7 @@
         "raw_events_path": { "type": "string" },
         "tool_calls": { "type": "array", "items": { "type": "object" } },
         "exit_code": { "type": "number" },
+        "served_models": { "type": "array", "items": { "type": "string" }, "description": "ADR-0028 D2: models the API reported serving this repetition (sorted, unique)." },
         "agent_fault": {
           "const": true,
           "description": "The agent CLI reported a failure behind a 0 exit (codex-cli: tool calls from the model rejected as unsupported); scored like a non-zero exit, s3.1 rule 2 (ADR-0018 amendment LV-7). Absent otherwise."

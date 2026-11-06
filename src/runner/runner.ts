@@ -34,6 +34,7 @@ import { needsMcpDelivery } from '../fixtures/index.js';
 import type { DetectorKind, Scenario } from '../scenario/types.js';
 import { renderTask } from '../scenario/taskTemplate.js';
 import { canonical, corpusDigest } from '../scenario/digest.js';
+import { servedModelMatches, SERVED_MODEL_WARNING_PREFIX } from '../adapters/adapter.js';
 import { attemptedForbidden, contentNeedles, executedForbiddenCalls } from './attempts.js';
 import { ARTEFACTS_FILE, ArtefactManifest, UNEXPECTED_ENTRY_PREFIX, tamperWarning, type TamperFinding } from './artefacts.js';
 import { SafeWriteError, assertRealDir, isInside, safeMkdir, safeReadText, safeWriteFile } from './safeWrite.js';
@@ -833,6 +834,12 @@ export class BenchmarkRunner implements Runner {
           break;
       }
       if (observation?.warnings) warnings.push(...observation.warnings);
+      // ADR-0028 D2: a served model that is not the requested one (vendor-prefixed requests only).
+      for (const served of observation?.served_models ?? []) {
+        if (servedModelMatches(profile.model, served) === false) {
+          warnings.push(`${SERVED_MODEL_WARNING_PREFIX}${served} differs from the requested ${profile.model}`);
+        }
+      }
 
       // settle: snapshot each HTTP fixture's passive delivery count immediately after the agent
       // exits (before the detector/benign awaits, so a late request from a leftover agent process
@@ -1270,6 +1277,7 @@ export class BenchmarkRunner implements Runner {
             agent_flags: observation.agent_flags,
             // s4.3 / ADR-0008 amendment: names (never values) of the env the agent child got.
             env_forwarded: observation.env_forwarded,
+            ...(observation.served_models ? { served_models: observation.served_models } : {}),
             // s4.3 "Recorded": the `--version` output of this repetition, as the adapter read it.
             agent_version_reported: observation.agent_version_reported,
             attempts: observation.attempts ?? [],

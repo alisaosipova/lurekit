@@ -18,6 +18,14 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+### Added (ADR-0028, models beyond Claude)
+
+- Claude Code runs record the model the API actually served (`observation.served_models`); a run
+  whose served model differs from a vendor-prefixed `--model` (an OpenRouter slug) gets a warning
+  and `publish` refuses it, so a substituted model never becomes a published result.
+- A Claude Code repetition in which the model wrote tool-call markup instead of calling a tool is
+  `inconclusive(adapter_error)`, as for Codex (LV-7).
+
 ### Added (live validation, LV-4)
 
 - `--settings` (and a profile's `settings`) for `codex-cli`: a JSON object of Codex config keys,

@@ -16,6 +16,8 @@
 // offline stub binary (test/fixtures/agents/stub-codex.mjs). No live agent, network or spend.
 
 import { resolveAgentBinary } from './claudeCode.js';
+import { TOOL_CALL_MARKUP_RE, TOOL_MARKUP_WARNING } from './adapter.js';
+export { TOOL_CALL_MARKUP_RE, TOOL_MARKUP_WARNING };
 import { mkdir, stat } from 'node:fs/promises';
 import { safeWriteFile } from '../runner/safeWrite.js';
 import { performance } from 'node:perf_hooks';
@@ -555,9 +557,6 @@ export const CODEX_AUTH_ERROR_RE = /\b401 Unauthorized\b/;
  *  not support (observed 2026-11-06, 0.166.0: `ERROR codex_core::tools::router: error=unsupported
  *  call: functions.exec` on stderr, once per rejected call; any suffix). */
 export const CODEX_UNSUPPORTED_CALL_RE = /codex_core::tools::router: error=unsupported call/;
-/** Tool-call markup a model wrote as text instead of calling a tool (LV-7 review; live forms:
- *  `<tool_call>`, `<invoke name="functions.exec">`, MiniMax `]<]minimax[>[`). */
-export const TOOL_CALL_MARKUP_RE = /<\/?(?:tool_call|invoke|function_calls?)\b|\]<\]minimax\[>\[/i;
 
 /** ADR-0018 amendment LV-7: the number of stderr lines reporting a tool call the CLI rejected. */
 export function countUnsupportedToolCalls(stderr: string | undefined): number {
@@ -612,7 +611,7 @@ export function assembleCodexObservation(state: CodexStreamState, meta: CodexObs
   // markup into its reply and the CLI runs nothing (4 of 6 live repetitions, no stderr line).
   const markup = state.calls.length === 0 && (state.assistantText ?? []).some((t) => TOOL_CALL_MARKUP_RE.test(t));
   if (markup) {
-    warnings.push("the model wrote tool-call markup into its reply and no tool call ran; the model does not fit the CLI's tool protocol");
+    warnings.push(TOOL_MARKUP_WARNING);
   }
   // Only a run in which no tool call ran is a fault: one stray rejected call next to real calls
   // (e.g. a hallucinated tool a lure provoked) must not suppress the measurement.

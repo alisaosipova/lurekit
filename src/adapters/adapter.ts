@@ -254,6 +254,9 @@ export interface RunObservation {
   // rejected tool calls from the model as unsupported). The runner treats it like a non-zero
   // exit. Set only to `true`; absent otherwise. Only codex-cli sets it.
   agent_fault?: boolean;
+  // ADR-0028 D2: models the API reported serving this repetition (sorted, unique); absent when
+  // the adapter reads none.
+  served_models?: string[];
 }
 
 /** Source of the skill-loading facts for a run that did not observe them live (block 8). */
@@ -316,3 +319,22 @@ export interface Adapter {
   // adapter needs options.runDir and may also take it via its constructor.
   run(profile: SetupProfile, task: string, signal: AbortSignal, options?: RunOptions): Promise<RunObservation>;
 }
+
+/** ADR-0028 D2: the warning text of a served-model mismatch (publish refuses runs that carry it). */
+export const SERVED_MODEL_WARNING_PREFIX = 'served model ';
+
+/** ADR-0028 D2: whether a served model id names the requested one. Only a vendor-prefixed
+ *  request (`vendor/model`, an OpenRouter slug) is compared; an alias such as `sonnet` is not.
+ *  Lowercase; the vendor prefix, a trailing `:variant` and a trailing date (-YYYYMMDD or
+ *  -YYYY-MM-DD) are ignored on both sides. Returns undefined when not comparable. */
+export function servedModelMatches(requested: string, served: string): boolean | undefined {
+  if (!requested.includes('/')) return undefined;
+  const norm = (m: string): string =>
+    m.toLowerCase().replace(/^[^/]*\//, '').replace(/:[^:]*$/, '').replace(/-(?:\d{8}|\d{4}-\d{2}-\d{2})$/, '');
+  return norm(requested) === norm(served);
+}
+
+/** Tool-call markup a model wrote as text instead of calling a tool (LV-7 review; live forms:
+ *  `<tool_call>`, `<invoke name="functions.exec">`, MiniMax `]<]minimax[>[`). */
+export const TOOL_CALL_MARKUP_RE = /<\/?(?:tool_call|invoke|function_calls?)\b|\]<\]minimax\[>\[/i;
+export const TOOL_MARKUP_WARNING = "the model wrote tool-call markup into its reply and no tool call ran; the model does not fit the CLI's tool protocol";

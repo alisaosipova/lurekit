@@ -40,7 +40,7 @@ import type {
 import { agentChildEnv, envNames } from './childEnv.js';
 import { safeReadText, safeWriteFile } from '../runner/safeWrite.js';
 import { createLineSplitter, killTree, probeVersionCapped, reapGroup, spawnAgent, waitExit } from './childProcess.js';
-import { inputDigest, normalizeMcpServers, requireWorkdir, stderrExcerpt, strictMcpConfigFor, validateSettingSources } from './adapter.js';
+import { TOOL_CALL_MARKUP_RE, TOOL_MARKUP_WARNING, inputDigest, normalizeMcpServers, requireWorkdir, stderrExcerpt, strictMcpConfigFor, validateSettingSources } from './adapter.js';
 import type { AgentId } from '../scenario/types.js';
 
 const STREAM_FILE = 'claude-stream.jsonl';
@@ -367,6 +367,7 @@ export interface StreamState {
   /** s4.1 "Assistant text" (block 3): the `text` of every assistant `text` block, in stream
    *  order; set (possibly empty) once an assistant event was seen. */
   assistantText?: string[];
+  servedModels?: string[]; // ADR-0028 D2: message.model of assistant events
 }
 
 export function newStreamState(): StreamState {
@@ -395,7 +396,11 @@ export function parseStreamLine(line: string, at: number, state: StreamState): v
     const servers = normalizeMcpServers(evt.mcp_servers);
     if (servers) state.mcpServers = servers;
   } else if (type === 'assistant') {
-    const msg = evt.message as { content?: unknown } | undefined;
+    const msg = evt.message as { content?: unknown; model?: unknown } | undefined;
+    if (typeof msg?.model === 'string' && msg.model.length > 0) {
+      state.servedModels ??= [];
+      if (!state.servedModels.includes(msg.model)) state.servedModels.push(msg.model);
+    }
     const content = Array.isArray(msg?.content) ? msg!.content : [];
     state.assistantText ??= [];
     for (const block of content as Array<Record<string, unknown>>) {
@@ -535,6 +540,8 @@ export function assembleObservation(
   const warnings = [...(meta.warnings ?? [])];
   if (state.resultError !== undefined) warnings.push(`result event reports is_error=true: ${state.resultError}`);
   const toolCalls = mergeById(state.calls, hook.calls);
+  const markupFault = toolCalls.length === 0 && (state.assistantText ?? []).some((t) => TOOL_CALL_MARKUP_RE.test(t));
+  if (markupFault) warnings.push(TOOL_MARKUP_WARNING);
   return {
     transcript_path: hook.transcriptPath,
     raw_events_path: meta.rawEventsPath,
@@ -553,6 +560,9 @@ export function assembleObservation(
     ...(meta.agentFlags ? { agent_flags: [...meta.agentFlags] } : {}),
     ...(state.assistantText ? { assistant_text: [...state.assistantText] } : {}),
     attempts: attemptsFrom(state, toolCalls),
+    ...(state.servedModels ? { served_models: [...state.servedModels].sort() } : {}),
+    // ADR-0028 D3 (LV-7 generalised): no tool call ran and the model wrote tool-call markup.
+    ...(markupFault ? { agent_fault: true } : {}),
   };
 }
 
