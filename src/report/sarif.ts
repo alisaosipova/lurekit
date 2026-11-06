@@ -6,6 +6,7 @@
 import type { RunManifest, RunOutcome } from '../runner/types.js';
 import type { Report } from './score.js';
 import { HARDENING_KNOBS, type SurfaceLookup } from './guidance.js';
+import { asiBreakdown, type ClassLookup } from './frameworks.js';
 
 /** Repository URL for the SARIF driver.informationUri (matches the schemas' $id origin). */
 export const REPOSITORY_URL = 'https://github.com/alisaosipova/lurekit';
@@ -14,8 +15,8 @@ export const REPOSITORY_URL = 'https://github.com/alisaosipova/lurekit';
 /** B17: inconclusive is a `warning` (not measured must not read as a pass); resisted is omitted. */
 const LEVEL: Partial<Record<RunOutcome, string>> = { vulnerable: 'error', degraded: 'note', inconclusive: 'warning' };
 
-export function renderSarif(manifest: RunManifest, report: Report, surfaceOf?: SurfaceLookup): string {
-  return JSON.stringify(toSarif(manifest, report, surfaceOf), null, 2) + '\n';
+export function renderSarif(manifest: RunManifest, report: Report, surfaceOf?: SurfaceLookup, classOf?: ClassLookup): string {
+  return JSON.stringify(toSarif(manifest, report, surfaceOf, classOf), null, 2) + '\n';
 }
 
 /** FEATURE-13 (evidence-spec s6.1 amendment): the "What to change" mapping as data, one entry
@@ -43,7 +44,7 @@ export function remediation(manifest: RunManifest, report: Report, surfaceOf?: S
   return out;
 }
 
-export function toSarif(manifest: RunManifest, report: Report, surfaceOf?: SurfaceLookup): Record<string, unknown> {
+export function toSarif(manifest: RunManifest, report: Report, surfaceOf?: SurfaceLookup, classOf?: ClassLookup): Record<string, unknown> {
   const byId = new Map(manifest.results.map((r) => [r.scenario_id, r]));
   const reported = report.scenarios.filter((s) => LEVEL[s.verdict] !== undefined);
 
@@ -93,7 +94,7 @@ export function toSarif(manifest: RunManifest, report: Report, surfaceOf?: Surfa
         originalUriBaseIds: { LUREKIT_RUN: { description: { text: 'the benchmark run directory (results/<benchmark_run_id>/)' } } },
         // B17: one code-scanning category per agent across uploads (GitHub uses the part up to the last '/').
         automationDetails: { id: `lurekit/${manifest.profile.agent}/${manifest.benchmark_run_id}` },
-        properties: { profileDigest: report.profile_digest, headline: report.headline, ...(surfaceOf ? { remediation: remediation(manifest, report, surfaceOf) } : {}) },
+        properties: { profileDigest: report.profile_digest, headline: report.headline, ...(surfaceOf ? { remediation: remediation(manifest, report, surfaceOf) } : {}), ...(classOf ? { by_asi: asiBreakdown(report, classOf) } : {}) },
       },
     ],
   };

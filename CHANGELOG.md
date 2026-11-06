@@ -18,7 +18,12 @@ No release is cut without changes.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added (UX and business review)
+
+- Results by OWASP Top 10 for Agentic Applications: the terminal view (`demo`, `report`, `run`)
+  has a "By OWASP Agentic Top 10" table (measured, vulnerable, resisted, inconclusive per ASI
+  category) and SARIF carries the rows as `run.properties.by_asi`, so a security team can map a
+  result to the framework it reports against (UB-1).
 
 ## [1.5.0] - 2026-11-05
 

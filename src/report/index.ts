@@ -4,6 +4,7 @@
 // or file. Markdown's evidence excerpt is supplied through an injected lookup, so no format
 // does file I/O here.
 
+import type { ClassLookup } from './frameworks.js';
 import type { RunManifest } from '../runner/types.js';
 import { renderJson } from './json.js';
 import { renderMarkdown, type EvidenceLookup } from './markdown.js';
@@ -40,6 +41,8 @@ export interface ReportOptions {
   evidenceLookup?: EvidenceLookup;
   /** Markdown only (ADR-0021): scenario id -> attack surface, for the plain-language layers. */
   surfaceOf?: SurfaceLookup;
+  /** UB-1: OWASP Agentic classes per scenario, from the corpus. */
+  classOf?: ClassLookup;
   /** Markdown only (ADR-0021 amendment): corpus path and budget estimate for the re-measure line. */
   reMeasure?: ReMeasureContext;
   /** `text` only: the width and colour decided by the CLI, and the demo banner lines, if any. */
@@ -55,7 +58,7 @@ export function report(manifest: RunManifest, opts: ReportOptions): string {
     case 'markdown':
       return renderMarkdown(manifest, score, opts.evidenceLookup, { surfaceOf: opts.surfaceOf, ...(opts.reMeasure ? { reMeasure: opts.reMeasure } : {}) });
     case 'sarif':
-      return renderSarif(manifest, score, opts.surfaceOf);
+      return renderSarif(manifest, score, opts.surfaceOf, opts.classOf);
     case 'text': {
       const t = opts.terminal ?? { width: 100, color: false };
       return renderTerminal(
@@ -63,6 +66,7 @@ export function report(manifest: RunManifest, opts: ReportOptions): string {
           manifest, report: score,
           ...(opts.evidenceLookup ? { evidenceLookup: opts.evidenceLookup } : {}),
           ...(opts.surfaceOf ? { surfaceOf: opts.surfaceOf } : {}),
+          ...(opts.classOf ? { classOf: opts.classOf } : {}),
           ...(opts.reMeasure ? { reMeasure: opts.reMeasure } : {}),
           ...(t.banner ? { banner: t.banner } : {}),
         },

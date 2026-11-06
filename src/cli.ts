@@ -44,6 +44,7 @@ import { fixturesForScenario } from './fixtures/index.js';
 import { BenchmarkRunner, Budget, DEFAULT_RUN_TIMEOUT_S, K_MAX, K_MIN, MAX_RUN_TIMEOUT_S, estimatedRunUsd, validK } from './runner/runner.js';
 import type { RunConfig, RunManifest, RunnerIds, RunMeta, EvidenceRecord } from './runner/types.js';
 import { diffRuns, renderDiffText } from './report/diff.js';
+import type { ClassLookup } from './report/frameworks.js';
 import { corpusDigest } from './scenario/digest.js';
 import { findCaches, humanBytes, removeCaches, treeBytes } from './clean.js';
 import { report, REPOSITORY_URL, colorEnabled, terminalWidth, type ReportFormat, type EvidenceLookup, type SurfaceLookup, type ReMeasureContext } from './report/index.js';
@@ -179,6 +180,16 @@ export function demoBundleDir(): string {
 }
 
 /** Scenario id -> surface from already-loaded scenarios (ADR-0021 plain-language layers). */
+/** UB-1: the OWASP Agentic classes of each scenario in a corpus. */
+function classLookupFrom(scenarios: Scenario[]): ClassLookup {
+  const byId = new Map(scenarios.map((s) => [s.id, (s.class?.asi ?? []) as string[]]));
+  return (id) => byId.get(id) ?? [];
+}
+
+function shippedClassLookup(): ClassLookup {
+  return classLookupFrom(loadScenarioDir(path.join(packageRoot(), 'scenarios')).scenarios);
+}
+
 function surfaceLookupFrom(scenarios: Scenario[]): SurfaceLookup {
   const bySurface = new Map(scenarios.map((s) => [s.id, s.surface as string]));
   return (id) => bySurface.get(id);
@@ -1128,6 +1139,7 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
       format,
       evidenceLookup: makeEvidenceLookup(runDir, manifest),
       surfaceOf: surfaceLookupFrom(scenarios),
+      classOf: classLookupFrom(scenarios),
       reMeasure: reMeasureContext(manifest, corpus.typed),
       terminal: { ...terminalOptions(deps, output !== undefined), evidenceBase: shownPath(runDir, deps) },
     });
@@ -1226,6 +1238,7 @@ export function cmdReport(flags: Flags, deps: CliDeps): number {
   const rendered = report(manifest, {
     format,
     evidenceLookup: makeEvidenceLookup(runDir, manifest),
+    ...(format === 'sarif' || format === 'text' ? { classOf: shippedClassLookup() } : {}), // UB-1
     ...(format === 'sarif' ? { surfaceOf: shippedSurfaceLookup() } : {}), // FEATURE-13: SARIF remediation
     ...(format === 'markdown' || format === 'text'
       ? { surfaceOf: shippedSurfaceLookup(), reMeasure: reMeasureContext(manifest, resolveScenarioDir(undefined, deps).typed) }
@@ -1497,6 +1510,7 @@ export function cmdDemo(flags: Flags, deps: CliDeps): number {
   const body = report(manifest, {
     format,
     ...(format === 'markdown' || format === 'text' ? { surfaceOf: shippedSurfaceLookup(), reMeasure: reMeasureContext(manifest, shipped) } : {}),
+    ...(format === 'text' ? { classOf: shippedClassLookup() } : {}), // UB-1
     terminal: { ...terminalOptions(deps, output !== undefined), banner: bannerLines, evidenceBase: `${REPOSITORY_URL}/tree/main/reports/${manifest.benchmark_run_id}` },
   });
   const banner = demoBanner(manifest, shipped);

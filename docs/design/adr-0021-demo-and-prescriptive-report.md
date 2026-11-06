@@ -184,3 +184,15 @@ repo is broken, a human cannot read it").
   it, and for `demo` with the published bundle URL, so they open as printed; the renderer takes
   the prefix as an option and stays pure (UX-17). The Markdown evidence lines are unchanged.
 
+## Amendment (2026-11-05, UB-1): results by OWASP Agentic Top 10
+
+Every scenario carries its OWASP Top 10 for Agentic Applications classes (`class.asi`, names in
+docs/research/landscape.md, source genai.owasp.org). The terminal view prints a "By OWASP Agentic
+Top 10" table after the result table: one row per ASI id that has at least one measured
+scenario, with the category name and the counts measured / vulnerable / resisted /
+inconclusive (degraded counts with resisted's neighbour column, shown as its own count when
+non-zero). A scenario with several classes counts in each. SARIF carries the same rows as
+`run.properties.by_asi`. The classes come from the corpus (the scenario files), like the
+attack surfaces, so a published bundle is shown with the classes of the shipped corpus. The
+Markdown report and report.json are unchanged (byte-identity with published bundles).
+

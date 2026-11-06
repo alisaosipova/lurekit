@@ -9,6 +9,7 @@
 // Colour is ANSI bold/red/green/yellow/dim only, and only when the caller says so (the CLI
 // decides from the TTY and NO_COLOR/FORCE_COLOR); padding is computed on the uncoloured text.
 
+import { asiBreakdown, type ClassLookup } from './frameworks.js';
 import type { RunManifest } from '../runner/types.js';
 import type { EvidenceLookup, MarkdownOptions } from './markdown.js';
 import { LOW_CONFIDENCE_LABEL, MARKDOWN_SCORING_NOTES, RESISTED_KIND_LABEL, headlineTail } from './markdown.js';
@@ -44,6 +45,8 @@ export interface TerminalData extends MarkdownOptions {
    *  colon closes its paragraph), and a URL (alone on its line, or after a `label:`) or a
    *  backticked command is printed whole on its own indented line, never wrapped. */
   banner?: string[];
+  /** UB-1: the OWASP Agentic (ASI) classes of each scenario, from the corpus. */
+  classOf?: ClassLookup;
 }
 
 /** Whether to colour terminal output: a TTY, NO_COLOR unset (https://no-color.org), and
@@ -190,6 +193,7 @@ export function renderTerminal(data: TerminalData, opts: TerminalOptions): strin
   const paint: Paint = opts.color ? (code, s) => `\x1b[${code}m${s}\x1b[0m` : (_c, s) => s;
   const bold = (s: string): string => paint(CODES.bold, s);
   const dim = (s: string): string => paint(CODES.dim, s);
+  const red = (s: string): string => paint(CODES.red, s);
   const { manifest, report } = data;
   const h = report.headline;
   const byId = new Map(manifest.results.map((r) => [r.scenario_id, r]));
@@ -307,6 +311,21 @@ export function renderTerminal(data: TerminalData, opts: TerminalOptions): strin
         out.push(`  detector: ${hit?.detector ?? ev.forbidden_effect.detector}`);
         const call = hit?.attributed_tool_call ?? ev.observation?.tool_calls?.[0];
         if (call) out.push(`  tool call: ${call.name} (+${call.at}ms)`);
+      }
+      out.push('');
+    }
+  }
+
+  // UB-1: results by OWASP Agentic Top 10, when the corpus classes are known.
+  if (data.classOf) {
+    const rowsAsi = asiBreakdown(report, data.classOf);
+    if (rowsAsi.length) {
+      out.push(bold('By OWASP Agentic Top 10'), '-'.repeat('By OWASP Agentic Top 10'.length), '');
+      const nameW = Math.max(...rowsAsi.map((r) => r.name.length));
+      out.push(dim(`${'id'.padEnd(6)} ${'category'.padEnd(nameW)}  measured  vulnerable  resisted  inconcl.`));
+      for (const r of rowsAsi) {
+        const line = `${r.id.padEnd(6)} ${r.name.padEnd(nameW)}  ${String(r.measured).padStart(8)}  ${String(r.vulnerable).padStart(10)}  ${String(r.resisted + r.degraded).padStart(8)}  ${String(r.inconclusive).padStart(8)}`;
+        out.push(r.vulnerable > 0 ? red(line) : line);
       }
       out.push('');
     }

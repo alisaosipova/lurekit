@@ -24,7 +24,7 @@ LureKit already tags every scenario with its ASI and MCP classes, but no report 
 
 | Id | Problem | Change | Status |
 |---|---|---|---|
-| UB-1 | Reports never show the OWASP Agentic (ASI) classes the scenarios already carry, so a security team cannot map a result to its framework. | A "By OWASP Agentic Top 10" section in the terminal and Markdown views and a `by_asi` block in SARIF run properties: per ASI id, scenarios measured, vulnerable, resisted, inconclusive. | open |
+| UB-1 | Reports never show the OWASP Agentic (ASI) classes the scenarios already carry, so a security team cannot map a result to its framework. | A "By OWASP Agentic Top 10" section in the terminal and Markdown views and a `by_asi` block in SARIF run properties: per ASI id, scenarios measured, vulnerable, resisted, inconclusive. | done |
 | UB-2 | `lurekit --help` opens with 100+ lines of flag detail; a newcomer does not see the three commands that matter. | A five-line "Start here" block at the top of the usage (demo, doctor, run smoke, report). | open |
 | UB-3 | doctor's isolation row is a long sentence marked ok, about a label that does nothing. | Shorten to one clause and point to the guide. | open |
 | UB-4 | Gating CI on "nothing got worse" needs two commands (`run`, then `diff --fail-on-regression`). | `run --baseline <runDir>`: after the run, diff against the baseline, print the transitions and exit 3 on a regression. | open |

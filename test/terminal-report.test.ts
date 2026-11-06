@@ -24,8 +24,13 @@ const corpus = loadScenarioDir(path.join(ROOT, 'scenarios')).scenarios;
 const surfaces = new Map(corpus.map((s) => [s.id, s.surface as string]));
 const surfaceOf: SurfaceLookup = (id) => surfaces.get(id);
 
-const render = (width: number, color = false, banner?: string[], evidenceBase?: string): string =>
-  renderTerminal({ manifest, report: buildScore(manifest), surfaceOf, reMeasure: { corpus: 'scenarios' }, ...(banner ? { banner } : {}) }, { width, color, ...(evidenceBase ? { evidenceBase } : {}) });
+const render = (width: number, color = false, banner?: string[], evidenceBase?: string, classOf?: (id: string) => readonly string[]): string =>
+  renderTerminal({ manifest, report: buildScore(manifest), surfaceOf, reMeasure: { corpus: 'scenarios' }, ...(banner ? { banner } : {}), ...(classOf ? { classOf } : {}) }, { width, color, ...(evidenceBase ? { evidenceBase } : {}) });
+/** UB-1: the ASI classes of the shipped corpus, as the demo command passes them. */
+const asiOf = (() => {
+  const byId = new Map(loadScenarioDir(path.join(ROOT, 'scenarios')).scenarios.map((s) => [s.id, (s.class?.asi ?? []) as string[]]));
+  return (id: string): readonly string[] => byId.get(id) ?? [];
+})();
 
 /** The result-table rows: from the header line through the blank line after the last row. */
 function tableRows(text: string): string[] {
@@ -242,7 +247,7 @@ describe('lurekit demo and report print the terminal view (CLI)', () => {
     expect(await main(['demo'], c.deps)).toBe(0);
     const text = c.out.join('');
     // UX-17: demo's evidence lines point at the published bundle.
-    expect(text).toBe(render(100, false, demoBannerLines(manifest, 'scenarios'), `https://github.com/alisaosipova/lurekit/tree/main/reports/${manifest.benchmark_run_id}`) + '\n');
+    expect(text).toBe(render(100, false, demoBannerLines(manifest, 'scenarios'), `https://github.com/alisaosipova/lurekit/tree/main/reports/${manifest.benchmark_run_id}`, asiOf) + '\n');
     expect(c.err.join('')).toBe('');
     for (const f of ['markdown', 'md']) {
       const m = capture();
@@ -300,5 +305,17 @@ describe('lurekit demo and report print the terminal view (CLI)', () => {
     const j = capture();
     expect(await main(['report', runDir, '--format', 'json'], j.deps)).toBe(0);
     expect(j.out.join('')).toBe(readFileSync(path.join(runDir, 'report.json'), 'utf8') + '\n');
+  });
+});
+
+describe('UB-1: results by OWASP Agentic Top 10', () => {
+  it('the table counts each class from the corpus; SARIF carries the same rows', async () => {
+    const text = render(100, false, undefined, undefined, asiOf);
+    expect(text).toMatch(/\nBy OWASP Agentic Top 10\n/);
+    expect(text).toMatch(/\nASI05 +Unexpected Code Execution +2 +2 +0 +0\n/);
+    const { asiBreakdown } = await import('../src/report/frameworks.js');
+    const rows = asiBreakdown(buildScore(manifest), asiOf);
+    expect(rows.find((r) => r.id === 'ASI05')?.scenarios).toEqual(['AAB-001', 'AAB-002']);
+    expect(render(100)).not.toMatch(/By OWASP Agentic/); // absent without the corpus classes
   });
 });
