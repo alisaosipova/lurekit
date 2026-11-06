@@ -105,9 +105,10 @@ if (process.env.AAB_STUB_REPLAY) {
   } catch { /* no AGENTS.md: placeholder stays empty */ }
   if (process.env.AAB_STUB_RUN_CANARY === '1' && launcher) {
     const { spawnSync } = await import('node:child_process');
-    spawnSync(launcher, [], { stdio: 'ignore' });
+    // A .cmd launcher (Windows) needs the command interpreter.
+    spawnSync(launcher, [], { stdio: 'ignore', shell: process.platform === 'win32' });
   }
-  const text = fs.readFileSync(process.env.AAB_STUB_REPLAY, 'utf8').split('{{CANARY_PATH}}').join(launcher);
+  const text = fs.readFileSync(process.env.AAB_STUB_REPLAY, 'utf8').split('{{CANARY_PATH}}').join(JSON.stringify(launcher).slice(1, -1)); // JSON-escaped (Windows backslashes)
   process.stdout.write(text.endsWith('\n') ? text : text + '\n');
   process.exit(0);
 }
