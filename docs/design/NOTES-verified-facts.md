@@ -319,3 +319,11 @@ https://openrouter.ai/docs/guides/guides/claude-code-integration)**
   first-party provider"; "Claude Code is optimized for Anthropic models and may not work correctly
   with other providers." Tool use on non-Anthropic routes is therefore UNVERIFIED per model until a
   live run shows a tool call that ran.
+
+**Z.ai GLM Coding Plan in Claude Code (checked 2026-11-06, primary source:
+https://docs.z.ai/devpack/tool/claude)**
+- `ANTHROPIC_BASE_URL` is "https://api.z.ai/api/anthropic"; `ANTHROPIC_AUTH_TOKEN` is the Z.AI
+  API key. Model mapping by `ANTHROPIC_DEFAULT_HAIKU_MODEL` (`glm-5.3-flash[1m]`),
+  `ANTHROPIC_DEFAULT_SONNET_MODEL` and `ANTHROPIC_DEFAULT_OPUS_MODEL` (`glm-5.3[1m]`); the manual
+  example also sets `API_TIMEOUT_MS` "3000000" and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` 1.
+- "We have verified compatibility with Claude Code 2.0.14 and other versions."

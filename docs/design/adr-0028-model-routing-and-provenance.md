@@ -16,7 +16,8 @@ D1. Route. A model is reached by forwarding `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUT
     `src/adapters/childEnv.ts`), passed with `--env` from the operator's environment; the model id
     is `--model <openrouter slug>`. The base URL is a recorded, published value of the run.
 D2. Served model. The Claude Code adapter records the model the API reported in each assistant
-    event (`message.model`) as `observation.served_models` (sorted, de-duplicated; written to evidence; `servedModelMatches`
+    event (`message.model`) as `observation.served_models` (sorted, de-duplicated; Claude Code's own `<synthetic>` label
+    for messages it generates itself, e.g. API errors, is skipped; written to evidence; `servedModelMatches`
     in `src/adapters/adapter.ts`). If any served
     model differs from the requested `--model` after normalisation (lowercase; a vendor prefix
     `vendor/` and a trailing date or `:variant` suffix ignored; only a vendor-prefixed request such

@@ -397,7 +397,8 @@ export function parseStreamLine(line: string, at: number, state: StreamState): v
     if (servers) state.mcpServers = servers;
   } else if (type === 'assistant') {
     const msg = evt.message as { content?: unknown; model?: unknown } | undefined;
-    if (typeof msg?.model === 'string' && msg.model.length > 0) {
+    // ADR-0028 D2: Claude Code labels its own error messages `<synthetic>`; not a served model.
+    if (typeof msg?.model === 'string' && msg.model.length > 0 && msg.model !== '<synthetic>') {
       state.servedModels ??= [];
       if (!state.servedModels.includes(msg.model)) state.servedModels.push(msg.model);
     }

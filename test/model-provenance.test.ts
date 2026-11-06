@@ -26,6 +26,7 @@ describe('served model (ADR-0028 D2)', () => {
     const streamText = [assistant('z-model', [{ type: 'text', text: 'a' }]), assistant('a-model', []), assistant('z-model', [])].join('\n');
     expect(observeClaudeRun({ ...meta, streamText }).served_models).toEqual(['a-model', 'z-model']);
     expect(observeClaudeRun({ ...meta, streamText: '' }).served_models).toBeUndefined();
+    expect(observeClaudeRun({ ...meta, streamText: assistant('<synthetic>', [{ type: 'text', text: 'API Error' }]) }).served_models).toBeUndefined();
   });
 
   it('publish refuses a run whose evidence records a substituted model', () => {
