@@ -18,6 +18,10 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [1.6.0] - 2026-11-05
+
 ### Added (UX and business review)
 
 - Results by OWASP Top 10 for Agentic Applications: the terminal view (`demo`, `report`, `run`)

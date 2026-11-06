@@ -177,7 +177,7 @@ reporting. It is not a benchmark result, and every replayed run's `evidence.json
 
 ## Status
 
-LureKit <!-- n:versions.tool -->1.5.0<!-- /n --> is the latest npm release (see [CHANGELOG.md](CHANGELOG.md)).
+LureKit <!-- n:versions.tool -->1.6.0<!-- /n --> is the latest npm release (see [CHANGELOG.md](CHANGELOG.md)).
 
 - <!-- n:scenarios.total -->52<!-- /n --> scenarios catalogued in `scenarios/` ([catalog](docs/catalog.md)); <!-- n:scenarios.runnable -->34<!-- /n --> are runnable, and <!-- n:plan.claude-code.kept -->25<!-- /n --> of the
   runnable ones apply to claude-code (the other <!-- n:scenarios.runnable_other_agents -->9<!-- /n --> apply to other agents via each scenario's `applies_to`:

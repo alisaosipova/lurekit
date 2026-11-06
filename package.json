@@ -1,6 +1,6 @@
 {
   "name": "lurekit",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "LureKit: a runnable, disclosure-traced security benchmark for deployed coding-agent configurations.",
   "keywords": [
     "security-benchmark",

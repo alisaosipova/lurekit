@@ -57,7 +57,7 @@ tool with docs and a release, not a write-up.
 > Claude Code 2.1.317 headless, the default setup took 4 of 21 and `--setting-sources user` took it to
 > 0 of 21, and the Markdown report names that one setting. Repo: https://github.com/alisaosipova/lurekit.
 
-Note before sending: `lurekit demo` is on npm since 1.2.0 (current release 1.5.0, 2026-11-05). Nothing is sent without the maintainer's approval.
+Note before sending: `lurekit demo` is on npm since 1.2.0 (current release 1.6.0, 2026-11-05). Nothing is sent without the maintainer's approval.
 
 ## Changelog News
 
