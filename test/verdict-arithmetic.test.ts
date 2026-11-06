@@ -102,7 +102,7 @@ describe('B3-T1 aggregateOutcomes (evidence-spec s3.2)', () => {
     // Bare outcome strings carry no reason: verdict only.
     expect(aggregateOutcomes(['inconclusive', 'inconclusive'], 'any')).toEqual({ verdict: 'inconclusive', confidence: '0/2 vulnerable, 2 inconclusive' });
     expect(INCONCLUSIVE_SEVERITY[0]).toBe('evidence_tampered');
-    expect(INCONCLUSIVE_SEVERITY).toHaveLength(9);
+    expect(INCONCLUSIVE_SEVERITY).toHaveLength(10);
   });
 
   it('k=3 with one conclusive repetition: the verdict comes from it, flagged low confidence', () => {

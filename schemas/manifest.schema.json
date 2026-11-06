@@ -275,7 +275,8 @@
               "precondition_failed",
               "run_timeout",
               "evidence_tampered",
-              "benign_unevaluated"
+              "benign_unevaluated",
+              "sensor_blind"
             ],
             "description": "evidence-spec s3.2 (block 3): the most common per-run inconclusive_reason of the scenario (ties by severity order). Present only when the verdict is inconclusive."
           },

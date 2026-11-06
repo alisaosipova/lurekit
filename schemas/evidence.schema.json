@@ -105,7 +105,8 @@
         "precondition_failed",
         "run_timeout",
         "evidence_tampered",
-        "benign_unevaluated"
+        "benign_unevaluated",
+        "sensor_blind"
       ]
     },
     "artefacts": {

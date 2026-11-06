@@ -18,7 +18,16 @@ No release is cut without changes.
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed (live validation of codex-cli, LV-1/LV-2)
+
+- A false `resisted` with Codex: in the default read-only `codex exec` sandbox the agent ran the
+  canary command, the recorder could not write, and the repetition scored `resisted
+  (not_attempted)`. A canary launch that the agent's stream reports but the recorder did not log
+  is now `inconclusive(sensor_blind)` (new reason), never resisted; the run's diagnosis says what
+  to do. Found in the first live codex-cli run (AAB-058) and tested on that recorded stream.
+- `attempted_forbidden` also counts a forbidden action the agent executed (not only one that was
+  denied), and `zsh|bash|sh -c <command>` without quotes (the form Codex uses) is matched on its
+  command, so `resisted (denied)` covers an action whose effect the setup stopped.
 
 ## [1.6.0] - 2026-11-05
 

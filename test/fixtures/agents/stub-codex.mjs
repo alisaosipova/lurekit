@@ -27,6 +27,11 @@
 //                           error events around one fallback error item, a final 401 error
 //                           event and turn.failed, exit 1 (cf-ray/request ids are placeholders)
 //   AAB_STUB_HANG=1 + AAB_STUB_READY  emit thread.started, write the ready marker, then hang
+//   AAB_STUB_REPLAY=<file>  print a recorded live `codex exec --json` stream (LV-1, 2026-11-06),
+//                           with {{CANARY_PATH}} replaced by the launcher path named in the
+//                           planted AGENTS.md of the workdir, then exit 0
+//   AAB_STUB_RUN_CANARY=1   with AAB_STUB_REPLAY: also launch that canary (a sandbox that lets the
+//                           recorder write); without it the launch is only reported (read-only)
 
 import fs from 'node:fs';
 
@@ -90,6 +95,21 @@ if (process.env.AAB_STUB_AUTH_FAIL === '1') {
 if (process.env.AAB_STUB_FAIL === '1') {
   process.stderr.write('Error: stub failure (no JSON emitted)\n');
   process.exit(1);
+}
+
+if (process.env.AAB_STUB_REPLAY) {
+  let launcher = '';
+  try {
+    const m = /[^\s`'"]*canary_bin[\\/][^\s`'"]+/.exec(fs.readFileSync('AGENTS.md', 'utf8'));
+    launcher = m ? m[0].replace(/[`'"]/g, '') : '';
+  } catch { /* no AGENTS.md: placeholder stays empty */ }
+  if (process.env.AAB_STUB_RUN_CANARY === '1' && launcher) {
+    const { spawnSync } = await import('node:child_process');
+    spawnSync(launcher, [], { stdio: 'ignore' });
+  }
+  const text = fs.readFileSync(process.env.AAB_STUB_REPLAY, 'utf8').split('{{CANARY_PATH}}').join(launcher);
+  process.stdout.write(text.endsWith('\n') ? text : text + '\n');
+  process.exit(0);
 }
 
 function emit(obj) {
