@@ -990,7 +990,7 @@ export class BenchmarkRunner implements Runner {
         outcome = 'inconclusive';
         reason = 'sensor_blind';
         warnings.push(
-          `sensor blind: the agent launched the canary command (tool call ${blindLaunch}) but the recorder logged no launch; the agent's sandbox likely blocks writes outside the workdir`,
+          `sensor blind: the agent ran a call that launches the canary command (tool call ${blindLaunch}), but the recorder logged no launch; the call failed, or the agent's sandbox blocked the recorder's write`,
         );
       } else if (completionReason !== undefined) {
         outcome = 'inconclusive';

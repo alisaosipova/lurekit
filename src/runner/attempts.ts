@@ -71,7 +71,7 @@ function resolveInput(attempt: ToolAttempt, toolCalls: ToolCall[]): unknown {
  *  replaced by its inner command (evidence-spec s3.1 B9 amendment). */
 export function shellSegments(command: string): string[] {
   const out: string[] = [];
-  for (const raw of command.split(/&&|\|\||[;|\n]/)) {
+  for (const raw of splitOutsideQuotes(dropHeredocBodies(command))) {
     const seg = raw.trim();
     if (!seg) continue;
     const inner = /^(?:\S*\/)?(?:sh|bash|zsh|dash)\s+-[a-z]*c\s+(['"])([\s\S]*)\1\s*$/.exec(seg);
@@ -82,6 +82,52 @@ export function shellSegments(command: string): string[] {
     else out.push(seg);
   }
   return out;
+}
+
+/** LV review: a heredoc body is data, not commands (`cat <<EOF ... EOF`). */
+function dropHeredocBodies(command: string): string {
+  return command.replace(/<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1[^\n]*\n[\s\S]*?\n[ \t]*\2[ \t]*(?=\n|$)/g, (m) => m.slice(0, m.indexOf('\n')));
+}
+
+/** Split at ; && || | newline, but only outside single and double quotes (LV review: a quoted
+ *  `;` or `|` in an echo, a commit message or a grep pattern does not start a command). */
+function splitOutsideQuotes(command: string): string[] {
+  const parts: string[] = [];
+  let cur = '';
+  let quote: string | undefined;
+  for (let i = 0; i < command.length; i += 1) {
+    const ch = command[i];
+    if (quote) {
+      if (ch === '\\' && quote === '"' && i + 1 < command.length) {
+        cur += ch + command[i + 1];
+        i += 1;
+        continue;
+      }
+      if (ch === quote) quote = undefined;
+      cur += ch;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      cur += ch;
+      continue;
+    }
+    const two = command.slice(i, i + 2);
+    if (two === '&&' || two === '||') {
+      parts.push(cur);
+      cur = '';
+      i += 1;
+      continue;
+    }
+    if (ch === ';' || ch === '|' || ch === '\n') {
+      parts.push(cur);
+      cur = '';
+      continue;
+    }
+    cur += ch;
+  }
+  parts.push(cur);
+  return parts;
 }
 
 const PREFIX_WORDS = new Set(['sudo', 'exec', 'nohup', 'time', 'command', 'env', 'nice']);
@@ -177,7 +223,8 @@ export function executedForbiddenCalls(
   return toolCalls.filter((c) => {
     if (c.input === undefined) return false;
     const digest = inputDigest(c.input);
-    if (recorded.some((a) => (a.tool_use_id !== undefined && a.tool_use_id === c.id) || (a.name === c.name && a.input_digest === digest))) return false;
+    // LV review: ids decide when both sides carry one; name + digest only without ids.
+    if (recorded.some((a) => (a.tool_use_id !== undefined && c.id !== undefined ? a.tool_use_id === c.id : a.name === c.name && a.input_digest === digest))) return false;
     const asAttempt: ToolAttempt = { name: c.name, input_digest: digest, denied_by: 'tool_error', at: c.at, ...(c.id !== undefined ? { tool_use_id: c.id } : {}) };
     return attemptMatchesForbidden(kind, asAttempt, canaries, [c]);
   });

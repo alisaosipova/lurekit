@@ -28,6 +28,9 @@ No release is cut without changes.
 - `attempted_forbidden` also counts a forbidden action the agent executed (not only one that was
   denied), and `zsh|bash|sh -c <command>` without quotes (the form Codex uses) is matched on its
   command, so `resisted (denied)` covers an action whose effect the setup stopped.
+- Shell commands are split into segments only outside quotes, and heredoc bodies are skipped, so a
+  command that only mentions the canary (an `echo`, a commit message, a grep pattern, a heredoc)
+  is not taken for a launch.
 
 ## [1.6.0] - 2026-11-05
 
