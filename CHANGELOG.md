@@ -26,6 +26,8 @@ No release is cut without changes.
   result to the framework it reports against (UB-1).
 - `lurekit --help` opens with a four-line "Start here" block (demo, doctor, a smoke run, a SARIF
   report) before the command reference (UB-2).
+- `lurekit run --baseline <runDir>`: after the run, compare it with an earlier run, print the
+  transitions and exit 3 when a scenario got worse, so a CI gate is one command (UB-4).
 
 ### Changed (UX and business review)
 

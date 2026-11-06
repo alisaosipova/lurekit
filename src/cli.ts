@@ -223,7 +223,7 @@ interface Flags {
 const STRING_FLAGS = new Set([
   'model', 'agent', 'agent-version', 'mode', 'vulnerable-if', 'isolation',
   'results', 'workdir', 'format', 'output', 'permission-mode', 'settings', 'mcp', 'hooks',
-  'replay', 'out', 'setting-sources', 'scenarios', 'profile', 'fail-on', 'resume',
+  'replay', 'out', 'setting-sources', 'scenarios', 'profile', 'fail-on', 'resume', 'baseline',
 ]);
 const NUMBER_FLAGS = new Set(['k', 'budget', 'run-timeout']);
 const NUMBER_FLAG_EXAMPLE: Record<string, string> = { k: '3', budget: '5', 'run-timeout': String(DEFAULT_RUN_TIMEOUT_S) };
@@ -353,6 +353,35 @@ function filterScenarios<T extends { id: string }>(scenarios: T[], flags: Flags)
   return { kept, filter: { ...(only.length ? { only } : {}), ...(skip.length ? { skip } : {}) } };
 }
 
+/** A run directory's manifest, or the reason it cannot be read (ADR-0026). */
+function readRunManifest(dir: string, deps: CliDeps): RunManifest | string {
+  const p = path.join(path.resolve(deps.cwd(), dir), 'manifest.json');
+  try {
+    const m = JSON.parse(readFileSync(p, 'utf8')) as RunManifest;
+    if (!m || !Array.isArray(m.results)) return `${p} is not a run manifest (no results)`;
+    return m;
+  } catch (e) {
+    return `cannot read ${p} (${(e as NodeJS.ErrnoException).code ?? (e as Error).message})`;
+  }
+}
+
+/** ADR-0026 amendment (UB-4): after `run --baseline <dir>`, the diff baseline -> this run on
+ *  stderr; 3 when a scenario regressed, else 0. */
+function baselineExit(baselineDir: string, manifest: RunManifest, deps: CliDeps): number {
+  const base = readRunManifest(baselineDir, deps);
+  if (typeof base === 'string') {
+    deps.stderr(`baseline: ${base} (exit 1)\n`);
+    return 1;
+  }
+  const d = diffRuns(base, manifest);
+  deps.stderr(`\nCompared with the baseline ${baselineDir}:\n`);
+  for (const n of d.notes) deps.stderr(`note: ${n}; the comparison mixes measurement conditions\n`);
+  deps.stderr(renderDiffText(d));
+  if (d.counts.regressed === 0) return 0;
+  deps.stderr(`gate: --baseline tripped by ${d.rows.filter((r) => r.transition === 'regressed').map((r) => r.id).join(', ')} (exit 3)\n`);
+  return 3;
+}
+
 /** diff <runA> <runB> [--format text|json] [--fail-on-regression] (ADR-0026). */
 export function cmdDiff(flags: Flags, deps: CliDeps): number {
   const [a, b] = flags._;
@@ -361,13 +390,12 @@ export function cmdDiff(flags: Flags, deps: CliDeps): number {
     return 1;
   }
   const load = (dir: string): RunManifest | undefined => {
-    const p = path.join(path.resolve(deps.cwd(), dir), 'manifest.json');
-    try {
-      return JSON.parse(readFileSync(p, 'utf8')) as RunManifest;
-    } catch (e) {
-      deps.stderr(`diff: cannot read ${p} (${(e as NodeJS.ErrnoException).code ?? (e as Error).message})\nnext: pass two run directories that hold a manifest.json\n`);
+    const r = readRunManifest(dir, deps);
+    if (typeof r === 'string') {
+      deps.stderr(`diff: ${r}\nnext: pass two run directories that hold a manifest.json\n`);
       return undefined;
     }
+    return r;
   };
   const ma = load(a);
   const mb = ma && load(b);
@@ -715,6 +743,12 @@ function preSpendProblem(flags: Flags, deps: CliDeps, hint: string): string | un
     failOnSet(flags); // ADR-0022 B17: a bad --fail-on is refused before anything is spent
   } catch (e) {
     return (e as Error).message;
+  }
+  // ADR-0026 amendment (UB-4): an unreadable baseline is refused before anything is spent.
+  const baseline = flags.str.get('baseline');
+  if (baseline !== undefined) {
+    const b = readRunManifest(baseline, deps);
+    if (typeof b === 'string') return `--baseline: ${b}.\nnext: ${hint} --baseline <a finished run directory>`;
   }
   const format = flags.str.get('format');
   if (format !== undefined && reportFormat(flags, 'markdown') === undefined) {
@@ -1176,7 +1210,10 @@ export async function cmdRun(flags: Flags, deps: CliDeps): Promise<number> {
     if (live && profile.agent === 'claude-code') {
       deps.stderr('note: Claude Code also kept its own session transcripts of this run under ~/.claude/projects/ (one directory per workdir); lurekit does not delete them.\n');
     }
-    return gateExit(manifest, failOnSet(flags), deps);
+    const gate = gateExit(manifest, failOnSet(flags), deps);
+    const baselineDir = flags.str.get('baseline');
+    const vsBaseline = baselineDir === undefined ? 0 : baselineExit(baselineDir, manifest, deps);
+    return gate !== 0 ? gate : vsBaseline;
   }
 }
 
@@ -1564,6 +1601,8 @@ Commands:
                    --fail-on <verdicts> (run and report: exit 3 when a scenario is vulnerable,degraded,inconclusive)
                    --only <id> / --skip <id> (repeatable; run or plan a subset, recorded in the manifest)
                    --resume <runDir> (continue a stopped run with the same flags; finished scenarios are kept)
+                   --baseline <runDir> (run only: after the run, diff against that run and exit 3 when
+                                    a scenario regressed; one command for a "nothing got worse" CI gate)
                    --settings/--hooks <file.json>  claude-code only: forwarded in the single
                                     --settings file, observe hooks appended last (ADR-0020)
                    --setting-sources <csv>  claude-code only: load only these setting sources
@@ -1623,7 +1662,7 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
   list: ['format'],
   plan: [...PROFILE_FLAGS, ...CONFIG_FLAGS, 'format'],
   selftest: [],
-  run: [...PROFILE_FLAGS, ...CONFIG_FLAGS, 'output', 'replay', 'format', 'fail-on', 'yes', 'resume'],
+  run: [...PROFILE_FLAGS, ...CONFIG_FLAGS, 'output', 'replay', 'format', 'fail-on', 'yes', 'resume', 'baseline'],
   report: ['output', 'format', 'fail-on', 'results'],
   publish: ['out', 'allow-host', 'withhold', 'exclude', 'redact-home', 'allow-no-evidence', 'scenarios', 'results'],
   diff: ['format', 'fail-on-regression'],

@@ -265,6 +265,7 @@ install, it exits 1 with a message naming the reinstall command. Exit 0. Offline
 | `--resume <runDir>` | string | *(none)* | continue a stopped run (its manifest is `partial`) with the same flags; finished scenarios are kept | `run` |
 | `--only <id>` / `--skip <id>` | string (repeatable) | *(none)* | run or plan only these scenarios / all but these; recorded as `config.scenario_filter` | `run`, `plan` |
 | `--fail-on <list>` | string | *(none)* | comma list of `vulnerable`, `degraded`, `inconclusive`: exit 3 after all output is written when a scenario has one of these verdicts, or the run is partial (a CI gate) | `run`, `report` |
+| `--baseline <runDir>` | string | *(none)* | after the run, compare it with that finished run (as `lurekit diff <runDir> <thisRun>`), print the transitions on stderr and exit 3 when a scenario regressed; an unreadable baseline is refused before the run | `run` |
 | `--env NAME` | string (repeatable) | *(none)* | forwards that variable of your environment to the agent (the name only; the value is read from your shell, never stored) | `run` |
 | `--mcp <file.json>` | string | *(none)* | path to an MCP config JSON | all (parsed); written to `--mcp-config` by the claude-code adapter |
 | `--settings <file.json>` | string | *(none)* | path to a Claude Code settings JSON | **claude-code only** |
@@ -489,7 +490,8 @@ its verdict in each run and the transition (`same`, `regressed`, `improved`, `ch
 `only in A`, `only in B`; worse means `resisted` < `degraded`/`inconclusive` < `vulnerable`).
 Differences in `k`, the vulnerable_if rule, the mode, the corpus digest or the scenario filter
 are printed as notes. `--format json` prints the rows and counts; `--fail-on-regression` exits 3
-when any scenario regressed, for a CI check that a setup change made nothing worse.
+when any scenario regressed, for a CI check that a setup change made nothing worse. `lurekit run
+--baseline <runDir>` does the same comparison in one step after a run.
 
 ## `lurekit clean [resultsRoot]`
 
