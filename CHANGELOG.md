@@ -18,6 +18,10 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [1.5.0] - 2026-11-05
+
 ### Fixed (ENGINE-01)
 
 - Windows: an npm-installed agent CLI is now launchable. The resolver tries the PATHEXT forms
