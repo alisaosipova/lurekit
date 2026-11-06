@@ -28,6 +28,8 @@ No release is cut without changes.
   report) before the command reference (UB-2).
 - `lurekit run --baseline <runDir>`: after the run, compare it with an earlier run, print the
   transitions and exit 3 when a scenario got worse, so a CI gate is one command (UB-4).
+- `docs/guide/for-security-teams.md`: what a result proves and does not, the evidence to keep, the
+  OWASP Agentic mapping, a one-command CI gate and the limits; linked from the README (UB-5).
 
 ### Changed (UX and business review)
 

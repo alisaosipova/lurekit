@@ -15,7 +15,7 @@ Output: Markdown, JSON or SARIF. Requires Node <!-- n:versions.node_min -->20.19
 ## Who this is for
 
 - **You run Claude Code every day:** watch the [60-second demo](#60-second-demo), then do a [smoke run](#first-real-run) on your own setup.
-- **You own agent setups for a platform or security team:** read the [hardened profile](profiles/README.md) and the [agent x version x result matrix](docs/verified-against.md), then [re-measure](#what-to-do-with-the-result).
+- **You own agent setups for a platform or security team:** start with [LureKit for security teams](docs/guide/for-security-teams.md), read the [hardened profile](profiles/README.md) and the [agent x version x result matrix](docs/verified-against.md), then [re-measure](#what-to-do-with-the-result).
 - **You build a guard tool (hooks, proxy, sandbox):** publish your arm as a bundle ([third-party arms](docs/launch/vendor-scoreboard.md), [CONTRIBUTING.md](CONTRIBUTING.md)).
 
 ## 60-second demo
@@ -245,6 +245,7 @@ User guide:
 - [Scenarios](docs/guide/scenarios.md) - the corpus and how to write a scenario; [catalog](docs/catalog.md) - every scenario in one table.
 - [Fixtures and detectors](docs/guide/fixtures-and-detectors.md) - inert fixtures and control sensors.
 - [Interpreting results](docs/guide/interpreting-results.md) - verdicts, evidence and reports.
+- [For security teams](docs/guide/for-security-teams.md) - what a result proves, evidence to keep, the OWASP Agentic mapping, a CI gate.
 - [Verified against](docs/verified-against.md) - every published bundle: agent, version, model, profile, result.
 - [Publishing](docs/guide/publishing.md) - the redaction gate and run bundles; [badge](docs/guide/badge.md) - a static badge from a bundle.
 - [Troubleshooting](docs/guide/troubleshooting.md) - auto-update, inconclusive verdicts, isolation, platforms.
