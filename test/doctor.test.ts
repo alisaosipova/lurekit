@@ -16,6 +16,7 @@ import {
   checkAuth,
   claudeAuthStatusVerified,
   checkBinary,
+  checkIsolation,
   checkModel,
   checkNode,
   checkUpdate,
@@ -63,6 +64,13 @@ function fakeProbe(o: FakeOpts = {}): AgentProbe & { calls: string[] } {
 const ok = (stdout: string): ExecResult => ({ status: 0, stdout, stderr: '' });
 
 describe('doctor checks (pure, fake probe)', () => {
+  it('the isolation row is one short ok clause that points to the guide (UB-3)', () => {
+    const c = checkIsolation();
+    expect(c.status).toBe('ok');
+    expect(c.summary.length).toBeLessThan(100);
+    expect(c.summary).toContain('docs/guide/interpreting-results.md');
+  });
+
   it('node: ok at the floor, fail below it with an install command', () => {
     expect(checkNode('20.19.0').status).toBe('ok');
     expect(checkNode('26.13.0').status).toBe('ok');

@@ -511,7 +511,7 @@ export function checkIsolation(): Check {
     id: 'isolation',
     status: 'ok',
     summary:
-      '--isolation container|container+netns is an evidence label written to the manifest; lurekit starts no container and needs no docker/podman (run it inside your own container or VM for that boundary)',
+      'no container needed: --isolation only labels the manifest (see docs/guide/interpreting-results.md)',
   };
 }
 

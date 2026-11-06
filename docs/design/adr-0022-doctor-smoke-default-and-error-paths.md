@@ -262,3 +262,12 @@ installed binary), parallel to the Claude Code recipe; an npm-global codex insta
 with that recipe as the fix. The OpenHands version in its recipe is one constant. Cursor stays
 unpinnable (ADR-0016). doctor stays read-only: it prints recipes, it installs nothing.
 
+## Amendment (2026-11-05, UB-3): a short isolation row
+
+The `isolation` row was one long sentence, marked ok, about a flag that only labels the manifest;
+in an 80-column terminal it wrapped over three lines and read like a requirement. The summary
+(`checkIsolation` in `src/doctor.ts`) is now one clause, "no container needed: --isolation only
+labels the manifest", followed by a pointer to the guide
+(`docs/guide/interpreting-results.md`, section Isolation) that explains the label and what running
+inside your own container or VM adds. Status and semantics are unchanged. Test plan:
+`test/doctor.test.ts` asserts the row is ok, under 100 characters, and names the guide file.

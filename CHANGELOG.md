@@ -27,6 +27,11 @@ No release is cut without changes.
 - `lurekit --help` opens with a four-line "Start here" block (demo, doctor, a smoke run, a SARIF
   report) before the command reference (UB-2).
 
+### Changed (UX and business review)
+
+- doctor's isolation row is one short clause that points to the guide instead of a three-line
+  sentence (UB-3).
+
 ## [1.5.0] - 2026-11-05
 
 ### Fixed (ENGINE-01)
