@@ -89,7 +89,7 @@ PR body:
 > (`npx lurekit demo`). Scenarios cite public disclosures; fixtures bind to
 > loopback only and carry only canary values. I am the author.
 
-Note: `lurekit demo` is on npm since 1.2.0 (current release 1.6.0, 2026-11-05). Nothing here is posted without the maintainer's approval.
+Note: `lurekit demo` is on npm since 1.2.0 (current release 1.7.0, 2026-11-06). Nothing here is posted without the maintainer's approval.
 
 ## Rules for all of these
 

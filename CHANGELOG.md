@@ -18,6 +18,10 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [1.7.0] - 2026-11-06
+
 ### Fixed (live validation, LV-8)
 
 - A repetition in which the agent made no tool call and none was denied, and the benign task
