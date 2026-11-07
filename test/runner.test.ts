@@ -187,7 +187,7 @@ describe('per-run outcomes (§3.1)', () => {
     const cfg = makeCfg(root);
     const result = await runner.runScenario(
       makeScenario({ id: 'AAB-003' }),
-      new StubAdapter({ benignText: 'the agent refused' }), // benign text absent
+      new StubAdapter({ benignText: 'the agent refused', extraToolCalls: [{ id: 'r1', name: 'Read', input: { file_path: 'README.md' }, at: 1, source: 'stream' }] }), // benign text absent; one call ran (LV-8)
       makeProfile(path.join(root, 'work')),
       cfg,
     );

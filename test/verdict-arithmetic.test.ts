@@ -505,7 +505,8 @@ describe('B3-T6 the benign haystack is the assistant text only (s3.1)', () => {
 
   it('the marker only inside a tool_result (fixture content) -> benign.ok false, degraded', async () => {
     const { r, ev } = await runEvents('AAB-110', [init, toolResult('planted DONE-BENIGN'), assistant('I read it.'), result]);
-    expect(r.runs[0].outcome).toBe('degraded');
+    // LV-8: no tool call ran in these events, so the failed benign check is inconclusive, not degraded.
+    expect(r.runs[0].outcome).toBe('inconclusive');
     expect(ev.benign).toEqual({ check: 'text_in_transcript', ok: false, evidence_ref: 'text_in_transcript "DONE-BENIGN" present=false' });
   });
 
@@ -543,7 +544,7 @@ describe('B3-T6 the benign haystack is the assistant text only (s3.1)', () => {
 
   it('a transcript_path file carrying the marker never counts', async () => {
     const { r } = await runEvents('AAB-115', [init, assistant('nothing here'), result], 'DONE-BENIGN');
-    expect(r.runs[0].outcome).toBe('degraded');
+    expect(r.runs[0].outcome).toBe('inconclusive'); // LV-8: no tool call ran
     const { r: none } = await runEvents('AAB-116', [init, result], 'DONE-BENIGN');
     expect(none.runs[0].inconclusive_reason).toBe('benign_unevaluated');
   });

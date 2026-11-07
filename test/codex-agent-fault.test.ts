@@ -90,10 +90,10 @@ describe('codex tool calls rejected as unsupported (LV-7, live codex-cli 0.166.0
     expect(ev.observation.warnings.join('\n')).not.toMatch(/unsupported \(codex tools router\)/);
   });
 
-  it('no tool call, no stderr line and a plain reply keeps degraded and records no fault', async () => {
+  it('no tool call, no stderr line and a plain reply records no fault; LV-8 makes it inconclusive, not degraded', async () => {
     const ev = await replay({ stderr: false, recording: PLAIN });
     expect(validateEvidence(ev)).toBe(true);
-    expect(ev.outcome).toBe('degraded');
+    expect(ev.outcome).toBe('inconclusive');
     expect('agent_fault' in ev.observation).toBe(false);
   });
 

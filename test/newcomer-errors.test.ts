@@ -16,6 +16,8 @@ import { ClaudeCodeAdapter } from '../src/adapters/claudeCode.js';
 import { CursorCliAdapter } from '../src/adapters/cursorCli.js';
 import { CodexCliAdapter } from '../src/adapters/codexCli.js';
 import { StubAdapter } from './helpers/stubAdapter.js';
+// LV-8: a stub agent that did something (one tool call ran), so a failed benign check is degraded.
+const WORKED = { extraToolCalls: [{ id: 'w1', name: 'Read', input: { file_path: 'README.md' }, at: 1, source: 'stream' as const }] };
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 const realScenarios = path.join(repoRoot, 'scenarios');
@@ -60,7 +62,7 @@ function deps(o: DepOpts = {}): CliDeps {
   return {
     now: () => '2026-11-03T00:00:00.000Z',
     newRunId: () => 'aab-test-newcomer',
-    adapterFor: o.adapter ?? (() => new StubAdapter({})),
+    adapterFor: o.adapter ?? (() => new StubAdapter(WORKED)),
     cwd: () => work,
     stdout: (s) => out.push(s),
     stderr: (s) => err.push(s),
@@ -99,7 +101,7 @@ const errText = (): string => err.join('');
 
 describe('run: smoke by default, plan + confirmation before a live launch', () => {
   it('without --yes and without a terminal it refuses (exit 1), names --yes, launches nothing', async () => {
-    const stub = new StubAdapter({});
+    const stub = new StubAdapter(WORKED);
     const code = await main(['run', corpus('AAB-003'), '--model', 'sonnet'], deps({ adapter: () => stub }));
     expect(code).toBe(1);
     expect(stub.runCount).toBe(0);
@@ -119,18 +121,18 @@ describe('run: smoke by default, plan + confirmation before a live launch', () =
     expect(errText()).toContain('budget cap: 2 USD (--budget)');
     expect(errText()).toContain('[1/1] AAB-003');
 
-    const no = new StubAdapter({});
+    const no = new StubAdapter(WORKED);
     expect(await main(['run', corpus('AAB-003'), '--model', 'sonnet'], deps({ adapter: () => no, interactive: true, answer: '' }))).toBe(1);
     expect(no.runCount).toBe(0);
     expect(errText()).toContain('not launched: nothing was run or spent.');
   });
 
   it('--mode full is k=3 and also confirms; --yes skips the prompt', async () => {
-    const stub = new StubAdapter({});
+    const stub = new StubAdapter(WORKED);
     expect(await main(['run', corpus('AAB-003'), '--model', 'sonnet', '--mode', 'full'], deps({ adapter: () => stub }))).toBe(1);
     expect(errText()).toMatch(/k=3 \(full\), 3 launch\(es\)/);
     expect(errText()).toMatch(/about 0\.18 USD \(1 scenario\(s\) x k=3/);
-    const go = new StubAdapter({});
+    const go = new StubAdapter(WORKED);
     expect(await main(['run', corpus('AAB-003'), '--model', 'sonnet', '--mode', 'full', '--yes'], deps({ adapter: () => go, interactive: true, answer: 'n' }))).toBe(0);
     expect(asked).toEqual([]);
     expect(go.runCount).toBe(3);
@@ -138,7 +140,7 @@ describe('run: smoke by default, plan + confirmation before a live launch', () =
   });
 
   it('an agent without a published run says so instead of estimating', async () => {
-    const stub = new StubAdapter({});
+    const stub = new StubAdapter(WORKED);
     await main(['run', corpus('AAB-005'), '--agent', 'cursor-cli', '--model', 'gpt-5'], deps({ adapter: () => stub }));
     // ADR-0022 amendment (block 3): the s3.3 per-run estimate is named on both lines.
     expect(errText()).toContain('estimated cost: unknown for cursor-cli (no published run); each repetition is charged an estimated 0.25 USD against --budget');
@@ -157,7 +159,7 @@ describe('run: smoke by default, plan + confirmation before a live launch', () =
 
 describe('run: newcomer error paths say what happened and the next command', () => {
   it('no agent binary: the preflight refuses before launching, with the install command', async () => {
-    const stub = new StubAdapter({});
+    const stub = new StubAdapter(WORKED);
     const code = await main(['run', corpus('AAB-003'), '--model', 'sonnet', '--yes'], deps({ adapter: () => stub, probe: probe() }));
     expect(code).toBe(1);
     expect(stub.runCount).toBe(0);
@@ -229,7 +231,7 @@ describe('run: newcomer error paths say what happened and the next command', () 
   });
 
   it('openhands without --permission-mode always-approve: refused once, up front, naming the flag', async () => {
-    const stub = new StubAdapter({});
+    const stub = new StubAdapter(WORKED);
     const code = await main(['run', corpus('AAB-014'), '--agent', 'openhands', '--model', 'openai/x', '--yes'], deps({ adapter: () => stub }));
     expect(code).toBe(1);
     expect(stub.runCount).toBe(0);
@@ -269,7 +271,7 @@ describe('run: newcomer error paths say what happened and the next command', () 
     const ro = path.join(work, 'ro');
     mkdirSync(ro);
     chmodSync(ro, 0o555);
-    const stub = new StubAdapter({});
+    const stub = new StubAdapter(WORKED);
     const code = await main(['run', corpus('AAB-003'), '--model', 'sonnet', '--yes', '--results', path.join(ro, 'sub')], deps({ adapter: () => stub }));
     expect(code).toBe(1);
     expect(stub.runCount).toBe(0);
@@ -302,7 +304,7 @@ describe('corpus resolution: argument -> ./scenarios -> the shipped corpus', () 
   });
 
   it('run prints the corpus line before it asks', async () => {
-    const stub = new StubAdapter({});
+    const stub = new StubAdapter(WORKED);
     expect(await main(['run', corpus('AAB-003'), '--model', 'sonnet'], deps({ adapter: () => stub }))).toBe(1);
     expect(errText()).toMatch(/corpus: .*c-AAB-003 \(given on the command line\)/);
   });
@@ -316,7 +318,7 @@ describe('run: pre-spend validation happens before the prompt and before any lau
     [['--budget', '0'], /refusing to run: --budget must be a number of USD greater than 0 \(got 0\)\.\nnext: .*--budget 5/],
     [['--budget', '-2'], /--budget must be a number of USD greater than 0 \(got -2\)/],
   ])('%j: exit 1, nothing asked, nothing launched', async (extra, msg) => {
-    const stub = new StubAdapter({});
+    const stub = new StubAdapter(WORKED);
     const code = await main(['run', corpus('AAB-003'), '--model', 'sonnet', ...extra], deps({ adapter: () => stub, interactive: true, answer: 'y' }));
     expect(code).toBe(1);
     expect(stub.runCount).toBe(0);
@@ -474,7 +476,7 @@ describe('ADR-0008 amendment B11a: --env NAME and private run dirs', () => {
   it('--env forwards a set variable by name into the profile; the value never appears in argv or the manifest', async () => {
     process.env.LUREKIT_TEST_PROXY_TOKEN = 'value-that-must-not-leak-123';
     let seen: Record<string, string> | undefined;
-    const stub = new StubAdapter({});
+    const stub = new StubAdapter(WORKED);
     const orig = stub.run.bind(stub);
     stub.run = async (profile, task, signal, opts) => {
       seen = profile.env;
@@ -565,7 +567,7 @@ describe('ADR-0024 amendment B13a: provisional manifest, partial runs', () => {
     const fs = await import('node:fs');
     const mf = path.join(work, 'r', 'aab-test-newcomer', 'manifest.json');
     const seen: unknown[] = [];
-    const stub = new StubAdapter({});
+    const stub = new StubAdapter(WORKED);
     const orig = stub.run.bind(stub);
     stub.run = async (p, t, s, o) => {
       seen.push(fs.existsSync(mf) ? JSON.parse(fs.readFileSync(mf, 'utf8')).partial : 'none');
@@ -726,7 +728,7 @@ describe('ADR-0024 B19 amendment: run --resume', () => {
     m.partial = { completed_scenarios: 1, planned_scenarios: 2 };
     fs.writeFileSync(mf, JSON.stringify(m));
     const ran: string[] = [];
-    const stub = new StubAdapter({});
+    const stub = new StubAdapter(WORKED);
     const orig = stub.run.bind(stub);
     stub.run = async (p, t, s, o) => {
       ran.push(String(o?.runDir));

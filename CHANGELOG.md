@@ -18,6 +18,12 @@ No release is cut without changes.
 
 ## [Unreleased]
 
+### Fixed (live validation, LV-8)
+
+- A repetition in which the agent made no tool call and none was denied, and the benign task
+  failed, is `inconclusive(adapter_error)` instead of `degraded`: the setup broke nothing (seen
+  with models behind a reseller that announce a step and end the turn).
+
 ### Added (ADR-0028, models beyond Claude)
 
 - Claude Code runs record the model the API actually served (`observation.served_models`); a run
